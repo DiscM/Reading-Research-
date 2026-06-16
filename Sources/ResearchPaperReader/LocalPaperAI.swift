@@ -113,6 +113,47 @@ enum LocalPaperAI {
         return selected.map { "- \($0)" }.joined(separator: "\n")
     }
 
+    static func sections(from text: String) -> [PaperSection] {
+        let lines = text.components(separatedBy: "\n")
+        let known: [(SectionKind, [String])] = [
+            (.abstract,    ["abstract"]),
+            (.introduction, ["introduction"]),
+            (.relatedWork, ["related work", "background"]),
+            (.method,      ["method", "approach", "model", "algorithm", "architecture", "framework", "system design", "proposed method"]),
+            (.experiment,  ["experiment", "evaluation", "dataset", "empirical", "setup"]),
+            (.results,     ["results", "findings", "outcome"]),
+            (.discussion,  ["discussion"]),
+            (.conclusion,  ["conclusion", "future work", "summary", "concluding"]),
+            (.references,  ["references", "bibliography"]),
+            (.appendix,    ["appendix"]),
+        ]
+
+        var matched: [(index: Int, kind: SectionKind, title: String)] = []
+        for (i, raw) in lines.enumerated() {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            guard !line.isEmpty, line.count < 120 else { continue }
+
+            for (kind, keywords) in known {
+                guard keywords.contains(where: { line.localizedCaseInsensitiveContains($0) }) else { continue }
+                guard matched.last?.kind != kind else { break }
+                matched.append((i, kind, line))
+                break
+            }
+        }
+
+        guard !matched.isEmpty else { return [] }
+
+        var sections: [PaperSection] = []
+        for (j, match) in matched.enumerated() {
+            let nextIndex = j + 1 < matched.count ? matched[j + 1].index : lines.count
+            let body = lines[(match.index + 1)..<nextIndex]
+                .joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            sections.append(PaperSection(kind: match.kind, title: match.title, text: body, order: j))
+        }
+        return sections
+    }
+
     private static func firstSection(named name: String, in text: String) -> String? {
         guard let range = text.range(of: name, options: [.caseInsensitive]) else { return nil }
         let remainder = text[range.lowerBound...]

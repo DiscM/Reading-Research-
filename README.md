@@ -6,13 +6,14 @@ Built with SwiftUI and PDFKit. Designed for graduate students, researchers, and 
 
 ## Features
 
-- **PDF import** — Drag-and-drop or open-panel import; metadata extracted from PDF attributes automatically.
+- **PDF import** — Drag-and-drop from Finder or open-panel import (`⌘I`); metadata extracted from PDF attributes automatically.
 - **Paper library** — Sort, search, and filter by reading status, tags, or full-text content.
 - **Full-text search** — Every word in every paper is indexed on import. Search titles, authors, tags, notes, and PDF body text with 300ms debounced full-text matching.
 - **Reader** — PDFKit-based reader with continuous scroll, zoom, and keyboard navigation.
+- **Outline tab** — On import, the app detects common academic paper sections (Abstract, Introduction, Method, Results, Conclusion, etc.). The Outline tab shows the table of contents and lets you click any section to read its full text.
 - **Color-coded highlights** — Annotations render as native PDFKit highlights directly on the page. Color per kind: yellow (highlight), orange (claim), green (evidence), blue (method), red (limitation), purple (question), gray (definition).
-- **Typed notes** — Save structured notes anchored to selected text and page number. Export to Markdown.
-- **On-device AI** — Summarize papers, extract claims/methods/evidence/limitations, or explain selected passages. All processing stays local using heuristic text extraction — no API keys, no cloud calls, no data leaving your Mac.
+- **Typed notes** — Save structured notes anchored to selected text and page number. Export to Markdown. Keyboard shortcut: `⌘N`.
+- **On-device AI** — Summarize papers (`⌘S`), extract claims/methods/evidence/limitations, or explain selected passages. All processing stays local using heuristic text extraction — no API keys, no cloud calls, no data leaving your Mac.
 - **Debounced persistence** — Library changes write to disk at most once per second, batching rapid mutations (highlighting, status changes) into a single save.
 - **Privacy controls** — AI mode selector (Private Local, Balanced, Best AI, Custom) with clear labels showing when content stays on-device.
 
@@ -57,8 +58,8 @@ open Package.swift
 
 ## Usage
 
-1. **Import papers** — Click `+` in the toolbar or press `⌘O`. Select one or more PDFs.
-2. **Browse library** — The sidebar shows your papers. Use the search bar to filter by title, author, tags, notes, or any text in the PDF body.
+1. **Import papers** — Click `+` in the toolbar, press `⌘I` / `⌘O`, or drag PDFs from Finder onto the library sidebar.
+2. **Browse library** — The sidebar shows your papers. Press `⌘F` to focus the search bar and filter by title, author, tags, notes, or any text in the PDF body.
 3. **Read** — Select a paper to open the reader. The PDF fills the left pane; the right pane has three tabs:
    - **Notes** — Select text in the PDF, choose a highlight type, add your notes, and save. Existing notes render as colored highlights on the PDF.
    - **AI** — Click "Summarize" for a local heuristic summary, use "Extract" to find claims/methods/evidence/limitations, or select text and click "Explain Selection" to see surrounding context.

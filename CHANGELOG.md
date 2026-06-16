@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.3.0 — 2026-06-16
+
+### Added
+
+- **Section detection & Outline tab** — On import, the app now parses `allText` for common academic paper section headers (Abstract, Introduction, Related Work, Method, Experiments, Results, Discussion, Conclusion, References, Appendix). The detected sections appear in a new **Outline** tab in the reader inspector. Clicking any section opens a sheet showing its full text.
+- **Drag-and-drop import** — PDFs can be dropped from Finder directly onto the paper library sidebar. Accepts single or multiple files; non-PDF files are silently ignored. Uses `NSPasteboard`-based reading for synchronous handling.
+- **Keyboard shortcuts** — `⌘F` focuses the search field in the library sidebar. `⌘N` saves the current note in the reader. `⌘S` generates the paper summary. `⌘I` opens the import panel (standard menu item).
+- **New data models** — `SectionKind` enum (12 cases mapping to common paper sections) and `PaperSection` struct with id, kind, title, text, and order. `Paper.sections` persists extracted sections alongside the library.
+
+### Changed
+
+- `PaperStore.importPDFs` — now calls `LocalPaperAI.sections(from:)` during import and stores result in `paper.sections`.
+- `ContentView` sidebar — extracted `PaperList` helper view to manage list, onDelete, and drag-and-drop independently, reducing type-checking complexity in the main view body.
+
 ## v0.2.0 — 2026-06-16
 
 ### Added

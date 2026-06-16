@@ -1,3 +1,5 @@
+import AppKit
+import UniformTypeIdentifiers
 import SwiftUI
 
 struct ContentView: View {
@@ -6,37 +8,23 @@ struct ContentView: View {
     @State private var searchText = ""
     @State private var debouncedSearch = ""
     @State private var searchTask: Task<Void, Never>?
-
-    private var filteredPapers: [Paper] {
-        guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return store.papers
-        }
-
-        return store.papers.filter { paper in
-            paper.title.localizedCaseInsensitiveContains(searchText)
-            || paper.authors.localizedCaseInsensitiveContains(searchText)
-            || paper.tags.joined(separator: " ").localizedCaseInsensitiveContains(searchText)
-            || paper.notes.contains { $0.body.localizedCaseInsensitiveContains(searchText) || $0.quote.localizedCaseInsensitiveContains(searchText) }
-            || paper.allText.localizedCaseInsensitiveContains(debouncedSearch)
-        }
-    }
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         NavigationSplitView {
             VStack(spacing: 0) {
-                LibraryHeader(searchText: $searchText)
+                LibraryHeader(searchText: $searchText, searchFocused: $searchFocused)
 
-                List(selection: $selectedPaperID) {
-                    ForEach(filteredPapers) { paper in
-                        PaperRow(paper: paper)
-                            .tag(paper.id)
-                    }
-                    .onDelete { offsets in
-                        offsets.map { filteredPapers[$0] }.forEach(store.delete)
-                    }
-                }
+                PaperList(store: store, selectedPaperID: $selectedPaperID, searchText: $searchText, debouncedSearch: $debouncedSearch)
             }
             .navigationSplitViewColumnWidth(min: 290, ideal: 340)
+            .onTapGesture { searchFocused = false }
+            .onKeyPress(.escape) { searchFocused = false; return .handled }
+            .background {
+                Button("") { searchFocused = true }
+                    .keyboardShortcut("f", modifiers: .command)
+                    .hidden()
+            }
             .onChange(of: searchText) { _, newValue in
                 searchTask?.cancel()
                 searchTask = Task {
@@ -90,6 +78,7 @@ struct ContentView: View {
 
 private struct LibraryHeader: View {
     @Binding var searchText: String
+    var searchFocused: FocusState<Bool>.Binding
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -101,6 +90,7 @@ private struct LibraryHeader: View {
                     .foregroundStyle(.secondary)
                 TextField("Search titles, notes, full text", text: $searchText)
                     .textFieldStyle(.plain)
+                    .focused(searchFocused)
             }
             .padding(8)
             .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
@@ -136,6 +126,44 @@ private struct PaperRow: View {
             }
         }
         .padding(.vertical, 6)
+    }
+}
+
+private struct PaperList: View {
+    @ObservedObject var store: PaperStore
+    @Binding var selectedPaperID: Paper.ID?
+    @Binding var searchText: String
+    @Binding var debouncedSearch: String
+
+    private var filteredPapers: [Paper] {
+        guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return store.papers
+        }
+        return store.papers.filter { paper in
+            paper.title.localizedCaseInsensitiveContains(searchText)
+            || paper.authors.localizedCaseInsensitiveContains(searchText)
+            || paper.tags.joined(separator: " ").localizedCaseInsensitiveContains(searchText)
+            || paper.notes.contains { $0.body.localizedCaseInsensitiveContains(searchText) || $0.quote.localizedCaseInsensitiveContains(searchText) }
+            || paper.allText.localizedCaseInsensitiveContains(debouncedSearch)
+        }
+    }
+
+    var body: some View {
+        List(selection: $selectedPaperID) {
+            ForEach(filteredPapers) { paper in
+                PaperRow(paper: paper)
+                    .tag(paper.id)
+            }
+            .onDelete { offsets in
+                offsets.map { filteredPapers[$0] }.forEach(store.delete)
+            }
+        }
+        .onDrop(of: [.fileURL], isTargeted: nil) { _ in
+            let urls = NSPasteboard.general.readObjects(forClasses: [NSURL.self]) as? [URL] ?? []
+            let pdfs = urls.filter { $0.pathExtension.lowercased() == "pdf" }
+            if !pdfs.isEmpty { store.importPDFs(pdfs) }
+            return !pdfs.isEmpty
+        }
     }
 }
 

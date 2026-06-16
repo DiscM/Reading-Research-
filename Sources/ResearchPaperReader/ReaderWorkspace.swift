@@ -29,6 +29,11 @@ struct ReaderWorkspace: View {
                             Label("Notes", systemImage: "note.text")
                         }
 
+                    outlinePanel
+                        .tabItem {
+                            Label("Outline", systemImage: "list.bullet.indent")
+                        }
+
                     aiPanel
                         .tabItem {
                             Label("AI", systemImage: "sparkles")
@@ -98,6 +103,7 @@ struct ReaderWorkspace: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(selectedText.isEmpty || newNote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .keyboardShortcut("n", modifiers: .command)
             }
             .padding()
 
@@ -134,6 +140,58 @@ struct ReaderWorkspace: View {
         }
     }
 
+    @State private var selectedSection: PaperSection?
+
+    private var outlinePanel: some View {
+        List(paper.sections) { section in
+            VStack(alignment: .leading, spacing: 4) {
+                Text(section.title)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                Text(section.kind.rawValue)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                selectedSection = section
+            }
+        }
+        .overlay {
+            if paper.sections.isEmpty {
+                ContentUnavailableView(
+                    "No sections detected",
+                    systemImage: "doc.text.magnifyingglass",
+                    description: Text("Section parsing works best on PDFs with clear section headers.")
+                )
+            }
+        }
+        .sheet(item: $selectedSection) { section in
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text(section.title)
+                        .font(.title2.bold())
+                    Spacer()
+                    Button("Close") { selectedSection = nil }
+                        .keyboardShortcut(.escape)
+                }
+                .padding([.top, .horizontal])
+
+                Divider()
+
+                ScrollView {
+                    Text(section.text)
+                        .font(.body)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding()
+                }
+            }
+            .frame(width: 540, height: 400)
+        }
+    }
+
     private var aiPanel: some View {
             ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -144,6 +202,7 @@ struct ReaderWorkspace: View {
                         Label("Summarize", systemImage: "text.badge.checkmark")
                     }
                     .buttonStyle(.borderedProminent)
+                    .keyboardShortcut("s", modifiers: .command)
 
                     Menu {
                         ForEach([HighlightKind.claim, .method, .evidence, .limitation]) { kind in

@@ -37,6 +37,31 @@ enum HighlightKind: String, CaseIterable, Codable, Identifiable {
     }
 }
 
+struct PaperSection: Identifiable, Codable, Equatable {
+    var id = UUID()
+    var kind: SectionKind
+    var title: String
+    var text: String
+    var order: Int
+}
+
+enum SectionKind: String, CaseIterable, Codable, Identifiable {
+    case abstract = "Abstract"
+    case introduction = "Introduction"
+    case relatedWork = "Related Work"
+    case background = "Background"
+    case method = "Method"
+    case experiment = "Experiments"
+    case results = "Results"
+    case discussion = "Discussion"
+    case conclusion = "Conclusion"
+    case references = "References"
+    case appendix = "Appendix"
+    case other = "Other"
+
+    var id: String { rawValue }
+}
+
 struct PaperNote: Identifiable, Codable, Equatable {
     var id = UUID()
     var kind: HighlightKind
@@ -56,6 +81,7 @@ struct Paper: Identifiable, Codable, Equatable {
     var importedAt = Date()
     var status: ReadingStatus = .unread
     var tags: [String] = []
+    var sections: [PaperSection] = []
     var notes: [PaperNote] = []
     var aiSummary: String?
     var allText: String = ""

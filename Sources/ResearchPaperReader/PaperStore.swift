@@ -58,12 +58,14 @@ final class PaperStore: ObservableObject {
 
                 let metadata = extractMetadata(from: destinationURL)
                 let allText = extractAllText(from: destinationURL)
+                let sections = LocalPaperAI.sections(from: allText)
                 let paper = Paper(
                     title: metadata.title,
                     authors: metadata.authors,
                     year: metadata.year,
                     abstract: metadata.abstract,
                     filePath: destinationURL.path,
+                    sections: sections,
                     allText: allText
                 )
                 papers.insert(paper, at: 0)
