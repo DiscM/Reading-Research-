@@ -3,6 +3,7 @@ import SwiftUI
 struct ReaderWorkspace: View {
     @EnvironmentObject private var store: PaperStore
     @Binding var paper: Paper
+    @Binding var navigateToPage: Int?
     @State private var selectedText = ""
     @State private var selectedPage: Int?
     @State private var newNote = ""
@@ -11,16 +12,39 @@ struct ReaderWorkspace: View {
     @State private var aiExplanation = ""
     @State private var isInspectorCollapsed = false
     @State private var isGeneratingAI = false
+    @State private var zoomFactor: CGFloat = 0
+    @State private var zoomAction: ZoomAction?
+    @State private var showGoToPage = false
+    @State private var goToPageNumber = ""
+    @State private var showFindBar = false
+    @State private var findText = ""
+    @State private var findMatches: [String] = []
+    @State private var findCurrentIndex = 0
+    @State private var summaryExpanded = true
+    @State private var explanationExpanded = true
 
     var body: some View {
-        HSplitView {
+        VStack(spacing: 0) {
+            if showFindBar {
+                findBar
+            }
+
+            HSplitView {
             PDFReaderView(
                 url: paper.fileURL,
                 selectedText: $selectedText,
                 selectedPage: $selectedPage,
-                notes: paper.notes
+                notes: paper.notes,
+                navigateToPage: $navigateToPage,
+                zoomFactor: $zoomFactor,
+                zoomAction: $zoomAction
             )
             .frame(minWidth: 420)
+            .onChange(of: navigateToPage) { _, _ in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    navigateToPage = nil
+                }
+            }
 
             if !isInspectorCollapsed {
                 VStack(spacing: 0) {
@@ -32,27 +56,56 @@ struct ReaderWorkspace: View {
                                 Label("Notes", systemImage: "note.text")
                             }
 
-                        outlinePanel
-                            .tabItem {
-                                Label("Outline", systemImage: "list.bullet.indent")
-                            }
-
                         aiPanel
                             .tabItem {
                                 Label("AI", systemImage: "sparkles")
-                            }
-
-                        metadataPanel
-                            .tabItem {
-                                Label("Details", systemImage: "info.circle")
                             }
                     }
                 }
                 .frame(minWidth: 300, idealWidth: 380, maxWidth: 520)
             }
         }
+        }
         .navigationTitle(paper.title)
         .toolbar {
+            ToolbarItemGroup {
+                Button {
+                    zoomAction = .out
+                } label: {
+                    Image(systemName: "minus.magnifyingglass")
+                }
+                .help("Zoom Out")
+
+                if zoomFactor > 0 {
+                    Text("\(Int(zoomFactor * 100))%")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 44)
+                }
+
+                Button {
+                    zoomAction = .in
+                } label: {
+                    Image(systemName: "plus.magnifyingglass")
+                }
+                .help("Zoom In")
+
+                Divider()
+                    .frame(height: 16)
+
+                Text("p. \(selectedPage ?? 0)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+
+                Button {
+                    showGoToPage = true
+                } label: {
+                    Image(systemName: "arrow.up.arrow.down")
+                }
+                .help("Go to Page…")
+                .keyboardShortcut("g", modifiers: .command)
+            }
+
             ToolbarItem {
                 Button {
                     withAnimation {
@@ -64,12 +117,26 @@ struct ReaderWorkspace: View {
                 .help(isInspectorCollapsed ? "Show Inspector" : "Hide Inspector")
             }
         }
+        .sheet(isPresented: $showGoToPage) {
+            goToPageSheet
+        }
+        .onChange(of: showFindBar) { _, _ in if !showFindBar { findText = ""; findMatches = [] } }
+        .background {
+            Button("") { showFindBar.toggle() }
+                .keyboardShortcut("f", modifiers: .command)
+                .hidden()
+        }
     }
 
     private var notesPanel: some View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 8) {
-                HStack {
+                HStack(spacing: 4) {
+                    Color(nsColor: noteKind.color)
+                        .frame(width: 14, height: 14)
+                        .clipShape(Circle())
+                        .overlay(Circle().stroke(.quaternary, lineWidth: 1))
+
                     Picker("Type", selection: $noteKind) {
                         ForEach(HighlightKind.allCases) { kind in
                             Text(kind.rawValue).tag(kind)
@@ -156,61 +223,6 @@ struct ReaderWorkspace: View {
         }
     }
 
-    @State private var selectedSection: PaperSection?
-
-    private var outlinePanel: some View {
-        List(paper.sections) { section in
-            VStack(alignment: .leading, spacing: 4) {
-                Text(section.title)
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
-                Text(section.kind.rawValue)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.vertical, 4)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                selectedSection = section
-            }
-        }
-        .overlay {
-            if paper.sections.isEmpty {
-                ContentUnavailableView(
-                    "No sections detected",
-                    systemImage: "doc.text.magnifyingglass",
-                    description: Text("Section parsing works best on PDFs with clear section headers.")
-                )
-            }
-        }
-        .sheet(item: $selectedSection) { section in
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top) {
-                    Text(section.title)
-                        .font(.title2.bold())
-                        .lineLimit(2)
-                        .layoutPriority(0)
-                    Spacer()
-                    Button("Close") { selectedSection = nil }
-                        .keyboardShortcut(.escape)
-                        .layoutPriority(1)
-                }
-                .padding([.top, .horizontal])
-
-                Divider()
-
-                ScrollView {
-                    Text(section.text)
-                        .font(.body)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding()
-                }
-            }
-            .frame(width: 540, height: 400)
-        }
-    }
-
     private var aiPanel: some View {
             ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -219,6 +231,7 @@ struct ReaderWorkspace: View {
                         Button {
                             runAIAction {
                                 await store.generateSummary(for: paper)
+                                summaryExpanded = true
                             }
                         } label: {
                             Label("Summarize", systemImage: "text.badge.checkmark")
@@ -230,10 +243,13 @@ struct ReaderWorkspace: View {
 
                         Menu {
                             ForEach([HighlightKind.claim, .method, .evidence, .limitation]) { kind in
-                                Button(kind.rawValue) {
+                                Button {
                                     runAIAction {
                                         aiExtraction = await store.generateExtraction(for: paper, kind: kind)
+                                        explanationExpanded = true
                                     }
+                                } label: {
+                                    Label(kind.rawValue, systemImage: "circle.fill")
                                 }
                             }
                         } label: {
@@ -248,6 +264,7 @@ struct ReaderWorkspace: View {
                             let textToExplain = selectedText
                             runAIAction {
                                 aiExplanation = await LocalPaperAI.explainSelection(textToExplain, in: paper)
+                                explanationExpanded = true
                             }
                         } label: {
                             Label("Explain Selection", systemImage: "questionmark.bubble")
@@ -266,23 +283,43 @@ struct ReaderWorkspace: View {
 
                 AIStatusBadge()
 
-                if let summary = paper.aiSummary {
-                    AIResultView(title: "Paper Summary", bodyText: summary)
+                CollapsibleSection(title: "Summary", isExpanded: $summaryExpanded) {
+                    if let summary = paper.aiSummary {
+                        AIResultBody(bodyText: summary)
+                    } else {
+                        Text("Run Summarize to generate a summary.")
+                            .font(.callout)
+                            .foregroundStyle(.tertiary)
+                    }
                 }
 
-                if !aiExtraction.isEmpty {
-                    AIResultView(title: "Extraction", bodyText: aiExtraction)
+                CollapsibleSection(title: "Explanation", isExpanded: $explanationExpanded) {
+                    if aiExtraction.isEmpty && aiExplanation.isEmpty {
+                        Text("Run Extract or Explain Selection to see results.")
+                            .font(.callout)
+                            .foregroundStyle(.tertiary)
+                    } else {
+                        VStack(alignment: .leading, spacing: 12) {
+                            if !aiExtraction.isEmpty {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Extraction")
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                    AIResultBody(bodyText: aiExtraction)
+                                }
+                            }
+                            if !aiExplanation.isEmpty {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Selection Context")
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                    AIResultBody(bodyText: aiExplanation)
+                                }
+                            }
+                        }
+                    }
                 }
 
-                if !aiExplanation.isEmpty {
-                    AIResultView(title: "Selection Context", bodyText: aiExplanation)
-                }
-
-                if paper.aiSummary == nil && aiExtraction.isEmpty && aiExplanation.isEmpty {
-                    Text("Use local AI actions to summarize the paper, extract claims, or explain selected text. This MVP keeps all processing on device.")
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
             }
             .padding()
         }
@@ -297,31 +334,88 @@ struct ReaderWorkspace: View {
         }
     }
 
-    private var metadataPanel: some View {
-        Form {
-            TextField("Title", text: $paper.title, axis: .vertical)
-            TextField("Authors", text: $paper.authors, axis: .vertical)
-            TextField("Year", text: $paper.year)
+        private var findBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+                .imageScale(.small)
 
-            Picker("Status", selection: $paper.status) {
-                ForEach(ReadingStatus.allCases) { status in
-                    Text(status.rawValue).tag(status)
+            TextField("Find in paper", text: $findText)
+                .textFieldStyle(.plain)
+                .font(.callout)
+                .onChange(of: findText) { _, newValue in
+                    guard newValue.count >= 2 else { findMatches = []; return }
+                    findMatches = LocalPaperAI.sentenceCandidates(from: paper.allText)
+                        .filter { $0.localizedCaseInsensitiveContains(newValue) }
+                    findCurrentIndex = 0
                 }
-            }
 
-            Section("Abstract") {
-                TextEditor(text: $paper.abstract)
-                    .frame(minHeight: 140)
-            }
-
-            Section("File") {
-                Text(paper.filePath)
-                    .font(.caption)
+            if !findMatches.isEmpty {
+                Text("\(findCurrentIndex + 1) of \(findMatches.count)")
+                    .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
+
+                Button {
+                    findCurrentIndex = max(0, findCurrentIndex - 1)
+                } label: {
+                    Image(systemName: "chevron.up")
+                }
+                .buttonStyle(.plain)
+                .disabled(findCurrentIndex <= 0)
+
+                Button {
+                    findCurrentIndex = min(findMatches.count - 1, findCurrentIndex + 1)
+                } label: {
+                    Image(systemName: "chevron.down")
+                }
+                .buttonStyle(.plain)
+                .disabled(findCurrentIndex >= findMatches.count - 1)
+            }
+
+            Button {
+                showFindBar = false
+            } label: {
+                Image(systemName: "xmark")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(.bar)
+    }
+
+    private var goToPageSheet: some View {
+        VStack(spacing: 16) {
+            Text("Go to Page")
+                .font(.headline)
+
+            TextField("Page number", text: $goToPageNumber)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 120)
+                .labelsHidden()
+
+            HStack(spacing: 12) {
+                Button("Cancel") {
+                    showGoToPage = false
+                    goToPageNumber = ""
+                }
+                .keyboardShortcut(.escape)
+
+                Button("Go") {
+                    if let page = Int(goToPageNumber), page > 0 {
+                        navigateToPage = page
+                    }
+                    showGoToPage = false
+                    goToPageNumber = ""
+                }
+                .keyboardShortcut(.return)
+                .buttonStyle(.borderedProminent)
+                .disabled(Int(goToPageNumber) == nil)
             }
         }
-        .formStyle(.grouped)
+        .padding(24)
+        .frame(width: 200)
     }
 }
 
@@ -363,20 +457,54 @@ private struct AIStatusBadge: View {
     }
 }
 
-private struct AIResultView: View {
-    let title: String
+private struct AIResultBody: View {
     let bodyText: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title)
-                .font(.headline)
-            Text(bodyText)
-                .font(.body)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
+        Text(bodyText)
+            .font(.body)
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 4)
+    }
+}
+
+private struct CollapsibleSection<Content: View>: View {
+    let title: String
+    @Binding var isExpanded: Bool
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack {
+                    Text(title)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                content()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
+            }
         }
-        .padding()
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
     }
 }

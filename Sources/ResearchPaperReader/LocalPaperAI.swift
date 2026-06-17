@@ -226,11 +226,9 @@ enum LocalPaperAI {
     }
 
     private static func context(around text: String, in allText: String) -> String {
-        let lower = text.lowercased()
-        guard let range = allText.lowercased().range(of: lower) else {
+        guard let range = allText.range(of: text, options: .caseInsensitive) else {
             return String(clean(allText).prefix(1_200))
         }
-
         let startOffset = max(0, allText.distance(from: allText.startIndex, to: range.lowerBound) - 700)
         let endOffset = min(allText.count, allText.distance(from: allText.startIndex, to: range.upperBound) + 700)
         let start = allText.index(allText.startIndex, offsetBy: startOffset)
@@ -332,29 +330,45 @@ enum LocalPaperAI {
             .existingDirectory
     }
 
-    static func sections(from text: String) -> [PaperSection] {
+    private static let numberedRegex = try! NSRegularExpression(pattern: #"^(?:\d+(?:\.\d+)*|[A-Z]|[IVX]+)\.?\s+"#)
+
+    static func sections(from text: String, pageOffsets: [Int] = []) -> [PaperSection] {
         let lines = text.components(separatedBy: "\n")
+        var lineOffsets: [Int] = []
+        var running = 0
+        for line in lines {
+            lineOffsets.append(running)
+            running += line.count + 1
+        }
+
         let known: [(SectionKind, [String])] = [
-            (.abstract,    ["abstract"]),
+            (.abstract,     ["abstract"]),
             (.introduction, ["introduction"]),
-            (.relatedWork, ["related work", "background"]),
-            (.method,      ["method", "approach", "model", "algorithm", "architecture", "framework", "system design", "proposed method"]),
-            (.experiment,  ["experiment", "evaluation", "dataset", "empirical", "setup"]),
-            (.results,     ["results", "findings", "outcome"]),
-            (.discussion,  ["discussion"]),
-            (.conclusion,  ["conclusion", "future work", "summary", "concluding"]),
-            (.references,  ["references", "bibliography"]),
-            (.appendix,    ["appendix"]),
+            (.relatedWork,  ["related work", "related literature", "background"]),
+            (.method,       ["method", "approach", "model", "algorithm", "architecture", "framework", "system design", "proposed method", "methodology"]),
+            (.experiment,   ["experiment", "evaluation", "dataset", "empirical", "setup", "experimental setup"]),
+            (.results,      ["results", "findings", "outcome"]),
+            (.discussion,   ["discussion"]),
+            (.conclusion,   ["conclusion", "future work", "summary", "concluding remarks"]),
+            (.references,   ["references", "bibliography"]),
+            (.appendix,     ["appendix"]),
         ]
 
         var matched: [(index: Int, kind: SectionKind, title: String)] = []
+
         for (i, raw) in lines.enumerated() {
             let line = raw.trimmingCharacters(in: .whitespaces)
             guard !line.isEmpty, line.count < 120 else { continue }
 
+            let nsLine = line as NSString
+            let nsr = NSRange(location: 0, length: nsLine.length)
+            let hasNumber = numberedRegex.firstMatch(in: line, options: [.anchored], range: nsr) != nil
+            let stripped = hasNumber ? numberedRegex.stringByReplacingMatches(in: line, options: [], range: nsr, withTemplate: "") : line
+
             for (kind, keywords) in known {
-                guard keywords.contains(where: { line.localizedCaseInsensitiveContains($0) }) else { continue }
-                guard matched.last?.kind != kind else { break }
+                let checkLine = hasNumber ? stripped : line
+                guard keywords.contains(where: { checkLine.localizedCaseInsensitiveContains($0) }) else { continue }
+                guard !matched.contains(where: { $0.kind == kind }) else { break }
                 matched.append((i, kind, line))
                 break
             }
@@ -368,7 +382,17 @@ enum LocalPaperAI {
             let body = lines[(match.index + 1)..<nextIndex]
                 .joined(separator: "\n")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            sections.append(PaperSection(kind: match.kind, title: match.title, text: body, order: j))
+
+            let page: Int? = {
+                guard match.index < lineOffsets.count else { return nil }
+                let charOffset = lineOffsets[match.index]
+                for p in (0..<pageOffsets.count).reversed() {
+                    if pageOffsets[p] <= charOffset { return p + 1 }
+                }
+                return nil
+            }()
+
+            sections.append(PaperSection(kind: match.kind, title: match.title, text: body, order: j, page: page))
         }
         return sections
     }
@@ -379,7 +403,7 @@ enum LocalPaperAI {
         return String(remainder.prefix(700)).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func sentenceCandidates(from text: String) -> [String] {
+    static func sentenceCandidates(from text: String) -> [String] {
         clean(text)
             .split(separator: ".", omittingEmptySubsequences: true)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }

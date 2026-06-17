@@ -6,16 +6,18 @@ Built with SwiftUI and PDFKit. Designed for graduate students, researchers, and 
 
 ## Features
 
-- **PDF import** — Drag-and-drop from Finder or open-panel import (`⌘I`); metadata extracted from PDF attributes automatically.
-- **Paper library** — Sort, search, and filter by reading status, tags, or full-text content.
-- **Full-text search** — Every word in every paper is indexed on import. Search titles, authors, tags, notes, and PDF body text with 300ms debounced full-text matching.
-- **Reader** — PDFKit-based reader with continuous scroll, zoom, and keyboard navigation.
-- **Outline tab** — On import, the app detects common academic paper sections (Abstract, Introduction, Method, Results, Conclusion, etc.). The Outline tab shows the table of contents and lets you click any section to read its full text.
+- **Selection screen** — A visual card-based browser shows papers as rich cards with title, authors, abstract preview, reading status badge, import date, note count, year, venue, and tags. Sort by Recent, Title, Author, or Year with animated reordering.
+- **Sidebar paper list** — The library sidebar shows a filterable, sortable list of all papers with status color dot, title, authors, and note count. Sort by Recent, Title, Author, or Year. Filter by reading status.
+- **PDF import** — Drag-and-drop from Finder onto the card grid, or open-panel import (`⌘I` / `⌘O`); metadata extracted from PDF attributes and enriched via CrossRef/arXiv lookups, with AI-powered fallback extraction.
+- **Full-text search** — Every word in every paper is extracted on import. Search titles, authors, tags, notes, and PDF body text with 300ms debounced full-text matching.
+- **Reader** — PDFKit-based reader with continuous scroll, zoom controls (toolbar + trackpad), find within paper (`⌘F`), go-to-page dialog (`⌘G`), collapsible inspector, and keyboard navigation.
+- **Section-aware navigation** — On import, the app detects common academic paper sections (Abstract, Introduction, Method, Results, Conclusion, etc.) using numbered-header-aware parsing. Click a section in the sidebar outline to jump the PDF to that page.
 - **Color-coded highlights** — Annotations render as native PDFKit highlights directly on the page. Color per kind: yellow (highlight), orange (claim), green (evidence), blue (method), red (limitation), purple (question), gray (definition).
-- **Typed notes** — Save structured notes anchored to selected text and page number. Export to Markdown. Keyboard shortcut: `⌘N`.
-- **On-device AI** — Summarize papers (`⌘S`), extract claims/methods/evidence/limitations, or explain selected passages. All processing stays local using heuristic text extraction — no API keys, no cloud calls, no data leaving your Mac.
-- **Debounced persistence** — Library changes write to disk at most once per second, batching rapid mutations (highlighting, status changes) into a single save.
-- **Privacy controls** — AI mode selector (Private Local, Balanced, Best AI, Custom) with clear labels showing when content stays on-device.
+- **Typed notes** — Save structured notes anchored to selected text and page number. Type Picker shows a live color swatch of the selected highlight kind. Export to Markdown. Shortcut: `⌘N`.
+- **On-device AI** — Summarize papers (`⌘S`), extract claims/methods/evidence/limitations, or explain selected passages. Results shown in collapsible Summary and Explanation sections. All processing stays local — no API keys, no cloud calls, no data leaving your Mac.
+- **Metadata enrichment** — On import, papers are enriched via CrossRef (DOI lookups), arXiv API (arXiv ID lookups), and heuristic/AI text extraction. DOI, arXiv ID, and venue are shown on paper cards.
+- **Debounced persistence** — Library changes write to disk at most once per second, batching rapid mutations into a single save.
+- **Privacy controls** — AI mode selector (Private Local, Balanced, Best AI, Custom) with clear status text.
 
 ## Quick Start
 
@@ -58,26 +60,30 @@ open Package.swift
 
 ## Usage
 
-1. **Import papers** — Click `+` in the toolbar, press `⌘I` / `⌘O`, or drag PDFs from Finder onto the library sidebar.
-2. **Browse library** — The sidebar shows your papers. Press `⌘F` to focus the search bar and filter by title, author, tags, notes, or any text in the PDF body.
-3. **Read** — Select a paper to open the reader. The PDF fills the left pane; the right pane has three tabs:
-   - **Notes** — Select text in the PDF, choose a highlight type, add your notes, and save. Existing notes render as colored highlights on the PDF.
-   - **AI** — Click "Summarize" for a local heuristic summary, use "Extract" to find claims/methods/evidence/limitations, or select text and click "Explain Selection" to see surrounding context.
-   - **Details** — Edit title, authors, year, reading status, and abstract.
-4. **Export** — Click "Export" in the AI tab to save notes and AI summaries as Markdown.
+1. **Import papers** — Click `+` in the toolbar, press `⌘O` / `⌘I`, or drag PDFs from Finder onto the card grid.
+2. **Browse & filter** — The detail pane shows papers as visual cards. Press `⌘F` to focus the sidebar search and filter by title, author, or any text in the PDF body. Use the status filter below the search bar to narrow by reading status (Unread, Reading, Read, etc.).
+3. **Sort** — Use the segmented sort picker at the top of the card grid to order by Recent (default), Title, Author, or Year. Cards animate into their new positions.
+4. **Read** — Click any card to open the reader with an animated slide transition. The PDF fills the left pane (collapsible with the sidebar toolbar button); the right pane has two tabs:
+   - **Notes** — Select text in the PDF, choose a highlight type (color swatch shown), add your notes, and save. Existing notes render as colored highlights on the PDF. Shortcut: `⌘N`.
+   - **AI** — Click "Summarize" (`⌘S`) for a local heuristic summary, or use "Extract" to find claims/methods/evidence/limitations, or select text and click "Explain Selection". Results appear in collapsible Summary and Explanation sections.
+5. **Navigate** — Use the toolbar zoom controls (`+`/`-`), the find bar (`⌘F`), or go-to-page dialog (`⌘G`). Click a section in the sidebar's paper list to jump the PDF to that page.
+6. **Export** — Click "Export" in the AI tab to save notes and AI summaries as Markdown.
 
 ## Architecture
 
 ```
 Sources/ResearchPaperReader/
-  ResearchPaperReaderApp.swift   — App entry, keyboard shortcut, Settings scene
-  ContentView.swift              — NavigationSplitView: library sidebar + detail
+  ResearchPaperReaderApp.swift   — App entry, ⌘O/⌘I shortcuts, Settings scene
+  ContentView.swift              — NavigationSplitView: sidebar (filter, sort, paper list) + animated detail
+  SelectionScreen.swift          — Card-based paper browser with sort (Recent/Title/Author/Year) + PaperCard
   PaperStore.swift               — @MainActor ObservableObject, JSON persistence with debounced save
-  Models.swift                   — Paper, PaperNote, ReadingStatus, HighlightKind + color map
-  PDFReaderView.swift            — NSViewRepresentable wrapping PDFKit.PDFView, highlight rendering
-  ReaderWorkspace.swift          — HSplitView: PDF reader + inspector panel (Notes / AI / Details)
-  LocalPaperAI.swift             — Stateless enum, heuristic text extraction (no external deps)
+  Models.swift                   — Paper, PaperSection, PaperNote, ReadingStatus, HighlightKind + sort/filter extensions
+  PDFReaderView.swift            — NSViewRepresentable wrapping PDFKit.PDFView, highlights, zoom, page nav
+  ReaderWorkspace.swift          — HSplitView: PDF reader + inspector (Notes / AI), find bar, collapsible sections
+  LocalPaperAI.swift             — Stateless enum, heuristic text + Core ML + Foundation Models router
+  MetadataService.swift          — CrossRef/arXiv API lookups, AI metadata extraction, enrichment pipeline
   SettingsView.swift             — AI mode, provider, and privacy toggles
+  WindowBoundsEnforcer.swift     — NSViewRepresentable enforcing minimum window size
 ```
 
 ### Design principles
@@ -91,14 +97,14 @@ Sources/ResearchPaperReader/
 
 | Phase | Focus | Status |
 |-------|-------|--------|
-| 1 | Foundation (app shell, PDF rendering, library) | ✅ Done |
+| 1 | Foundation (app shell, PDF rendering, library, selection screen) | ✅ Done |
 | 2 | Annotations & notes (highlights, typed notes, Markdown export) | ✅ Done |
-| 3 | Processing pipeline (text extraction, section detection, full-text search) | ✅ Partial |
-| 4 | Local AI & retrieval (heuristic summarization, extraction, explain selection) | ✅ MVP |
-| 5 | Cloud & BYOK (model router, provider settings, privacy gates) | 🔲 Not started |
-| 6 | Sync (iCloud metadata sync, multi-device) | 🔲 Not started |
-| 7 | Literature review workspace (projects, comparisons, synthesis) | 🔲 Not started |
-| 8 | Collaboration (team libraries, shared annotations) | 🔲 Not started |
+| 3 | Processing pipeline (text extraction, section detection, full-text search) | ✅ Done |
+| 4 | Local AI & retrieval (heuristic summarization, extraction, explain selection) | ✅ Done |
+| 5 | Metadata enrichment (CrossRef, arXiv, heuristic/AI metadata extraction) | ✅ Done |
+| 6 | Preview features (find within paper, go-to-page, zoom controls) | ✅ Done |
+| 7 | Cloud & BYOK (model router, provider settings, privacy gates) | 🔲 Not started |
+| 8 | Sync (iCloud metadata sync, multi-device) | 🔲 Not started |
 
 See [`research-paper-reader-design.md`](research-paper-reader-design.md) for the full product specification.
 

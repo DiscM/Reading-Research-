@@ -1,5 +1,106 @@
 # Changelog
 
+## v0.7.0 — 2026-06-16
+
+### Added
+
+- **Collapsible AI sections** — The AI tab now has two expandable/collapsible sub-tabs: "Summary" and "Explanation". Each uses a custom `CollapsibleSection` component with a full-row clickable header, animated rotating chevron, and rounded background. Summary auto-expands on generate; Explanation groups both Extraction and Selection Context results. Placeholder text shown when empty.
+- **Note type color swatch** — A 14pt colored circle (filled with the selected highlight kind's color) appears next to the "Type" Picker in the Notes tab, updating live as the selection changes.
+- **Shared filter/sort extension** — `Array<Paper>.filtered(searchText:debouncedSearch:status:)` and `.sorted(by:)` added to `Models.swift`, consolidating the duplicate filter/sort logic that previously lived in both `ContentView` and `SelectionScreen`.
+
+### Fixed
+
+- **NotificationCenter observer leak** — `PDFReaderView.Coordinator` now calls `NotificationCenter.default.removeObserver(self)` in its `deinit`, preventing dead coordinators from accumulating on every paper switch (was causing 41 GB memory growth).
+- **Find bar performance** — Added `guard newValue.count >= 2` to prevent expensive `sentenceCandidates` split/filter on the full paper text until the user has typed at least 2 characters.
+
+### Removed
+
+- **Details tab** — Removed the reader inspector's Details tab. The inspector now shows only Notes and AI.
+- **Dead code** — Removed unused `addMatch()` function from `LocalPaperAI.sections(from:)`, unused `zoomIn()`/`zoomOut()`/`zoomToFit()` methods from `PDFReaderView.Coordinator`, unused empty-state text block from `ReaderWorkspace.aiPanel`, and unused `import AppKit` from `ContentView.swift`.
+
+## v0.6.1 — 2026-06-16
+
+### Added
+
+- **Sidebar paper list with sort** — The library sidebar now shows a filterable, sortable list of all papers. Each row displays a status color dot, title (2-line), authors, and note count. Sort by Recent, Title, Author, or Year via a compact Picker next to the status filter.
+- **Back button in toolbar** — When a paper is open in the reader, a "Back to Library" button (chevron.left) appears in the toolbar next to the import button. Clicking it returns to the selection screen.
+
+### Removed
+
+- **Sections panel** — Removed the per-paper section outline ("Sections" list with page navigation and section text sheet) from the sidebar. Sections remain available in the reader's Outline tab within the inspector.
+
+### Changed
+
+- `ContentView.swift` — Rewrote sidebar: removed `sidebarSection` state, sections list, and section sheet. Added `sidebarSort` state and a `sidebarPapers` computed property mirroring the filter/sort logic. Replaced empty space with a `List(selection:)` of `SidebarPaperRow` views. Added back button to toolbar. Removed "Now Reading" section (paper is now visible as selected in the list instead).
+- `SidebarPaperRow` — New private struct showing status dot, title, authors, and note count for each paper in the sidebar list.
+
+### Added
+
+- **Numbered-header section detection** — The section parser now prioritizes numbered headers (`1. Introduction`, `2.1 Background`, `III. Methodology`, `A. Setup`). A two-pass regex approach strips the number prefix and matches the content against known keywords. Unnumbered headers are matched secondarily. This produces more accurate outlines with fewer false positives.
+- **Page-mapped sections** — Sections now carry a `page: Int?` field pinpointing which PDF page the section starts on. `Paper.allTextPageOffsets` tracks character offsets per page during text extraction; the section parser maps each detected header offset back to a page.
+- **Sidebar section outline** — When a paper is open, the sidebar shows a "Sections" panel below "Now Reading". Each row displays: page number (e.g. "p.3"), section kind badge, title, and chevron. Clicking a section both opens its text in a sheet AND navigates the PDF reader to that page.
+- **PDF page navigation** — `PDFReaderView` accepts a new `@Binding var navigateToPage: Int?`. When set, the PDF scrolls to and centers on the specified page. `ReaderWorkspace` threads this binding from `ContentView` through to `PDFReaderView`.
+
+### Changed
+
+- `LocalPaperAI.sections(from:text:)` → `sections(from:text:pageOffsets:)` — Now accepts page offsets for page mapping. Rewritten with numbered-header regex prioritization.
+- `PaperStore.extractAllText(from:)` returns a `(text: String, offsets: [Int])` tuple. Page offsets stored in `Paper.allTextPageOffsets`.
+- `PaperSection` — added `page: Int?` property.
+- `ContentView.swift` — Added `navigateToPage` state. Sidebar section buttons set both `navigateToPage` (for PDF scroll) and `sidebarSection` (for text sheet). Added page number ("p.3") in sidebar rows and sheet header.
+- `ReaderWorkspace` — Added `@Binding var navigateToPage: Int?`, passed through to `PDFReaderView`.
+- `PDFReaderView` — Added `@Binding var navigateToPage: Int?` and `lastNavigatedPage` tracking. On change, calls `pdfView.go(to:)` for the target page.
+
+## v0.5.0 — 2026-06-16
+
+### Added
+
+- **Bulk ingestion with metadata enrichment** — Importing PDFs now triggers an automatic enrichment pipeline that fetches metadata from publication databases and uses on-device AI to improve incomplete data.
+- **CrossRef DOI lookup** — On import, the app scans the first page for DOI patterns (`10.xxxx/...`). When found, it queries the CrossRef API (free, no key required) to fetch title, authors, year, abstract, and venue. Matched results overwrite placeholder metadata.
+- **arXiv API lookup** — The first page is also scanned for arXiv IDs (`arXiv:xxxx.xxxxx`). When found, the arXiv API provides title, authors, year, and abstract. `paper.venue` is set to "arXiv".
+- **Heuristic metadata extraction** — When no DOI or arXiv ID is found, the app attempts to extract title (first non-empty line), authors (second line), year (first four-digit year in first 5 lines), and abstract from the first page text using the existing `abstractCandidate` heuristic.
+- **Apple Foundation Model metadata extraction (macOS 26+)** — On future OS versions, the system language model is used to extract structured metadata (title, authors, year, abstract, venue) from the first page via a JSON-prompted generation. Falls back gracefully to the heuristic on older OS versions.
+- **Enrichment progress in sidebar** — An animated spinner with "Enriching N..." text appears in the sidebar during the enrichment phase after import. Fades in/out with opacity transition.
+- **Enrichment indicators on cards** — Paper cards now show DOI ("DOI" badge in blue) and arXiv ("arXiv" badge in orange) when available. Venue appears as a `building.2` label in the bottom metadata bar.
+- **Enrichment status in Details tab** — Read-only fields for DOI, arXiv ID, and Venue appear in the reader's Details tab. An orange warning icon with "Metadata enrichment unavailable" text shows when enrichment is attempted but fails.
+- **New data model fields** — `Paper.doi: String`, `Paper.arxivId: String`, `Paper.venue: String`, `Paper.enrichmentFailed: Bool`.
+
+### Removed
+
+- **Library error alert** — Removed the modal `.alert("Library Error", ...)` dialog from ContentView. Errors now appear as a transient red text banner at the bottom of the sidebar that auto-dismisses after 4 seconds. Non-blocking and non-intrusive.
+
+### Added (files)
+
+- `MetadataService.swift` — 215-line service struct with CrossRef/arXiv HTTP lookups, heuristic + Foundation Model text extraction, and the top-level `enrich(_:)` pipeline.
+
+### Changed
+
+- `PaperStore.importPDFs` — Now runs an asynchronous enrichment loop after importing all PDFs. Each paper is passed through `MetadataService.enrich()` in sequence. Progress tracked via `isImporting` and `enrichmentCount` published properties.
+- `PaperStore.extractMetadata` — Extended to also extract DOI and arXiv ID from the first page during the initial import pass, before enrichment runs.
+- `PaperCard` bottom bar — Added venue icon/label, DOI capsule badge, and arXiv capsule badge.
+- `ReaderWorkspace` Details tab — Added read-only venue, DOI, arXiv ID fields, and enrichment-failed warning.
+- `ContentView` sidebar — Added import progress HStack with `ProgressView` spinner and enrichment count.
+
+## v0.4.0 — 2026-06-16
+
+### Added
+
+- **Selection screen** — A new visual card-based paper browser replaces the direct-open-to-reader flow. The detail pane shows papers as rich cards with title, authors, abstract preview, reading status badge (color-coded), relative import date, note count, year, and tags.
+- **Sort controls** — A segmented picker at the top of the selection screen offers four sort orders: **Recent** (default, by `importedAt` descending), Title, Author, and Year. Changing the sort animates the card list with a spring transition.
+- **Sidebar redesign** — The sidebar is now a compact control panel: library title, search field, status filter picker, and a "Now Reading" section showing the currently open paper with a close button. Paper count shown at the bottom.
+- **Animated transitions** — Opening a paper uses an asymmetric slide+opacity transition (card grid slides out left, reader slides in from right). Closing reverses. Cards animate in with scale+opacity on initial appearance and smoothly reorder when filter/sort changes.
+- **Visual flare** — Paper cards have rounded corners (12pt), subtle shadow, a colored status strip on the leading edge, and a status badge capsule. Empty and no-match states use SF Symbol effects (bounce, pulse). Status colors: unread=gray, skimmed=blue, reading=green, read=indigo, cited=purple, rejected=red, archived=secondary.
+
+### Changed
+
+- `ContentView.swift` — completely restructured. Sidebar extracted into its own `@ViewBuilder`; detail switches between `SelectionScreen` and `ReaderWorkspace` with animated transitions. Removed `PaperList`, `PaperRow`, and `EmptyLibraryView` private structs (replaced by `SelectionScreen`).
+- `SelectionScreen.swift` — new file containing `SelectionScreen`, `PaperCard`, and `SortOrder` enum. Filtering, sorting, and card display logic lives here.
+- Drag-and-drop import — moved from sidebar `PaperList` to `SelectionScreen` (and retained on the detail view).
+- Toolbar — removed the per-paper status Picker (status is now visible on each card and in the reader's Details tab).
+
+### Fixed
+
+- **⌘I keyboard shortcut** — Now wired as a hidden button behind the toolbar import button. Both `⌘O` and `⌘I` open the import panel.
+
 ## v0.3.0 — 2026-06-16
 
 ### Added
@@ -13,6 +114,12 @@
 
 - `PaperStore.importPDFs` — now calls `LocalPaperAI.sections(from:)` during import and stores result in `paper.sections`.
 - `ContentView` sidebar — extracted `PaperList` helper view to manage list, onDelete, and drag-and-drop independently, reducing type-checking complexity in the main view body.
+
+### Fixed
+
+- **⌘I keyboard shortcut** — Now wired as a hidden button behind the toolbar import button. Both `⌘O` and `⌘I` open the import panel.
+- **READNE accuracy** — Removed unimplemented "Sort" claim; corrected "filter by reading status" to reference the actual status filter Picker added in this release; updated tab count from 3 to 4 (added Outline tab).
+- **Library status filter** — Added `ReadingStatus?` Picker to the library header. Papers can now be filtered by reading status (All, Unread, Skimmed, Reading, Read, Cited, Rejected, Archived).
 
 ## v0.2.0 — 2026-06-16
 

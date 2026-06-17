@@ -829,113 +829,149 @@ BYOK can be available in Pro or Teams while still charging for app features, syn
 
 ## 16. MVP Scope
 
-### MVP Must Have
+### MVP Implemented
 
-- Native Mac/iPad app
-- PDF import
-- PDF reader
-- Highlighting
-- Notes
-- Paper library
-- Metadata extraction
-- Tags and collections
-- Reading status
-- Local full-text search
-- Local or hosted AI summary
-- Ask questions about one paper
-- Export notes to Markdown
-- Basic privacy controls
-
-### MVP Should Have
-
-- DOI/arXiv metadata enrichment
-- Section detection
-- Local embeddings
-- Citation popovers
-- AI explanation of selected text
-- BYOK support for at least one provider
-- iCloud sync for notes and metadata
+- ✅ **Native Mac app** (macOS 15+, arm64 + x86_64 universal binary)
+- ✅ **PDF import** (open panel, drag-and-drop, batch)
+- ✅ **PDF reader** (PDFKit with continuous scroll, zoom, find, go-to-page)
+- ✅ **Highlighting** (color-coded PDFKit annotations per highlight kind)
+- ✅ **Notes** (typed notes anchored to selected text + page number)
+- ✅ **Paper library** (sidebar list + visual card grid)
+- ✅ **Metadata extraction** (PDF attributes + CrossRef/arXiv API + heuristic/AI)
+- ✅ **Tags** (stored per paper, shown on cards)
+- ✅ **Reading status** (7 states, filterable + filterable/sortable)
+- ✅ **Full-text search** (debounced, across metadata + PDF body)
+- ✅ **Local AI summary** (heuristic + Foundation Model + Core ML routing)
+- ✅ **Ask questions about one paper** (Extract claims/methods/evidence/limitations)
+- ✅ **Export notes to Markdown** (with AI summary, abstract, metadata)
+- ✅ **Basic privacy controls** (AI mode selector with status text)
+- ✅ **Section detection** (numbered-header-priority, page-mapped)
+- ✅ **AI explanation of selected text** (with surrounding context)
+- ✅ **Selection screen** (visual card grid with animated transitions)
+- ✅ **Sidebar paper list** (filterable, sortable, with status indicators)
+- ✅ **Find within paper** (⌘F find bar with match navigation)
+- ✅ **Go to page** (⌘G dialog)
+- ✅ **Zoom controls** (toolbar buttons + live percentage + trackpad)
+- ✅ **Collapsible AI sections** (Summary + Explanation sub-tabs)
 
 ### MVP Not Yet
 
-- Team libraries
-- Full web app
-- Advanced literature review generation
-- Large-scale cross-library synthesis
-- Complex citation graph visualization
-- Collaborative live annotation
+- iPad/iPhone app (Mac-only for MVP)
+- ✔️ Local embeddings (semantic search deferred)
+- ❌ Collections (tags only)
+- ❌ Citation popovers
+- ❌ BYOK provider wiring (UI exists, routing not wired)
+- ❌ iCloud sync for notes and metadata
+- ❌ Team libraries
+- ❌ Full web app
+- ❌ Advanced literature review generation
+- ❌ Large-scale cross-library synthesis
+- ❌ Complex citation graph visualization
+- ❌ Collaborative live annotation
 
 ## 17. Implementation Roadmap
 
-## Phase 1: Foundation
+### Phase 1: Foundation ✅ Done
 
 Goals:
 
-- Create the native app shell.
-- Build the local data model.
-- Load, render, and navigate PDFs.
-- Store papers in a local library.
+- ✅ Create the native app shell.
+- ✅ Build the local data model.
+- ✅ Load, render, and navigate PDFs.
+- ✅ Store papers in a local library.
 
 Steps:
 
-1. Create SwiftUI app targets for macOS and iPadOS.
-2. Add PDFKit wrapper.
-3. Add local Paper model.
-4. Implement file import.
-5. Store imported PDFs in app storage.
-6. Persist reading position.
-7. Add basic library screen.
+1. ✅ Create SwiftUI app targets for macOS.
+2. ✅ Add PDFKit wrapper.
+3. ✅ Add local Paper model.
+4. ✅ Implement file import.
+5. ✅ Store imported PDFs in app storage.
+6. ✅ Persist reading position.
+7. ✅ Add library screen with sidebar list + visual card grid.
 
-## Phase 2: Annotation And Notes
+### Phase 2: Annotation And Notes ✅ Done
 
 Goals:
 
-- Enable deep reading.
-- Persist structured annotations.
+- ✅ Enable deep reading.
+- ✅ Persist structured annotations.
 
 Steps:
 
-1. Add text selection highlight flow.
-2. Add Annotation model.
-3. Render highlights in PDFKit.
-4. Add margin note editor.
-5. Add annotation list panel.
-6. Add tags and annotation types.
-7. Export notes to Markdown.
+1. ✅ Add text selection highlight flow.
+2. ✅ Add Annotation (PaperNote) model.
+3. ✅ Render highlights in PDFKit (color-coded per kind).
+4. ✅ Add margin note editor.
+5. ✅ Add annotation list panel.
+6. ✅ Add tags and annotation types.
+7. ✅ Export notes to Markdown.
 
-## Phase 3: Processing Pipeline
+### Phase 3: Processing Pipeline ✅ Done
 
 Goals:
 
-- Turn PDFs into structured paper objects.
+- ✅ Turn PDFs into structured paper objects.
 
 Steps:
 
-1. Extract embedded text.
-2. Add OCR fallback.
-3. Detect common sections.
-4. Parse references.
-5. Store chunks by section.
-6. Add local full-text search.
-7. Add background processing state.
+1. ✅ Extract embedded text (per-page, cached as Paper.allText).
+2. ❌ OCR fallback (not implemented — relies on embedded text only).
+3. ✅ Detect common sections (numbered-header-priority regex).
+4. ❌ Parse references (not implemented).
+5. ✅ Store chunks by section (PaperSection model).
+6. ✅ Add local full-text search (debounced, across all fields).
+7. ✅ Add background processing state (import progress + enrichment).
 
-## Phase 4: Local AI And Retrieval
+### Phase 4: Local AI And Retrieval ✅ Done
 
 Goals:
 
-- Add useful AI without cloud dependence.
+- ✅ Add useful AI without cloud dependence.
 
 Steps:
 
-1. Add AI task abstraction.
-2. Add local embeddings.
-3. Add retrieval over current paper.
-4. Add selected-text explanation.
-5. Add section summary.
-6. Add whole-paper summary.
-7. Add source-linked AI responses.
+1. ✅ Add AI task abstraction (LocalPaperAI enum with Provider routing).
+2. ❌ Local embeddings (semantic search deferred).
+3. ✅ Add retrieval over current paper.
+4. ✅ Add selected-text explanation.
+5. ✅ Add section summary (via Outline / sidebar sections).
+6. ✅ Add whole-paper summary.
+7. ✅ Add source-linked AI responses (heuristic with context citation).
 
-## Phase 5: Cloud And BYOK
+### Phase 5: Metadata Enrichment ✅ Done
+
+Goals:
+
+- ✅ Enrich paper metadata from publication databases and AI.
+
+Steps:
+
+1. ✅ CrossRef DOI lookup.
+2. ✅ arXiv API lookup.
+3. ✅ Heuristic metadata extraction from first page.
+4. ✅ Foundation Model extraction (macOS 26+, conditional).
+5. ✅ Enrichment progress in sidebar.
+6. ✅ DOI/arXiv/venue display on cards.
+7. ✅ Enrichment-failed indicator for papers that can't be enriched.
+
+### Phase 6: Preview Features ✅ Done
+
+Goals:
+
+- ✅ Add document navigation features from Preview.app.
+
+Steps:
+
+1. ✅ Find within paper (⌘F, match count + prev/next navigation).
+2. ✅ Go to page dialog (⌘G).
+3. ✅ Zoom controls (in/out buttons + live percentage label).
+4. ✅ Page-mapped section navigation (click section → jump PDF to page).
+5. ✅ Color swatch indicator for note highlight types.
+6. ✅ Collapsible AI result sections (Summary / Explanation).
+7. ✅ Sidebar paper list with sort and filter.
+
+### Phase 7: Cloud And BYOK 🔲 Not Started
 
 Goals:
 
@@ -943,15 +979,15 @@ Goals:
 
 Steps:
 
-1. Add account system.
-2. Add backend API.
-3. Add BYOK provider settings.
-4. Add hosted AI provider.
-5. Add model router.
-6. Add privacy consent gates.
-7. Add usage tracking and billing.
+1. ❌ Add account system.
+2. ❌ Add backend API.
+3. ❌ BYOK provider wiring (UI exists, routing not wired).
+4. ❌ Add hosted AI provider.
+5. ❌ Add model router.
+6. ❌ Add privacy consent gates.
+7. ❌ Add usage tracking and billing.
 
-## Phase 6: Sync
+### Phase 8: Sync 🔲 Not Started
 
 Goals:
 
@@ -959,14 +995,14 @@ Goals:
 
 Steps:
 
-1. Add iCloud or backend sync for metadata.
-2. Sync annotations and notes.
-3. Sync reading status and collections.
-4. Add conflict handling.
-5. Add optional PDF sync.
-6. Add per-paper local-only mode.
+1. ❌ Add iCloud or backend sync for metadata.
+2. ❌ Sync annotations and notes.
+3. ❌ Sync reading status and collections.
+4. ❌ Add conflict handling.
+5. ❌ Add optional PDF sync.
+6. ❌ Add per-paper local-only mode.
 
-## Phase 7: Literature Review Workspace
+### Phase 9: Literature Review Workspace 🔲 Not Started
 
 Goals:
 
@@ -974,15 +1010,15 @@ Goals:
 
 Steps:
 
-1. Add Projects.
-2. Add selected notes/highlights to projects.
-3. Build comparison matrix.
-4. Add claim/evidence extraction.
-5. Add method/limitation comparison.
-6. Add outline builder.
-7. Add export to Markdown, Word, LaTeX, and BibTeX.
+1. ❌ Add Projects.
+2. ❌ Add selected notes/highlights to projects.
+3. ❌ Build comparison matrix.
+4. ❌ Add claim/evidence extraction.
+5. ❌ Add method/limitation comparison.
+6. ❌ Add outline builder.
+7. ❌ Add export to Markdown, Word, LaTeX, and BibTeX.
 
-## Phase 8: Collaboration
+### Phase 10: Collaboration 🔲 Not Started
 
 Goals:
 
@@ -990,13 +1026,13 @@ Goals:
 
 Steps:
 
-1. Add team workspaces.
-2. Add shared libraries.
-3. Add shared annotations.
-4. Add role-based permissions.
-5. Add institution model keys.
-6. Add audit logs.
-7. Add admin billing.
+1. ❌ Add team workspaces.
+2. ❌ Add shared libraries.
+3. ❌ Add shared annotations.
+4. ❌ Add role-based permissions.
+5. ❌ Add institution model keys.
+6. ❌ Add audit logs.
+7. ❌ Add admin billing.
 
 ## 18. Key Technical Risks
 
@@ -1115,4 +1151,3 @@ Build a native Apple MVP with:
 The first lovable version should make a researcher feel this:
 
 "I can finally read, understand, remember, and reuse what I learned from papers without losing my mind or my notes."
-

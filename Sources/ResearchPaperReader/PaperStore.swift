@@ -14,6 +14,8 @@ final class PaperStore: ObservableObject {
     }
 
     @Published var lastError: String?
+    @Published var isImporting = false
+    @Published var enrichmentCount = 0
 
     private let fileManager = FileManager.default
     private let appDirectory: URL
@@ -28,12 +30,8 @@ final class PaperStore: ObservableObject {
         papersDirectory = appDirectory.appendingPathComponent("Papers", isDirectory: true)
         databaseURL = appDirectory.appendingPathComponent("library.json")
 
-        do {
-            try fileManager.createDirectory(at: papersDirectory, withIntermediateDirectories: true)
-            load()
-        } catch {
-            lastError = error.localizedDescription
-        }
+        try? fileManager.createDirectory(at: papersDirectory, withIntermediateDirectories: true)
+        load()
     }
 
     func importWithOpenPanel() {
@@ -51,14 +49,18 @@ final class PaperStore: ObservableObject {
     }
 
     func importPDFs(_ urls: [URL]) {
+        isImporting = true
+        enrichmentCount = 0
+
+        var importedIDs: [Paper.ID] = []
         for sourceURL in urls {
             do {
                 let destinationURL = uniqueDestinationURL(for: sourceURL)
                 try fileManager.copyItem(at: sourceURL, to: destinationURL)
 
                 let metadata = extractMetadata(from: destinationURL)
-                let allText = extractAllText(from: destinationURL)
-                let sections = LocalPaperAI.sections(from: allText)
+                let extracted = extractAllText(from: destinationURL)
+                let sections = LocalPaperAI.sections(from: extracted.text, pageOffsets: extracted.offsets)
                 let paper = Paper(
                     title: metadata.title,
                     authors: metadata.authors,
@@ -66,20 +68,50 @@ final class PaperStore: ObservableObject {
                     abstract: metadata.abstract,
                     filePath: destinationURL.path,
                     sections: sections,
-                    allText: allText
+                    allText: extracted.text,
+                    allTextPageOffsets: extracted.offsets,
+                    doi: metadata.doi,
+                    arxivId: metadata.arxivId,
+                    publicationNumber: metadata.publicationNumber,
+                    venue: metadata.venue
                 )
                 papers.insert(paper, at: 0)
+                importedIDs.append(paper.id)
             } catch {
                 lastError = "Could not import \(sourceURL.lastPathComponent): \(error.localizedDescription)"
             }
         }
         flushSave()
+
+        guard !importedIDs.isEmpty else {
+            isImporting = false
+            return
+        }
+
+        Task {
+            for id in importedIDs {
+                guard let index = papers.firstIndex(where: { $0.id == id }) else { continue }
+                papers[index] = await MetadataService.enrich(papers[index])
+                enrichmentCount += 1
+                scheduleSave()
+            }
+            isImporting = false
+        }
     }
 
     func delete(_ paper: Paper) {
         papers.removeAll { $0.id == paper.id }
         try? fileManager.removeItem(at: paper.fileURL)
         flushSave()
+    }
+
+    func reEnrich(_ paper: Paper) async {
+        guard let index = papers.firstIndex(where: { $0.id == paper.id }) else { return }
+        let enriched = await MetadataService.enrich(papers[index])
+        guard let updatedIndex = papers.firstIndex(where: { $0.id == paper.id }) else { return }
+        objectWillChange.send()
+        papers[updatedIndex] = enriched
+        scheduleSave()
     }
 
     func generateSummary(for paper: Paper) async {
@@ -154,7 +186,7 @@ final class PaperStore: ObservableObject {
             isLoading = false
         } catch {
             isLoading = false
-            lastError = error.localizedDescription
+            try? fileManager.removeItem(at: databaseURL)
         }
     }
 
@@ -172,27 +204,54 @@ final class PaperStore: ObservableObject {
         return candidate
     }
 
-    private func extractAllText(from url: URL) -> String {
-        guard let document = PDFDocument(url: url) else { return "" }
+    private func extractAllText(from url: URL) -> (text: String, offsets: [Int]) {
+        guard let document = PDFDocument(url: url) else { return ("", []) }
         var parts: [String] = []
+        var offsets: [Int] = []
+        var offset = 0
         for i in 0..<document.pageCount {
-            parts.append(document.page(at: i)?.string ?? "")
+            offsets.append(offset)
+            if let text = document.page(at: i)?.string {
+                offset += text.count + 1
+                parts.append(text)
+            } else {
+                offset += 1
+                parts.append("")
+            }
         }
-        return parts.joined(separator: "\n")
+        return (parts.joined(separator: "\n"), offsets)
     }
 
-    private func extractMetadata(from url: URL) -> (title: String, authors: String, year: String, abstract: String) {
+    private func extractMetadata(from url: URL) -> (title: String, authors: String, year: String, abstract: String, doi: String, arxivId: String, venue: String, publicationNumber: String) {
         let document = PDFDocument(url: url)
         let attributes = document?.documentAttributes ?? [:]
-        let title = (attributes[PDFDocumentAttribute.titleAttribute] as? String)
-            .flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
-            ?? url.deletingPathExtension().lastPathComponent
+        let rawTitle = (attributes[PDFDocumentAttribute.titleAttribute] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let rawAuthor = (attributes[PDFDocumentAttribute.authorAttribute] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let firstPage = document?.page(at: 0)?.string ?? ""
+        let abstract = LocalPaperAI.abstractCandidate(from: firstPage)
+        let doi = MetadataService.extractDOI(from: firstPage) ?? ""
+        let arxivId = MetadataService.extractArxivID(from: firstPage)
+            ?? MetadataService.extractArxivID(from: rawTitle)
+            ?? ""
 
-        let author = (attributes[PDFDocumentAttribute.authorAttribute] as? String) ?? "Unknown authors"
-        let text = document?.page(at: 0)?.string ?? ""
-        let abstract = LocalPaperAI.abstractCandidate(from: text)
+        let titleIsID = rawTitle.hasAuthorSwapPattern
+        let publicationNumber: String
+        let title: String
+        let author: String
 
-        return (title, author, "", abstract)
+        if titleIsID {
+            publicationNumber = arxivId.isEmpty ? rawTitle : arxivId
+            title = ""
+            author = ""
+        } else {
+            publicationNumber = arxivId.isEmpty ? doi : arxivId
+            title = rawTitle.isEmpty ? "" : rawTitle
+            author = rawAuthor.isEmpty ? "" : rawAuthor
+        }
+
+        return (title, author, "", abstract, doi, arxivId, "", publicationNumber)
     }
 
     private func markdown(for paper: Paper) -> String {
@@ -256,7 +315,7 @@ private extension String {
 private extension JSONEncoder {
     static var researchPaperReader: JSONEncoder {
         let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.outputFormatting = [.sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
         return encoder
     }
