@@ -1,6 +1,39 @@
 import Foundation
+import CoreML
+
+#if canImport(FoundationModels)
+import FoundationModels
+#endif
 
 enum LocalPaperAI {
+    private enum Provider: String {
+        case appleFoundationModels = "Apple Foundation Models"
+        case coreML = "Core ML"
+        case localHeuristic = "Local Heuristic"
+        case mlx = "MLX"
+        case openAICompatibleBYOK = "OpenAI-compatible BYOK"
+
+        static var current: Provider {
+            let stored = UserDefaults.standard.string(forKey: "aiProvider")
+            return stored.flatMap(Provider.init(rawValue:)) ?? .appleFoundationModels
+        }
+    }
+
+    static var statusText: String {
+        switch Provider.current {
+        case .appleFoundationModels:
+            return foundationModelsStatusText
+        case .coreML:
+            return coreMLStatusText
+        case .localHeuristic:
+            return "Local heuristic mode - private fallback with no model accelerator."
+        case .mlx:
+            return "MLX provider is reserved for a future local model package. Falling back to the local heuristic."
+        case .openAICompatibleBYOK:
+            return "BYOK provider is reserved for explicit cloud routing. Falling back locally while cloud routing is unavailable."
+        }
+    }
+
     static func abstractCandidate(from pageText: String) -> String {
         let normalized = clean(pageText)
         guard !normalized.isEmpty else { return "" }
@@ -18,23 +51,112 @@ enum LocalPaperAI {
         return String(normalized.prefix(700)).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    static func explainSelection(_ text: String, in paper: Paper) -> String {
+    static func explainSelection(_ text: String, in paper: Paper) async -> String {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return "Select text in the PDF, then ask for an explanation."
         }
 
         let allText = paper.allText
         guard !allText.isEmpty else { return "No extractable text was found for context." }
+        let surrounding = context(around: text, in: allText)
 
-        let lower = text.lowercased()
+        switch Provider.current {
+        case .appleFoundationModels:
+            if let response = await foundationModelResponse(
+                instructions: "You explain dense research paper passages using only the provided context. Keep answers concise and cite the passage context.",
+                prompt: """
+                Explain the selected passage for a researcher.
 
-        let surrounding: String = {
-            guard let range = allText.lowercased().range(of: lower) else { return "" }
-            let start = allText.index(allText.startIndex, offsetBy: max(0, allText.distance(from: allText.startIndex, to: range.lowerBound) - 300))
-            let end = allText.index(range.upperBound, offsetBy: min(300, allText.distance(from: range.upperBound, to: allText.endIndex)))
-            return String(allText[start..<end])
-        }()
+                Selected passage:
+                \(text)
 
+                Nearby paper context:
+                \(surrounding)
+                """
+            ) {
+                return response
+            }
+        case .coreML:
+            if let response = try? coreMLTextResponse(
+                modelName: "PaperExplainer",
+                prompt: "\(text)\n\nContext:\n\(surrounding)"
+            ) {
+                return response
+            }
+        case .localHeuristic, .mlx, .openAICompatibleBYOK:
+            break
+        }
+
+        return heuristicExplanation(for: text, allText: allText, surrounding: surrounding)
+    }
+
+    static func summary(for paper: Paper) async -> String {
+        let text = String(clean(paper.allText).prefix(15_000))
+        guard !text.isEmpty else {
+            return "No extractable text was found. This paper may need OCR before AI features can summarize it."
+        }
+
+        switch Provider.current {
+        case .appleFoundationModels:
+            if let response = await foundationModelResponse(
+                instructions: "You summarize academic papers locally. Use only the provided text, be concise, and return bullet points.",
+                prompt: """
+                Summarize this research paper for a researcher. Include the central contribution, method, evidence, and limitations if present.
+
+                Title: \(paper.title)
+                Authors: \(paper.authors)
+
+                Paper text:
+                \(text)
+                """
+            ) {
+                return response
+            }
+        case .coreML:
+            if let response = try? coreMLTextResponse(modelName: "PaperSummarizer", prompt: text) {
+                return response
+            }
+        case .localHeuristic, .mlx, .openAICompatibleBYOK:
+            break
+        }
+
+        return heuristicSummary(for: paper, text: text)
+    }
+
+    static func extraction(for paper: Paper, kind: HighlightKind) async -> String {
+        let text = String(clean(paper.allText).prefix(30_000))
+        guard !text.isEmpty else {
+            return "No extractable text was found for this paper yet."
+        }
+
+        switch Provider.current {
+        case .appleFoundationModels:
+            if let response = await foundationModelResponse(
+                instructions: "You extract evidence from academic papers using only supplied text. Return no more than five bullets.",
+                prompt: """
+                Extract \(kind.rawValue.lowercased()) passages or claims from this paper. Quote or closely paraphrase only what appears in the text.
+
+                Paper text:
+                \(text)
+                """
+            ) {
+                return response
+            }
+        case .coreML:
+            if let response = try? coreMLTextResponse(
+                modelName: "PaperExtractor",
+                prompt: "Extract \(kind.rawValue.lowercased()):\n\(text)"
+            ) {
+                return response
+            }
+        case .localHeuristic, .mlx, .openAICompatibleBYOK:
+            break
+        }
+
+        return heuristicExtraction(from: text, kind: kind)
+    }
+
+    private static func heuristicExplanation(for text: String, allText: String, surrounding: String) -> String {
         let sentences = sentenceCandidates(from: surrounding).filter { $0.localizedCaseInsensitiveContains(text.prefix(40)) }
         var lines: [String] = ["Context around the selected passage:\n"]
         if sentences.isEmpty {
@@ -52,12 +174,7 @@ enum LocalPaperAI {
         return lines.joined(separator: "\n")
     }
 
-    static func summary(for paper: Paper) -> String {
-        let text = String(clean(paper.allText).prefix(15_000))
-        guard !text.isEmpty else {
-            return "No extractable text was found. This paper may need OCR before AI features can summarize it."
-        }
-
+    private static func heuristicSummary(for paper: Paper, text: String) -> String {
         let abstract = abstractCandidate(from: text)
         let sentences = sentenceCandidates(from: abstract.isEmpty ? text : abstract)
         let topSentences = sentences.prefix(4)
@@ -76,12 +193,7 @@ enum LocalPaperAI {
         return lines.joined(separator: "\n")
     }
 
-    static func extraction(for paper: Paper, kind: HighlightKind) -> String {
-        let text = String(clean(paper.allText).prefix(30_000))
-        guard !text.isEmpty else {
-            return "No extractable text was found for this paper yet."
-        }
-
+    private static func heuristicExtraction(from text: String, kind: HighlightKind) -> String {
         let keywords: [String]
         switch kind {
         case .claim:
@@ -111,6 +223,113 @@ enum LocalPaperAI {
         }
 
         return selected.map { "- \($0)" }.joined(separator: "\n")
+    }
+
+    private static func context(around text: String, in allText: String) -> String {
+        let lower = text.lowercased()
+        guard let range = allText.lowercased().range(of: lower) else {
+            return String(clean(allText).prefix(1_200))
+        }
+
+        let startOffset = max(0, allText.distance(from: allText.startIndex, to: range.lowerBound) - 700)
+        let endOffset = min(allText.count, allText.distance(from: allText.startIndex, to: range.upperBound) + 700)
+        let start = allText.index(allText.startIndex, offsetBy: startOffset)
+        let end = allText.index(allText.startIndex, offsetBy: endOffset)
+        return String(allText[start..<end])
+    }
+
+    private static var foundationModelsStatusText: String {
+        #if canImport(FoundationModels)
+        if #available(macOS 26.0, *) {
+            switch SystemLanguageModel.default.availability {
+            case .available:
+                return "Apple Foundation Models - on-device Apple Intelligence model available."
+            case .unavailable(let reason):
+                return "Apple Foundation Models unavailable (\(String(describing: reason))). Falling back locally."
+            }
+        }
+        #endif
+
+        return "Apple Foundation Models require macOS 26+. Falling back locally."
+    }
+
+    private static var coreMLStatusText: String {
+        let hasModel = ["PaperSummarizer", "PaperExtractor", "PaperExplainer"].contains { coreMLModelURL(named: $0) != nil }
+
+        if hasModel {
+            return "Core ML local mode - configured for all Apple compute units, including Neural Engine when the model supports it."
+        }
+
+        return "Core ML local mode - no compiled text model found yet; falling back to the local heuristic."
+    }
+
+    private static func foundationModelResponse(instructions: String, prompt: String) async -> String? {
+        #if canImport(FoundationModels)
+        if #available(macOS 26.0, *) {
+            guard case .available = SystemLanguageModel.default.availability else { return nil }
+
+            do {
+                let session = LanguageModelSession(instructions: instructions)
+                let response = try await session.respond(to: prompt)
+                return """
+                \(response.content)
+
+                Generated locally with Apple Foundation Models.
+                """
+            } catch {
+                return nil
+            }
+        }
+        #endif
+
+        return nil
+    }
+
+    private static func coreMLTextResponse(modelName: String, prompt: String) throws -> String? {
+        guard let modelURL = coreMLModelURL(named: modelName) else { return nil }
+
+        let configuration = MLModelConfiguration()
+        configuration.computeUnits = .all
+
+        let model = try MLModel(contentsOf: modelURL, configuration: configuration)
+        let description = model.modelDescription
+
+        guard let inputName = description.inputDescriptionsByName.first(where: { $0.value.type == .string })?.key,
+              let outputName = description.outputDescriptionsByName.first(where: { $0.value.type == .string })?.key else {
+            return nil
+        }
+
+        let input = try MLDictionaryFeatureProvider(dictionary: [
+            inputName: MLFeatureValue(string: prompt)
+        ])
+        let output = try model.prediction(from: input)
+
+        guard let text = output.featureValue(for: outputName)?.stringValue,
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+
+        return """
+        \(text)
+
+        Generated locally with Core ML using all available Apple compute units.
+        """
+    }
+
+    private static func coreMLModelURL(named modelName: String) -> URL? {
+        if let bundled = Bundle.main.url(forResource: modelName, withExtension: "mlmodelc") {
+            return bundled
+        }
+
+        guard let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+
+        let modelsDirectory = support
+            .appendingPathComponent("ResearchPaperReader", isDirectory: true)
+            .appendingPathComponent("Models", isDirectory: true)
+        return modelsDirectory.appendingPathComponent("\(modelName).mlmodelc", isDirectory: true)
+            .existingDirectory
     }
 
     static func sections(from text: String) -> [PaperSection] {
@@ -173,5 +392,15 @@ enum LocalPaperAI {
             .replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: #"[\t ]+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+private extension URL {
+    var existingDirectory: URL? {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            return nil
+        }
+        return self
     }
 }

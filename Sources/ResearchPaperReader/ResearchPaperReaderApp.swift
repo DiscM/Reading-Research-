@@ -1,5 +1,10 @@
 import SwiftUI
 
+private enum AppWindowMetrics {
+    static let minimumSize = CGSize(width: 960, height: 640)
+    static let defaultSize = CGSize(width: 1180, height: 760)
+}
+
 @main
 struct ResearchPaperReaderApp: App {
     @StateObject private var store = PaperStore()
@@ -8,7 +13,25 @@ struct ResearchPaperReaderApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(store)
-                .frame(minWidth: 1100, minHeight: 720)
+                .frame(
+                    minWidth: AppWindowMetrics.minimumSize.width,
+                    minHeight: AppWindowMetrics.minimumSize.height
+                )
+                .background {
+                    WindowBoundsEnforcer(
+                        minimumSize: AppWindowMetrics.minimumSize
+                    )
+                }
+        }
+        .defaultWindowPlacement { _, context in
+            WindowPlacement(
+                size: AppWindowMetrics.defaultSize.fitted(to: context.defaultDisplay.visibleRect.size)
+            )
+        }
+        .windowIdealPlacement { _, context in
+            WindowPlacement(
+                size: AppWindowMetrics.defaultSize.fitted(to: context.defaultDisplay.visibleRect.size)
+            )
         }
         .commands {
             CommandGroup(after: .newItem) {

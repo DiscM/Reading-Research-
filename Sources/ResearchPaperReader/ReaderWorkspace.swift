@@ -9,6 +9,8 @@ struct ReaderWorkspace: View {
     @State private var noteKind: HighlightKind = .highlight
     @State private var aiExtraction = ""
     @State private var aiExplanation = ""
+    @State private var isInspectorCollapsed = false
+    @State private var isGeneratingAI = false
 
     var body: some View {
         HSplitView {
@@ -18,36 +20,50 @@ struct ReaderWorkspace: View {
                 selectedPage: $selectedPage,
                 notes: paper.notes
             )
-            .frame(minWidth: 520)
+            .frame(minWidth: 420)
 
-            VStack(spacing: 0) {
-                PaperInspectorHeader(paper: $paper)
+            if !isInspectorCollapsed {
+                VStack(spacing: 0) {
+                    PaperInspectorHeader(paper: $paper)
 
-                TabView {
-                    notesPanel
-                        .tabItem {
-                            Label("Notes", systemImage: "note.text")
-                        }
+                    TabView {
+                        notesPanel
+                            .tabItem {
+                                Label("Notes", systemImage: "note.text")
+                            }
 
-                    outlinePanel
-                        .tabItem {
-                            Label("Outline", systemImage: "list.bullet.indent")
-                        }
+                        outlinePanel
+                            .tabItem {
+                                Label("Outline", systemImage: "list.bullet.indent")
+                            }
 
-                    aiPanel
-                        .tabItem {
-                            Label("AI", systemImage: "sparkles")
-                        }
+                        aiPanel
+                            .tabItem {
+                                Label("AI", systemImage: "sparkles")
+                            }
 
-                    metadataPanel
-                        .tabItem {
-                            Label("Details", systemImage: "info.circle")
-                        }
+                        metadataPanel
+                            .tabItem {
+                                Label("Details", systemImage: "info.circle")
+                            }
+                    }
                 }
+                .frame(minWidth: 300, idealWidth: 380, maxWidth: 520)
             }
-            .frame(minWidth: 360, idealWidth: 430, maxWidth: 540)
         }
         .navigationTitle(paper.title)
+        .toolbar {
+            ToolbarItem {
+                Button {
+                    withAnimation {
+                        isInspectorCollapsed.toggle()
+                    }
+                } label: {
+                    Label(isInspectorCollapsed ? "Show Inspector" : "Hide Inspector", systemImage: "sidebar.right")
+                }
+                .help(isInspectorCollapsed ? "Show Inspector" : "Hide Inspector")
+            }
+        }
     }
 
     private var notesPanel: some View {
@@ -169,12 +185,15 @@ struct ReaderWorkspace: View {
         }
         .sheet(item: $selectedSection) { section in
             VStack(alignment: .leading, spacing: 12) {
-                HStack {
+                HStack(alignment: .top) {
                     Text(section.title)
                         .font(.title2.bold())
+                        .lineLimit(2)
+                        .layoutPriority(0)
                     Spacer()
                     Button("Close") { selectedSection = nil }
                         .keyboardShortcut(.escape)
+                        .layoutPriority(1)
                 }
                 .padding([.top, .horizontal])
 
@@ -195,36 +214,53 @@ struct ReaderWorkspace: View {
     private var aiPanel: some View {
             ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    Button {
-                        store.generateSummary(for: paper)
-                    } label: {
-                        Label("Summarize", systemImage: "text.badge.checkmark")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut("s", modifiers: .command)
-
-                    Menu {
-                        ForEach([HighlightKind.claim, .method, .evidence, .limitation]) { kind in
-                            Button(kind.rawValue) {
-                                aiExtraction = store.generateExtraction(for: paper, kind: kind)
+                Grid(horizontalSpacing: 8, verticalSpacing: 8) {
+                    GridRow {
+                        Button {
+                            runAIAction {
+                                await store.generateSummary(for: paper)
                             }
+                        } label: {
+                            Label("Summarize", systemImage: "text.badge.checkmark")
+                                .frame(maxWidth: .infinity)
                         }
-                    } label: {
-                        Label("Extract", systemImage: "line.3.horizontal.decrease.circle")
+                        .buttonStyle(.borderedProminent)
+                        .keyboardShortcut("s", modifiers: .command)
+                        .disabled(isGeneratingAI)
+
+                        Menu {
+                            ForEach([HighlightKind.claim, .method, .evidence, .limitation]) { kind in
+                                Button(kind.rawValue) {
+                                    runAIAction {
+                                        aiExtraction = await store.generateExtraction(for: paper, kind: kind)
+                                    }
+                                }
+                            }
+                        } label: {
+                            Label("Extract", systemImage: "line.3.horizontal.decrease.circle")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .disabled(isGeneratingAI)
                     }
 
-                    Button {
-                        aiExplanation = LocalPaperAI.explainSelection(selectedText, in: paper)
-                    } label: {
-                        Label("Explain Selection", systemImage: "questionmark.bubble")
-                    }
-                    .disabled(selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    GridRow {
+                        Button {
+                            let textToExplain = selectedText
+                            runAIAction {
+                                aiExplanation = await LocalPaperAI.explainSelection(textToExplain, in: paper)
+                            }
+                        } label: {
+                            Label("Explain Selection", systemImage: "questionmark.bubble")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .disabled(isGeneratingAI || selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
-                    Button {
-                        store.exportMarkdown(for: paper)
-                    } label: {
-                        Label("Export", systemImage: "square.and.arrow.up")
+                        Button {
+                            store.exportMarkdown(for: paper)
+                        } label: {
+                            Label("Export", systemImage: "square.and.arrow.up")
+                                .frame(maxWidth: .infinity)
+                        }
                     }
                 }
 
@@ -249,6 +285,15 @@ struct ReaderWorkspace: View {
                 }
             }
             .padding()
+        }
+    }
+
+    private func runAIAction(_ action: @escaping () async -> Void) {
+        guard !isGeneratingAI else { return }
+        isGeneratingAI = true
+        Task {
+            await action()
+            isGeneratingAI = false
         }
     }
 
@@ -302,17 +347,19 @@ private struct PaperInspectorHeader: View {
 
 private struct AIStatusBadge: View {
     @AppStorage("aiMode") private var aiMode = "Private Local"
+    @AppStorage("aiProvider") private var aiProvider = "Apple Foundation Models"
 
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "lock.shield")
-            Text("\(aiMode) mode")
+            Text("\(aiMode) - \(aiProvider)")
             Spacer()
         }
         .font(.caption.weight(.medium))
         .foregroundStyle(.secondary)
         .padding(8)
         .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+        .help(LocalPaperAI.statusText)
     }
 }
 

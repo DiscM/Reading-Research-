@@ -82,13 +82,15 @@ final class PaperStore: ObservableObject {
         flushSave()
     }
 
-    func generateSummary(for paper: Paper) {
+    func generateSummary(for paper: Paper) async {
         guard let index = papers.firstIndex(where: { $0.id == paper.id }) else { return }
-        papers[index].aiSummary = LocalPaperAI.summary(for: papers[index])
+        let summary = await LocalPaperAI.summary(for: papers[index])
+        guard let updatedIndex = papers.firstIndex(where: { $0.id == paper.id }) else { return }
+        papers[updatedIndex].aiSummary = summary
     }
 
-    func generateExtraction(for paper: Paper, kind: HighlightKind) -> String {
-        LocalPaperAI.extraction(for: paper, kind: kind)
+    func generateExtraction(for paper: Paper, kind: HighlightKind) async -> String {
+        await LocalPaperAI.extraction(for: paper, kind: kind)
     }
 
     func addNote(to paper: Paper, kind: HighlightKind, quote: String, body: String, page: Int?) {

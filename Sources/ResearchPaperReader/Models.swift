@@ -1,7 +1,7 @@
 import AppKit
 import Foundation
 
-enum ReadingStatus: String, CaseIterable, Codable, Identifiable {
+enum ReadingStatus: String, CaseIterable, Codable, Identifiable, Sendable {
     case unread = "Unread"
     case skimmed = "Skimmed"
     case reading = "Reading"
@@ -13,7 +13,7 @@ enum ReadingStatus: String, CaseIterable, Codable, Identifiable {
     var id: String { rawValue }
 }
 
-enum HighlightKind: String, CaseIterable, Codable, Identifiable {
+enum HighlightKind: String, CaseIterable, Codable, Identifiable, Sendable {
     case highlight = "Highlight"
     case claim = "Claim"
     case evidence = "Evidence"
@@ -37,7 +37,7 @@ enum HighlightKind: String, CaseIterable, Codable, Identifiable {
     }
 }
 
-struct PaperSection: Identifiable, Codable, Equatable {
+struct PaperSection: Identifiable, Codable, Equatable, Sendable {
     var id = UUID()
     var kind: SectionKind
     var title: String
@@ -45,7 +45,7 @@ struct PaperSection: Identifiable, Codable, Equatable {
     var order: Int
 }
 
-enum SectionKind: String, CaseIterable, Codable, Identifiable {
+enum SectionKind: String, CaseIterable, Codable, Identifiable, Sendable {
     case abstract = "Abstract"
     case introduction = "Introduction"
     case relatedWork = "Related Work"
@@ -62,7 +62,7 @@ enum SectionKind: String, CaseIterable, Codable, Identifiable {
     var id: String { rawValue }
 }
 
-struct PaperNote: Identifiable, Codable, Equatable {
+struct PaperNote: Identifiable, Codable, Equatable, Sendable {
     var id = UUID()
     var kind: HighlightKind
     var quote: String
@@ -71,7 +71,7 @@ struct PaperNote: Identifiable, Codable, Equatable {
     var createdAt = Date()
 }
 
-struct Paper: Identifiable, Codable, Equatable {
+struct Paper: Identifiable, Codable, Equatable, Sendable {
     var id = UUID()
     var title: String
     var authors: String

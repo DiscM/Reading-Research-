@@ -17,7 +17,7 @@ struct ContentView: View {
 
                 PaperList(store: store, selectedPaperID: $selectedPaperID, searchText: $searchText, debouncedSearch: $debouncedSearch)
             }
-            .navigationSplitViewColumnWidth(min: 290, ideal: 340)
+            .navigationSplitViewColumnWidth(min: 240, ideal: 320)
             .onTapGesture { searchFocused = false }
             .onKeyPress(.escape) { searchFocused = false; return .handled }
             .background {
