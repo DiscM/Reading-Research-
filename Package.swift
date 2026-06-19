@@ -14,6 +14,10 @@ let package = Package(
         .executableTarget(
             name: "ResearchPaperReader",
             path: "Sources/ResearchPaperReader"
+        ),
+        .testTarget(
+            name: "ResearchPaperReaderTests",
+            dependencies: ["ResearchPaperReader"]
         )
     ]
 )

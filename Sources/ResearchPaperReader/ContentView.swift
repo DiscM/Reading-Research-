@@ -41,7 +41,7 @@ struct ContentView: View {
                     Button {
                         store.importWithOpenPanel()
                     } label: {
-                        Label("Import Papers", systemImage: "plus")
+                        Label("Import PDFs", systemImage: "plus")
                     }
                     .background {
                         Button("") { store.importWithOpenPanel() }
@@ -65,14 +65,23 @@ struct ContentView: View {
             if isSelecting && !selectedIDs.isEmpty {
                 ToolbarItemGroup {
                     Button(role: .destructive) {
-                        let papersToDelete = selectedIDs.compactMap { id in store.papers.first { $0.id == id } }
-                        for p in papersToDelete { store.delete(p) }
-                        selectedIDs = []
+                        deleteSelected()
                     } label: {
                         Label("Delete (\(selectedIDs.count))", systemImage: "trash")
                     }
                 }
             }
+        }
+        .alert(
+            "Research Paper Reader",
+            isPresented: Binding(
+                get: { store.lastError != nil },
+                set: { if !$0 { store.lastError = nil } }
+            )
+        ) {
+            Button("OK") { store.lastError = nil }
+        } message: {
+            Text(store.lastError ?? "An unknown error occurred.")
         }
     }
 
@@ -80,7 +89,7 @@ struct ContentView: View {
     private var sidebar: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Paper Library")
+                Text("Document Library")
                     .font(.title2.bold())
 
                 HStack {
@@ -121,9 +130,8 @@ struct ContentView: View {
             if store.isImporting {
                 HStack(spacing: 8) {
                     ProgressView()
-                        .scaleEffect(0.7)
-                        .frame(width: 12, height: 12)
-                    Text("Enriching \(store.enrichmentCount)...")
+                        .controlSize(.small)
+                    Text("Processing \(store.enrichmentCount)...")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -164,9 +172,7 @@ struct ContentView: View {
                         Spacer()
 
                         Button(role: .destructive) {
-                            let papersToDelete = selectedIDs.compactMap { id in store.papers.first { $0.id == id } }
-                            for p in papersToDelete { store.delete(p) }
-                            selectedIDs = []
+                            deleteSelected()
                         } label: {
                             Label("Delete", systemImage: "trash")
                                 .font(.caption)
@@ -190,7 +196,7 @@ struct ContentView: View {
             }
 
             if !isSelecting {
-                Text("\(store.papers.count) paper\(store.papers.count == 1 ? "" : "s") in library")
+                Text("\(store.papers.count) document\(store.papers.count == 1 ? "" : "s") in library")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                     .padding(.bottom, 8)
@@ -213,6 +219,14 @@ struct ContentView: View {
         }
     }
 
+    private func deleteSelected() {
+        for id in selectedIDs {
+            guard let paper = store.papers.first(where: { $0.id == id }) else { continue }
+            store.delete(paper)
+        }
+        selectedIDs = []
+    }
+
     private func toggleSelection(_ id: Paper.ID) {
         if selectedIDs.contains(id) {
             selectedIDs.remove(id)
@@ -221,15 +235,23 @@ struct ContentView: View {
         }
     }
 
-    private var selectedIndex: Int? {
+    private var selectedPaperBinding: Binding<Paper>? {
         guard let selectedPaperID else { return nil }
-        return store.papers.firstIndex { $0.id == selectedPaperID }
+        return Binding(
+            get: {
+                store.papers.first(where: { $0.id == selectedPaperID }) ?? Paper(title: "", authors: "", year: "", abstract: "", filePath: "")
+            },
+            set: { updatedPaper in
+                guard let index = store.papers.firstIndex(where: { $0.id == selectedPaperID }) else { return }
+                store.papers[index] = updatedPaper
+            }
+        )
     }
 
     @ViewBuilder
     private var detail: some View {
-        if let index = selectedIndex {
-            ReaderWorkspace(paper: $store.papers[index], navigateToPage: $navigateToPage)
+        if let selectedPaperBinding {
+            ReaderWorkspace(paper: selectedPaperBinding, navigateToPage: $navigateToPage)
                 .environmentObject(store)
                 .transition(.asymmetric(
                     insertion: .move(edge: .trailing).combined(with: .opacity),
@@ -279,9 +301,10 @@ private struct SidebarPaperRow: View {
                         .frame(width: 16)
                 }
 
-                Circle()
-                    .fill(statusColor)
-                    .frame(width: 7, height: 7)
+                Image(systemName: paper.documentKind.systemImage)
+                    .font(.caption)
+                    .foregroundStyle(statusColor)
+                    .frame(width: 14)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(paper.title)
@@ -289,7 +312,7 @@ private struct SidebarPaperRow: View {
                         .lineLimit(2)
                         .foregroundStyle(.primary)
 
-                    Text(paper.authors)
+                    Text(paper.authors.isEmpty ? paper.documentKind.rawValue : paper.authors)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)

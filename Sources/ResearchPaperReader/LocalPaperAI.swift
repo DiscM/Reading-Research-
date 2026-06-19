@@ -63,14 +63,14 @@ enum LocalPaperAI {
         switch Provider.current {
         case .appleFoundationModels:
             if let response = await foundationModelResponse(
-                instructions: "You explain dense research paper passages using only the provided context. Keep answers concise and cite the passage context.",
+                instructions: "Explain only the selected passage using the nearby context. Do not summarize the document or the surrounding context. Return clean Markdown with short paragraphs and bullets only when useful. Do not add a title. Keep the explanation concise and grounded in the supplied text.",
                 prompt: """
-                Explain the selected passage for a researcher.
+                Explain the selected passage from this \(paper.documentKind.rawValue.lowercased()). Do not provide a document summary. Clarify the passage's meaning, important terms, and how it relates to the nearby context.
 
                 Selected passage:
                 \(text)
 
-                Nearby paper context:
+                Nearby document context:
                 \(surrounding)
                 """
             ) {
@@ -93,20 +93,20 @@ enum LocalPaperAI {
     static func summary(for paper: Paper) async -> String {
         let text = String(clean(paper.allText).prefix(15_000))
         guard !text.isEmpty else {
-            return "No extractable text was found. This paper may need OCR before AI features can summarize it."
+            return "No extractable text was found. This document may need OCR before AI features can summarize it."
         }
 
         switch Provider.current {
         case .appleFoundationModels:
             if let response = await foundationModelResponse(
-                instructions: "You summarize academic papers locally. Use only the provided text, be concise, and return bullet points.",
+                instructions: "You summarize study documents locally. Use only the provided text. Return clean Markdown with concise bullets, bold key terms when useful, and no top-level title.",
                 prompt: """
-                Summarize this research paper for a researcher. Include the central contribution, method, evidence, and limitations if present.
+                Summarize this \(paper.documentKind.rawValue.lowercased()). Include \(paper.documentKind.summaryFocus) when present.
 
                 Title: \(paper.title)
-                Authors: \(paper.authors)
+                Creator or author: \(paper.authors)
 
-                Paper text:
+                Document text:
                 \(text)
                 """
             ) {
@@ -126,17 +126,17 @@ enum LocalPaperAI {
     static func extraction(for paper: Paper, kind: HighlightKind) async -> String {
         let text = String(clean(paper.allText).prefix(30_000))
         guard !text.isEmpty else {
-            return "No extractable text was found for this paper yet."
+            return "No extractable text was found for this document yet."
         }
 
         switch Provider.current {
         case .appleFoundationModels:
             if let response = await foundationModelResponse(
-                instructions: "You extract evidence from academic papers using only supplied text. Return no more than five bullets.",
+                instructions: "You extract useful passages from study documents using only supplied text. Return clean Markdown with no more than five bullets and no top-level title.",
                 prompt: """
-                Extract \(kind.rawValue.lowercased()) passages or claims from this paper. Quote or closely paraphrase only what appears in the text.
+                Extract \(kind.rawValue.lowercased()) passages or claims from this \(paper.documentKind.rawValue.lowercased()). Quote or closely paraphrase only what appears in the text.
 
-                Paper text:
+                Document text:
                 \(text)
                 """
             ) {
@@ -158,7 +158,7 @@ enum LocalPaperAI {
 
     private static func heuristicExplanation(for text: String, allText: String, surrounding: String) -> String {
         let sentences = sentenceCandidates(from: surrounding).filter { $0.localizedCaseInsensitiveContains(text.prefix(40)) }
-        var lines: [String] = ["Context around the selected passage:\n"]
+        var lines: [String] = ["**Nearby context**\n"]
         if sentences.isEmpty {
             let excerpt = surrounding.trimmingCharacters(in: .whitespacesAndNewlines)
             lines.append("> \(excerpt)")
@@ -169,7 +169,7 @@ enum LocalPaperAI {
         }
 
         lines.append("")
-        lines.append("This is a local heuristic context extraction. A model-router with Apple Foundation Models, Core ML, or cloud AI would provide a richer explanation.")
+        lines.append("*This is a local heuristic context extraction. A configured language model can provide a richer explanation.*")
 
         return lines.joined(separator: "\n")
     }
@@ -179,7 +179,7 @@ enum LocalPaperAI {
         let sentences = sentenceCandidates(from: abstract.isEmpty ? text : abstract)
         let topSentences = sentences.prefix(4)
 
-        var lines = ["Local summary generated from on-device PDF text extraction:"]
+        var lines = ["**On-device summary**"]
         for sentence in topSentences {
             lines.append("- \(sentence)")
         }
@@ -189,7 +189,7 @@ enum LocalPaperAI {
         }
 
         lines.append("")
-        lines.append("This MVP uses a local heuristic summarizer. The model-router layer is ready to be replaced with Apple Foundation Models, Core ML, MLX, Ollama, or BYOK cloud providers.")
+        lines.append("*Generated from on-device \(paper.documentKind.rawValue.lowercased()) text extraction.*")
         return lines.joined(separator: "\n")
     }
 
@@ -272,7 +272,9 @@ enum LocalPaperAI {
                 return """
                 \(response.content)
 
-                Generated locally with Apple Foundation Models.
+                ---
+
+                *Generated locally with Apple Foundation Models.*
                 """
             } catch {
                 return nil
@@ -310,7 +312,9 @@ enum LocalPaperAI {
         return """
         \(text)
 
-        Generated locally with Core ML using all available Apple compute units.
+        ---
+
+        *Generated locally with Core ML using all available Apple compute units.*
         """
     }
 

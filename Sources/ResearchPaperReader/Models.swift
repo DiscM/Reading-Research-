@@ -1,6 +1,41 @@
 import AppKit
 import Foundation
 
+enum DocumentKind: String, CaseIterable, Codable, Identifiable, Sendable {
+    case researchPaper = "Research Paper"
+    case lectureSlides = "Lecture Slides"
+    case studyNotes = "Study Notes"
+    case bookChapter = "Book or Chapter"
+    case generalPDF = "General PDF"
+
+    var id: String { rawValue }
+
+    var systemImage: String {
+        switch self {
+        case .researchPaper: "doc.text.magnifyingglass"
+        case .lectureSlides: "rectangle.on.rectangle.angled"
+        case .studyNotes: "note.text"
+        case .bookChapter: "book.closed"
+        case .generalPDF: "doc.richtext"
+        }
+    }
+
+    var summaryFocus: String {
+        switch self {
+        case .researchPaper:
+            "the central contribution, method, evidence, and limitations"
+        case .lectureSlides:
+            "the learning objectives, key concepts, definitions, examples, and takeaways"
+        case .studyNotes:
+            "the main topics, definitions, formulas, open questions, and study priorities"
+        case .bookChapter:
+            "the thesis, major arguments, concepts, supporting evidence, and conclusions"
+        case .generalPDF:
+            "the document's purpose, main ideas, important facts, and action items"
+        }
+    }
+}
+
 enum ReadingStatus: String, CaseIterable, Codable, Identifiable, Sendable {
     case unread = "Unread"
     case skimmed = "Skimmed"
@@ -70,10 +105,18 @@ struct PaperNote: Identifiable, Codable, Equatable, Sendable {
     var body: String
     var page: Int?
     var createdAt = Date()
+    
+    var isAreaNote: Bool = false
+    var rectX: Double? = nil
+    var rectY: Double? = nil
+    var rectWidth: Double? = nil
+    var rectHeight: Double? = nil
+    var imageFileName: String? = nil
 }
 
 struct Paper: Identifiable, Equatable, Sendable {
     var id = UUID()
+    var documentKind: DocumentKind = .researchPaper
     var title: String
     var authors: String
     var year: String
@@ -92,22 +135,49 @@ struct Paper: Identifiable, Equatable, Sendable {
     var publicationNumber: String = ""
     var venue: String = ""
     var enrichmentFailed: Bool = false
+    var lastReadPage: Int?
+    var lastReadAt: Date?
 
     var fileURL: URL {
         URL(fileURLWithPath: filePath)
+    }
+
+    var pageCount: Int {
+        allTextPageOffsets.count
+    }
+
+    var canResumeReading: Bool {
+        guard let lastReadPage else { return false }
+        return lastReadPage > 1
+    }
+
+    var readingProgress: Double? {
+        guard let lastReadPage, pageCount > 0 else { return nil }
+        return min(1, max(0, Double(lastReadPage) / Double(pageCount)))
+    }
+
+    mutating func recordReadingProgress(page: Int, at date: Date = Date()) {
+        guard page > 0 else { return }
+        lastReadPage = page
+        lastReadAt = date
+
+        if page > 1, status == .unread || status == .skimmed {
+            status = .reading
+        }
     }
 }
 
 extension Paper: Codable {
     enum CodingKeys: String, CodingKey {
-        case id, title, authors, year, abstract, filePath, importedAt, status
+        case id, documentKind, title, authors, year, abstract, filePath, importedAt, status
         case tags, sections, notes, aiSummary, allText, allTextPageOffsets
-        case doi, arxivId, publicationNumber, venue, enrichmentFailed
+        case doi, arxivId, publicationNumber, venue, enrichmentFailed, lastReadPage, lastReadAt
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        documentKind = try c.decodeIfPresent(DocumentKind.self, forKey: .documentKind) ?? .researchPaper
         title = try c.decode(String.self, forKey: .title)
         authors = try c.decode(String.self, forKey: .authors)
         year = try c.decodeIfPresent(String.self, forKey: .year) ?? ""
@@ -126,11 +196,14 @@ extension Paper: Codable {
         publicationNumber = try c.decodeIfPresent(String.self, forKey: .publicationNumber) ?? ""
         venue = try c.decodeIfPresent(String.self, forKey: .venue) ?? ""
         enrichmentFailed = try c.decodeIfPresent(Bool.self, forKey: .enrichmentFailed) ?? false
+        lastReadPage = try c.decodeIfPresent(Int.self, forKey: .lastReadPage)
+        lastReadAt = try c.decodeIfPresent(Date.self, forKey: .lastReadAt)
     }
 
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
+        try c.encode(documentKind, forKey: .documentKind)
         try c.encode(title, forKey: .title)
         try c.encode(authors, forKey: .authors)
         try c.encode(year, forKey: .year)
@@ -149,6 +222,8 @@ extension Paper: Codable {
         try c.encode(publicationNumber, forKey: .publicationNumber)
         try c.encode(venue, forKey: .venue)
         try c.encode(enrichmentFailed, forKey: .enrichmentFailed)
+        try c.encodeIfPresent(lastReadPage, forKey: .lastReadPage)
+        try c.encodeIfPresent(lastReadAt, forKey: .lastReadAt)
     }
 }
 
@@ -159,13 +234,15 @@ extension Array where Element == Paper {
             result = result.filter { $0.status == status }
         }
         let s = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fullTextQuery = debouncedSearch.trimmingCharacters(in: .whitespacesAndNewlines)
         if !s.isEmpty {
             result = result.filter { p in
                 p.title.localizedCaseInsensitiveContains(s)
                 || p.authors.localizedCaseInsensitiveContains(s)
+                || p.documentKind.rawValue.localizedCaseInsensitiveContains(s)
                 || p.tags.joined(separator: " ").localizedCaseInsensitiveContains(s)
                 || p.notes.contains { $0.body.localizedCaseInsensitiveContains(s) || $0.quote.localizedCaseInsensitiveContains(s) }
-                || p.allText.localizedCaseInsensitiveContains(debouncedSearch)
+                || (!fullTextQuery.isEmpty && p.allText.localizedCaseInsensitiveContains(fullTextQuery))
             }
         }
         return result

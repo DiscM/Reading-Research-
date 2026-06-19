@@ -35,7 +35,7 @@ struct ResearchPaperReaderApp: App {
         }
         .commands {
             CommandGroup(after: .newItem) {
-                Button("Import Papers...") {
+                Button("Import PDF Documents...") {
                     store.importWithOpenPanel()
                 }
                 .keyboardShortcut("o", modifiers: [.command])

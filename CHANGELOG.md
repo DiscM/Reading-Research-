@@ -1,5 +1,37 @@
 # Changelog
 
+## v0.9.1 — 2026-06-19
+
+### Fixed
+
+- **Annotation cleanup backward compatibility** — Both `cleanupAnnotations` and `syncAnnotations` now also remove annotations with the old `"ResearchPaperReader"` key (v0.8.0 convention), preventing orphaned annotations from accumulating when switching papers.
+- **Same-page rect navigation** — Tapping two area notes on the same page now correctly navigates to each rect. Added `lastNavigatedRect` tracking so rect changes trigger navigation even when the page hasn't changed.
+
+### Changed
+
+- **Deduplicated temp image cleanup** — Extracted the three identical `cleanupTempImage()` blocks across `onDisappear`, `onChange(of: paper.id)`, and `onChange(of: cropResult)` into a single private helper method.
+
+## v0.9.0 — 2026-06-19
+
+### Added
+
+- **PDF Area Notes (Image Crop Annotation)** — Introduced a drag-selection crop tool to annotate figures, charts, and equations. Dragging a rectangle extracts a high-resolution PNG of the region, shows a live crop preview in the editor, and renders visual thumbnails in the notes list.
+- **Native PDF Area Highlights** — Draws native `.square` annotations with the category color border and a 15% transparent interior fill over cropped page regions. Tapping an area note automatically scrolls and zooms to center the PDF view on its bounds.
+- **Hover Note Tooltips** — Hovering over any text highlight annotation for 2 seconds shows a floating popover HUD displaying the note's category and body content next to the cursor.
+- **Automatic Note Image Cleanup** — Image crop files are deleted from the disk when their corresponding notes are deleted.
+- **Model Round-Trip Tests** — Added `areaNotesSurviveSerializationRoundTrip()` to verify serialization stability of the new coordinate and image filename note properties.
+
+## v0.8.0 — 2026-06-19
+
+### Added
+
+- **Native PDF Search Navigation** — Replaced the mock find bar with native PDFKit search capabilities using `PDFDocument.findString`. Users can search document text, view the exact match count, and use chevron buttons to cycle through highlights and scroll directly to selections in the PDF view.
+- **Interactive Note Navigation** — Note rows in the Notes inspector panel are now clickable. Tapping a note immediately scrolls the PDF reader to the note's corresponding page, with hover animations indicating interactivity.
+- **Note Deletion** — Added a trash icon button next to each note. Users can delete individual notes from the paper, which automatically triggers a library save.
+- **Document Metadata & Tag Editor** — Added a detail-editing sheet presented from the inspector header via a pencil icon. Users can manually correct a document's title, authors, publication year, venue, abstract, and manage tags using an interactive tag manager.
+- **Custom Tag Wrapping FlowLayout** — Implemented a SwiftUI custom `FlowLayout` to arrange tag capsules nicely with wrapping support.
+- **Model Stability Tests** — Added `paperTagsAndNotesModificationWorks()` to verify tag and note editing operations round-trip properly via JSON serialization.
+
 ## v0.7.0 — 2026-06-16
 
 ### Added

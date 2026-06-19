@@ -7,6 +7,7 @@ import FoundationModels
 struct MetadataService {
     static func enrich(_ paper: Paper) async -> Paper {
         var p = paper
+        guard p.documentKind == .researchPaper else { return p }
 
         let firstPage = String(p.allText.prefix(3_000))
 

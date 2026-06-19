@@ -22,6 +22,18 @@ struct SelectionScreen: View {
             .sorted(by: sortOrder)
     }
 
+    private var continueReadingPapers: [Paper] {
+        store.papers
+            .filter { $0.status == .reading && $0.canResumeReading }
+            .sorted { ($0.lastReadAt ?? .distantPast) > ($1.lastReadAt ?? .distantPast) }
+    }
+
+    private var showsContinueReading: Bool {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && statusFilter == nil
+            && !continueReadingPapers.isEmpty
+    }
+
     var body: some View {
         Group {
             if store.papers.isEmpty {
@@ -35,7 +47,7 @@ struct SelectionScreen: View {
         .onDrop(of: [.fileURL], isTargeted: nil) { _ in
             let urls = NSPasteboard.general.readObjects(forClasses: [NSURL.self]) as? [URL] ?? []
             let pdfs = urls.filter { $0.pathExtension.lowercased() == "pdf" }
-            if !pdfs.isEmpty { store.importPDFs(pdfs) }
+            if !pdfs.isEmpty { store.importDocuments(pdfs) }
             return !pdfs.isEmpty
         }
     }
@@ -47,18 +59,18 @@ struct SelectionScreen: View {
                 .foregroundStyle(.secondary)
                 .symbolEffect(.bounce, options: .nonRepeating)
 
-            Text("Your research library is empty.")
+            Text("Your document library is empty.")
                 .font(.title3)
                 .foregroundStyle(.secondary)
 
-            Text("Import a PDF to get started.")
+            Text("Import research papers, lecture slides, study notes, or other PDFs.")
                 .font(.callout)
                 .foregroundStyle(.tertiary)
 
             Button {
                 store.importWithOpenPanel()
             } label: {
-                Label("Import Papers", systemImage: "plus")
+                Label("Import PDFs", systemImage: "plus")
             }
             .buttonStyle(.borderedProminent)
             .padding(.top, 8)
@@ -73,7 +85,7 @@ struct SelectionScreen: View {
                 .foregroundStyle(.secondary)
                 .symbolEffect(.pulse, options: .nonRepeating)
 
-            Text("No papers match your search.")
+            Text("No documents match your search.")
                 .font(.title3)
                 .foregroundStyle(.secondary)
 
@@ -90,6 +102,14 @@ struct SelectionScreen: View {
                 header
                     .padding(.horizontal)
                     .padding(.top, 8)
+
+                if showsContinueReading {
+                    ContinueReadingShelf(
+                        papers: Array(continueReadingPapers.prefix(6)),
+                        selectedPaperID: $selectedPaperID
+                    )
+                    .padding(.horizontal)
+                }
 
                 ForEach(papers) { paper in
                     PaperCard(paper: paper, isSelected: selectedPaperID == paper.id)
@@ -112,7 +132,7 @@ struct SelectionScreen: View {
 
     private var header: some View {
         HStack {
-            Text("\(papers.count) paper\(papers.count == 1 ? "" : "s")")
+            Text("\(papers.count) document\(papers.count == 1 ? "" : "s")")
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(.secondary)
 
@@ -159,18 +179,26 @@ private struct PaperCard: View {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(alignment: .top) {
-                        Text(paper.title)
-                            .font(.headline.weight(.semibold))
-                            .lineLimit(2)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(paper.title)
+                                .font(.headline.weight(.semibold))
+                                .lineLimit(2)
+
+                            Label(paper.documentKind.rawValue, systemImage: paper.documentKind.systemImage)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
 
                         statusBadge
                     }
 
-                    Text(paper.authors)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    if !paper.authors.isEmpty {
+                        Text(paper.authors)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
 
                 if !paper.abstract.isEmpty {
@@ -193,6 +221,12 @@ private struct PaperCard: View {
                         Label("\(paper.notes.count)", systemImage: "note.text")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                    }
+
+                    if let lastReadPage = paper.lastReadPage, lastReadPage > 1 {
+                        Label("Page \(lastReadPage)", systemImage: "bookmark.fill")
+                            .font(.caption)
+                            .foregroundStyle(.green)
                     }
 
                     if !paper.year.isEmpty {
@@ -268,5 +302,68 @@ private struct PaperCard: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
             .background(statusColor.opacity(0.12), in: Capsule())
+    }
+}
+
+private struct ContinueReadingShelf: View {
+    let papers: [Paper]
+    @Binding var selectedPaperID: Paper.ID?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Continue Reading", systemImage: "bookmark.fill")
+                .font(.headline)
+                .foregroundStyle(.primary)
+
+            ScrollView(.horizontal) {
+                HStack(spacing: 10) {
+                    ForEach(papers) { paper in
+                        Button {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                selectedPaperID = paper.id
+                            }
+                        } label: {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Label(paper.documentKind.rawValue, systemImage: paper.documentKind.systemImage)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+
+                                Text(paper.title)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(2)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                                Spacer(minLength: 0)
+
+                                if let progress = paper.readingProgress {
+                                    ProgressView(value: progress)
+                                        .tint(.green)
+                                }
+
+                                Text(pageLabel(for: paper))
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(12)
+                            .frame(width: 220, height: 126, alignment: .leading)
+                            .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 10))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(.quaternary, lineWidth: 1)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .scrollIndicators(.hidden)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func pageLabel(for paper: Paper) -> String {
+        guard let page = paper.lastReadPage else { return "Reading" }
+        return paper.pageCount > 0 ? "Page \(page) of \(paper.pageCount)" : "Page \(page)"
     }
 }
