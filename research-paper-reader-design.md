@@ -853,12 +853,17 @@ BYOK can be available in Pro or Teams while still charging for app features, syn
 - ✅ **Go to page** (⌘G dialog)
 - ✅ **Zoom controls** (toolbar buttons + live percentage + trackpad)
 - ✅ **Collapsible AI sections** (Summary + Explanation sub-tabs)
+- ✅ **Collections and smart folders** (nested manual collections + compound live rules)
+- ✅ **Citation interoperability** (BibTeX/RIS import/export, citation keys, duplicate merging)
+- ✅ **Cross-paper evidence tables** (editable source-linked cells + verification state)
+- ✅ **Local semantic retrieval** (on-device sentence embeddings + lexical fallback)
+- ✅ **Grounded library chat** (extractive answers with page-linked evidence)
+- ✅ **Synthesis writing workspaces** (multi-paper outlines, citation keys, editable drafts)
+- ✅ **Citation graph, discovery, and alerts** (local graph + CrossRef/OpenAlex workflows)
 
 ### MVP Not Yet
 
 - iPad/iPhone app (Mac-only for MVP)
-- ✔️ Local embeddings (semantic search deferred)
-- ❌ Collections (tags only)
 - ❌ Citation popovers
 - ❌ BYOK provider wiring (UI exists, routing not wired)
 - ❌ iCloud sync for notes and metadata
@@ -870,6 +875,8 @@ BYOK can be available in Pro or Teams while still charging for app features, syn
 - ❌ Collaborative live annotation
 
 ## 17. Implementation Roadmap
+
+The roadmap below preserves the original phase plan. For current priorities, newly researched competitive features, dependencies, and implementation status reconciled with the changelog, use [`PRODUCT_DEVELOPMENT_PATH.md`](PRODUCT_DEVELOPMENT_PATH.md) as the living execution reference.
 
 ### Phase 1: Foundation ✅ Done
 
@@ -932,7 +939,7 @@ Goals:
 Steps:
 
 1. ✅ Add AI task abstraction (LocalPaperAI enum with Provider routing).
-2. ❌ Local embeddings (semantic search deferred).
+2. ✅ Local sentence embeddings with lexical fallback (persistent incremental indexing deferred).
 3. ✅ Add retrieval over current paper.
 4. ✅ Add selected-text explanation.
 5. ✅ Add section summary (via Outline / sidebar sections).
@@ -1002,7 +1009,7 @@ Steps:
 5. ❌ Add optional PDF sync.
 6. ❌ Add per-paper local-only mode.
 
-### Phase 9: Literature Review Workspace 🔲 Not Started
+### Phase 9: Literature Review Workspace 🟨 Partially Complete
 
 Goals:
 
@@ -1010,13 +1017,13 @@ Goals:
 
 Steps:
 
-1. ❌ Add Projects.
-2. ❌ Add selected notes/highlights to projects.
-3. ❌ Build comparison matrix.
-4. ❌ Add claim/evidence extraction.
+1. ✅ Add Projects (persistent synthesis workspaces).
+2. ❌ Add selected notes/highlights to projects (paper selection and evidence-table attachment are implemented).
+3. ✅ Build comparison matrix (cross-paper evidence tables).
+4. ✅ Add claim/evidence extraction (suggested source-linked evidence cells).
 5. ❌ Add method/limitation comparison.
-6. ❌ Add outline builder.
-7. ❌ Add export to Markdown, Word, LaTeX, and BibTeX.
+6. ✅ Add outline builder.
+7. 🟨 Add export to Markdown, Word, LaTeX, and BibTeX (clipboard Markdown and citation BibTeX/RIS export are implemented; rich document export remains).
 
 ### Phase 10: Collaboration 🔲 Not Started
 

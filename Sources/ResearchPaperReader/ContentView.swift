@@ -12,6 +12,7 @@ struct ContentView: View {
     @State private var navigateToPage: Int?
     @State private var isSelecting = false
     @State private var selectedIDs = Set<Paper.ID>()
+    @State private var showResearchHub = false
 
     private var sidebarPapers: [Paper] {
         store.papers
@@ -20,6 +21,27 @@ struct ContentView: View {
     }
 
     var body: some View {
+        Group {
+            if showResearchHub {
+                researchHub
+            } else {
+                library
+            }
+        }
+        .alert(
+            "Research Paper Reader",
+            isPresented: Binding(
+                get: { store.lastError != nil },
+                set: { if !$0 { store.lastError = nil } }
+            )
+        ) {
+            Button("OK") { store.lastError = nil }
+        } message: {
+            Text(store.lastError ?? "An unknown error occurred.")
+        }
+    }
+
+    private var library: some View {
         NavigationSplitView {
             sidebar
                 .navigationSplitViewColumnWidth(min: 240, ideal: 300)
@@ -52,6 +74,15 @@ struct ContentView: View {
 
                 Spacer()
 
+                if !isSelecting {
+                    Button {
+                        showResearchHub = true
+                    } label: {
+                        Label("Research Hub", systemImage: "point.3.connected.trianglepath.dotted")
+                    }
+                    .keyboardShortcut("h", modifiers: [.command, .shift])
+                }
+
                 Button {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         isSelecting.toggle()
@@ -72,16 +103,24 @@ struct ContentView: View {
                 }
             }
         }
-        .alert(
-            "Research Paper Reader",
-            isPresented: Binding(
-                get: { store.lastError != nil },
-                set: { if !$0 { store.lastError = nil } }
-            )
-        ) {
-            Button("OK") { store.lastError = nil }
-        } message: {
-            Text(store.lastError ?? "An unknown error occurred.")
+    }
+
+    private var researchHub: some View {
+        ResearchHubView { paperID, page in
+            selectedPaperID = paperID
+            navigateToPage = page
+            showResearchHub = false
+        }
+        .environmentObject(store)
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    showResearchHub = false
+                } label: {
+                    Label("Back to Library", systemImage: "chevron.left")
+                }
+                .keyboardShortcut("[", modifiers: .command)
+            }
         }
     }
 
@@ -279,18 +318,6 @@ private struct SidebarPaperRow: View {
     let isSelected: Bool
     let onTap: () -> Void
 
-    private var statusColor: Color {
-        switch paper.status {
-        case .unread:    .gray
-        case .skimmed:   .blue
-        case .reading:   .green
-        case .read:      .indigo
-        case .cited:     .purple
-        case .rejected:  .red
-        case .archived:  .secondary
-        }
-    }
-
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 6) {
@@ -303,7 +330,7 @@ private struct SidebarPaperRow: View {
 
                 Image(systemName: paper.documentKind.systemImage)
                     .font(.caption)
-                    .foregroundStyle(statusColor)
+                    .foregroundStyle(paper.status.color)
                     .frame(width: 14)
 
                 VStack(alignment: .leading, spacing: 2) {

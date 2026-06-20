@@ -56,11 +56,10 @@ struct MetadataService {
     }
 
     static func extractDOI(from text: String) -> String? {
-        let pattern = #"10\.\d{4,}/[^\s,;()\[\]{}]+"#
-        guard let range = text.range(of: pattern, options: [.regularExpression, .caseInsensitive]) else { return nil }
+        guard let range = text.range(of: doiPattern, options: [.regularExpression, .caseInsensitive]) else { return nil }
         var doi = String(text[range])
         if doi.last == "." { doi = String(doi.dropLast()) }
-        return doi.trimmingCharacters(in: .whitespacesAndNewlines)
+        return doi.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
     }
 
     static func extractArxivID(from text: String) -> String? {

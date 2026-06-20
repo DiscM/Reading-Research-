@@ -13,7 +13,15 @@ final class PaperStore: ObservableObject {
         }
     }
 
+    @Published var researchState = ResearchState() {
+        didSet {
+            guard !isLoading else { return }
+            scheduleResearchSave()
+        }
+    }
+
     @Published var lastError: String?
+    @Published var lastNotice: String?
     @Published var isImporting = false
     @Published var enrichmentCount = 0
 
@@ -22,20 +30,28 @@ final class PaperStore: ObservableObject {
     private let papersDirectory: URL
     private let imagesDirectory: URL
     private let databaseURL: URL
+    private let researchDatabaseURL: URL
     private var isLoading = false
     private var saveTask: Task<Void, Never>?
+    private var researchSaveTask: Task<Void, Never>?
     private var importTask: Task<Void, Never>?
 
-    init() {
-        let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        appDirectory = base.appendingPathComponent("ResearchPaperReader", isDirectory: true)
+    init(baseDirectory: URL? = nil) {
+        if let baseDirectory {
+            appDirectory = baseDirectory
+        } else {
+            let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            appDirectory = base.appendingPathComponent("ResearchPaperReader", isDirectory: true)
+        }
         papersDirectory = appDirectory.appendingPathComponent("Papers", isDirectory: true)
         imagesDirectory = appDirectory.appendingPathComponent("Images", isDirectory: true)
         databaseURL = appDirectory.appendingPathComponent("library.json")
+        researchDatabaseURL = appDirectory.appendingPathComponent("research-state.json")
 
         try? fileManager.createDirectory(at: papersDirectory, withIntermediateDirectories: true)
         try? fileManager.createDirectory(at: imagesDirectory, withIntermediateDirectories: true)
         load()
+        loadResearchState()
     }
 
     func importWithOpenPanel() {
@@ -79,7 +95,13 @@ final class PaperStore: ObservableObject {
                         paper = await MetadataService.enrich(paper)
                     }
 
-                    papers.insert(paper, at: 0)
+                    if let duplicateIndex = duplicatePaperIndex(matching: paper) {
+                        papers[duplicateIndex] = merge(papers[duplicateIndex], with: paper)
+                        try? fileManager.removeItem(at: destinationURL)
+                        lastNotice = "Merged duplicate: \(paper.title)"
+                    } else {
+                        papers.insert(paper, at: 0)
+                    }
                     enrichmentCount += 1
                     flushSave()
                 } catch {
@@ -100,16 +122,181 @@ final class PaperStore: ObservableObject {
 
     func delete(_ paper: Paper) {
         papers.removeAll { $0.id == paper.id }
+        let paperID = paper.id
+        researchState.collections.indices.forEach { index in
+            researchState.collections[index].paperIDs.remove(paperID)
+        }
+        researchState.evidenceTables.indices.forEach { index in
+            researchState.evidenceTables[index].rows.removeAll { $0.paperID == paperID }
+        }
+        researchState.workspaces.indices.forEach { index in
+            researchState.workspaces[index].paperIDs.remove(paperID)
+        }
         try? fileManager.removeItem(at: paper.fileURL)
         flushSave()
+        saveResearchState()
+    }
+
+    // MARK: - Collections and smart folders
+
+    func createCollection(name: String, parentID: UUID? = nil) {
+        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return }
+        researchState.collections.append(PaperCollection(name: clean, parentID: parentID))
+    }
+
+    func deleteCollection(_ id: UUID) {
+        var idsToDelete: Set<UUID> = [id]
+        var foundChild = true
+        while foundChild {
+            let children = Set(researchState.collections.filter { collection in
+                collection.parentID.map(idsToDelete.contains) ?? false
+            }.map(\.id))
+            let previousCount = idsToDelete.count
+            idsToDelete.formUnion(children)
+            foundChild = idsToDelete.count > previousCount
+        }
+        researchState.collections.removeAll { idsToDelete.contains($0.id) }
+    }
+
+    func setPaper(_ paperID: UUID, in collectionID: UUID, included: Bool) {
+        guard let index = researchState.collections.firstIndex(where: { $0.id == collectionID }) else { return }
+        if included {
+            researchState.collections[index].paperIDs.insert(paperID)
+        } else {
+            researchState.collections[index].paperIDs.remove(paperID)
+        }
+    }
+
+    func papersInCollection(_ collectionID: UUID) -> [Paper] {
+        guard let collection = researchState.collections.first(where: { $0.id == collectionID }) else { return [] }
+        return papers.filter { collection.paperIDs.contains($0.id) }
+    }
+
+    func createSmartFolder(name: String, rules: [SmartFolderRule], matchAll: Bool = true) {
+        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty, !rules.isEmpty else { return }
+        researchState.smartFolders.append(SmartFolder(name: clean, matchAll: matchAll, rules: rules))
+    }
+
+    func papersInSmartFolder(_ smartFolderID: UUID) -> [Paper] {
+        guard let folder = researchState.smartFolders.first(where: { $0.id == smartFolderID }) else { return [] }
+        return papers.filter(folder.matches)
+    }
+
+    func deleteSmartFolder(_ id: UUID) {
+        researchState.smartFolders.removeAll { $0.id == id }
+    }
+
+    // MARK: - Citation library
+
+    @discardableResult
+    func importCitations(_ text: String) throws -> CitationImportReport {
+        let parsed = try CitationService.parse(text)
+        var imported = 0
+        var mergedCount = 0
+        for record in parsed {
+            if let index = researchState.citations.firstIndex(where: { $0.fingerprint == record.fingerprint }) {
+                researchState.citations[index] = CitationService.merged(researchState.citations[index], record)
+                mergedCount += 1
+            } else if let paper = papers.first(where: { CitationService.record(for: $0).fingerprint == record.fingerprint }) {
+                let paperRecord = CitationService.record(for: paper)
+                if !researchState.citations.contains(where: { $0.fingerprint == paperRecord.fingerprint }) {
+                    researchState.citations.append(CitationService.merged(paperRecord, record))
+                }
+                mergedCount += 1
+            } else {
+                var record = record
+                if record.citationKey.isEmpty { record.citationKey = CitationService.citationKey(for: record) }
+                researchState.citations.append(record)
+                imported += 1
+            }
+        }
+        return CitationImportReport(imported: imported, merged: mergedCount)
+    }
+
+    func allCitationRecords() -> [CitationRecord] {
+        CitationService.deduplicated(researchState.citations + papers.map(CitationService.record(for:)))
+    }
+
+    func deleteCitation(_ id: UUID) {
+        researchState.citations.removeAll { $0.id == id }
+    }
+
+    // MARK: - Evidence and synthesis
+
+    func createEvidenceTable(name: String, paperIDs: Set<UUID>) {
+        let selected = papers.filter { paperIDs.contains($0.id) }
+        guard !selected.isEmpty else { return }
+        researchState.evidenceTables.append(EvidenceService.makeTable(name: name, papers: selected))
+    }
+
+    func deleteEvidenceTable(_ id: UUID) {
+        researchState.evidenceTables.removeAll { $0.id == id }
+        researchState.workspaces.indices.forEach { index in
+            if researchState.workspaces[index].evidenceTableID == id {
+                researchState.workspaces[index].evidenceTableID = nil
+            }
+        }
+    }
+
+    func createWorkspace(name: String, paperIDs: Set<UUID>, evidenceTableID: UUID? = nil) {
+        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty, !paperIDs.isEmpty else { return }
+        researchState.workspaces.append(SynthesisWorkspace(
+            name: clean,
+            paperIDs: paperIDs,
+            evidenceTableID: evidenceTableID
+        ))
+    }
+
+    func generateOutline(for workspaceID: UUID) {
+        guard let index = researchState.workspaces.firstIndex(where: { $0.id == workspaceID }) else { return }
+        let workspace = researchState.workspaces[index]
+        let table = workspace.evidenceTableID.flatMap { id in
+            researchState.evidenceTables.first(where: { $0.id == id })
+        }
+        researchState.workspaces[index].outline = EvidenceService.outline(
+            workspace: workspace,
+            papers: papers,
+            table: table
+        )
+        researchState.workspaces[index].updatedAt = Date()
+    }
+
+    func deleteWorkspace(_ id: UUID) {
+        researchState.workspaces.removeAll { $0.id == id }
+    }
+
+    // MARK: - Alerts
+
+    func createAlert(name: String, kind: ResearchAlertKind, query: String) {
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanName.isEmpty, !cleanQuery.isEmpty else { return }
+        researchState.alerts.append(ResearchAlert(name: cleanName, kind: kind, query: cleanQuery))
+    }
+
+    func refreshAlert(_ id: UUID) async {
+        guard let alert = researchState.alerts.first(where: { $0.id == id }) else { return }
+        do {
+            let updated = try await DiscoveryService.refresh(alert)
+            guard let index = researchState.alerts.firstIndex(where: { $0.id == id }) else { return }
+            researchState.alerts[index] = updated
+        } catch {
+            lastError = "Could not refresh \(alert.name): \(error.localizedDescription)"
+        }
+    }
+
+    func deleteAlert(_ id: UUID) {
+        researchState.alerts.removeAll { $0.id == id }
     }
 
     func reEnrich(_ paper: Paper) async {
         guard let index = papers.firstIndex(where: { $0.id == paper.id }) else { return }
         let enriched = await MetadataService.enrich(papers[index])
-        guard let updatedIndex = papers.firstIndex(where: { $0.id == paper.id }) else { return }
         objectWillChange.send()
-        papers[updatedIndex] = enriched
+        papers[index] = enriched
         scheduleSave()
     }
 
@@ -228,20 +415,39 @@ final class PaperStore: ObservableObject {
 
     private func scheduleSave() {
         saveTask?.cancel()
-        saveTask = Task {
+        saveTask = Task { [weak self] in
             do {
                 try await Task.sleep(for: .seconds(1))
                 guard !Task.isCancelled else { return }
-                save()
-            } catch {
-                return
-            }
+                self?.save()
+            } catch { return }
         }
     }
 
     private func flushSave() {
         saveTask?.cancel()
         save()
+    }
+
+    private func scheduleResearchSave() {
+        researchSaveTask?.cancel()
+        researchSaveTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled else { return }
+                self?.saveResearchState()
+            } catch { return }
+        }
+    }
+
+    func saveResearchState() {
+        do {
+            let data = try JSONEncoder.researchPaperReader.encode(researchState)
+            try fileManager.createDirectory(at: appDirectory, withIntermediateDirectories: true)
+            try data.write(to: researchDatabaseURL, options: [.atomic])
+        } catch {
+            lastError = "Could not save research workspace: \(error.localizedDescription)"
+        }
     }
 
     func save() {
@@ -268,6 +474,19 @@ final class PaperStore: ObservableObject {
         }
     }
 
+    private func loadResearchState() {
+        guard fileManager.fileExists(atPath: researchDatabaseURL.path) else { return }
+        do {
+            isLoading = true
+            let data = try Data(contentsOf: researchDatabaseURL)
+            researchState = try JSONDecoder.researchPaperReader.decode(ResearchState.self, from: data)
+            isLoading = false
+        } catch {
+            isLoading = false
+            lastError = "Research workspace data could not be loaded. Its data was preserved at \(researchDatabaseURL.path). \(error.localizedDescription)"
+        }
+    }
+
     private func uniqueDestinationURL(for sourceURL: URL, reserving reservedPaths: Set<String> = []) -> URL {
         let baseName = sourceURL.deletingPathExtension().lastPathComponent
         let ext = sourceURL.pathExtension.isEmpty ? "pdf" : sourceURL.pathExtension
@@ -280,6 +499,50 @@ final class PaperStore: ObservableObject {
         }
 
         return candidate
+    }
+
+    private func duplicatePaperIndex(matching candidate: Paper) -> Int? {
+        let candidateDOI = candidate.doi.normalizedDOI
+        if !candidateDOI.isEmpty {
+            for (index, paper) in papers.enumerated() {
+                if paper.doi.normalizedDOI == candidateDOI {
+                    return index
+                }
+            }
+        }
+        if !candidate.arxivId.isEmpty {
+            for (index, paper) in papers.enumerated() {
+                if paper.arxivId.caseInsensitiveCompare(candidate.arxivId) == .orderedSame {
+                    return index
+                }
+            }
+        }
+        let normalized = candidate.title.lowercased().filter { $0.isLetter || $0.isNumber }
+        guard normalized.count > 8 else { return nil }
+        for (index, paper) in papers.enumerated() {
+            let other = paper.title.lowercased().filter { $0.isLetter || $0.isNumber }
+            if other == normalized && (candidate.year.isEmpty || paper.year.isEmpty || candidate.year == paper.year) {
+                return index
+            }
+        }
+        return nil
+    }
+
+    private func merge(_ existing: Paper, with candidate: Paper) -> Paper {
+        var result = existing
+        if result.authors.isEmpty { result.authors = candidate.authors }
+        if result.year.isEmpty { result.year = candidate.year }
+        if result.abstract.isEmpty { result.abstract = candidate.abstract }
+        if result.doi.isEmpty { result.doi = candidate.doi }
+        if result.arxivId.isEmpty { result.arxivId = candidate.arxivId }
+        if result.venue.isEmpty { result.venue = candidate.venue }
+        if result.sections.isEmpty { result.sections = candidate.sections }
+        if result.allText.isEmpty {
+            result.allText = candidate.allText
+            result.allTextPageOffsets = candidate.allTextPageOffsets
+        }
+        result.tags = Array(Set(result.tags + candidate.tags)).sorted()
+        return result
     }
 
     private nonisolated static func prepareDocument(sourceURL: URL, destinationURL: URL) throws -> Paper {
@@ -365,7 +628,7 @@ final class PaperStore: ObservableObject {
         return (title, author, "", abstract, doi, arxivId, "", publicationNumber)
     }
 
-    private nonisolated static func inferDocumentKind(filename: String, text: String, doi: String, arxivId: String) -> DocumentKind {
+    nonisolated static func inferDocumentKind(filename: String, text: String, doi: String, arxivId: String) -> DocumentKind {
         let name = filename.lowercased()
         let sample = String(text.prefix(20_000)).lowercased()
 

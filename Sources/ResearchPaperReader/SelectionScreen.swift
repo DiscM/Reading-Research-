@@ -98,17 +98,17 @@ struct SelectionScreen: View {
 
     private var content: some View {
         ScrollView {
-            LazyVStack(spacing: 12) {
+            LazyVStack(spacing: 8) {
                 header
-                    .padding(.horizontal)
-                    .padding(.top, 8)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 4)
 
                 if showsContinueReading {
                     ContinueReadingShelf(
                         papers: Array(continueReadingPapers.prefix(6)),
                         selectedPaperID: $selectedPaperID
                     )
-                    .padding(.horizontal)
+                    .padding(.horizontal, 12)
                 }
 
                 ForEach(papers) { paper in
@@ -119,10 +119,10 @@ struct SelectionScreen: View {
                             }
                         }
                         .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .top)))
-                        .padding(.horizontal)
+                        .padding(.horizontal, 12)
                 }
             }
-            .padding(.vertical)
+            .padding(.vertical, 8)
         }
         .scrollIndicators(.hidden)
         .animation(.spring(response: 0.35, dampingFraction: 0.9), value: sortOrder)
@@ -144,7 +144,7 @@ struct SelectionScreen: View {
                 }
             }
             .pickerStyle(.segmented)
-            .frame(width: 320)
+            .frame(width: 280)
             .labelsHidden()
         }
     }
@@ -153,18 +153,6 @@ struct SelectionScreen: View {
 private struct PaperCard: View {
     let paper: Paper
     let isSelected: Bool
-
-    private var statusColor: Color {
-        switch paper.status {
-        case .unread:    .gray
-        case .skimmed:   .blue
-        case .reading:   .green
-        case .read:      .indigo
-        case .cited:     .purple
-        case .rejected:  .red
-        case .archived:  .secondary
-        }
-    }
 
     private var dateText: String {
         let formatter = RelativeDateTimeFormatter()
@@ -205,12 +193,12 @@ private struct PaperCard: View {
                     Text(paper.abstract)
                         .font(.callout)
                         .foregroundStyle(.tertiary)
-                        .lineLimit(2)
-                        .padding(.top, 8)
+                        .lineLimit(1)
+                        .padding(.top, 5)
                 }
 
                 Divider()
-                    .padding(.vertical, 10)
+                    .padding(.vertical, 6)
 
                 HStack(spacing: 16) {
                     Label(dateText, systemImage: "calendar")
@@ -264,23 +252,23 @@ private struct PaperCard: View {
                         ForEach(paper.tags.prefix(3), id: \.self) { tag in
                             Text(tag)
                                 .font(.caption2.weight(.medium))
-                                .foregroundStyle(statusColor)
+                                .foregroundStyle(paper.status.color)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
-                                .background(statusColor.opacity(0.12), in: Capsule())
+                                .background(paper.status.color.opacity(0.12), in: Capsule())
                         }
                     }
                 }
             }
-            .padding(14)
+            .padding(10)
         }
         .background(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 9)
                 .fill(.background)
-                .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
+                .shadow(color: .black.opacity(0.05), radius: 2, y: 1)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 9)
                 .strokeBorder(.quaternary, lineWidth: 1)
         )
         .scaleEffect(isSelected ? 0.97 : 1)
@@ -288,8 +276,8 @@ private struct PaperCard: View {
     }
 
     private var statusStrip: some View {
-        RoundedRectangle(cornerRadius: 12)
-            .fill(statusColor)
+        RoundedRectangle(cornerRadius: 9)
+            .fill(paper.status.color)
             .frame(width: 5)
             .padding(.trailing, 0)
             .offset(x: -2)
@@ -298,10 +286,10 @@ private struct PaperCard: View {
     private var statusBadge: some View {
         Text(paper.status.rawValue)
             .font(.caption2.weight(.medium))
-            .foregroundStyle(statusColor)
+            .foregroundStyle(paper.status.color)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
-            .background(statusColor.opacity(0.12), in: Capsule())
+            .background(paper.status.color.opacity(0.12), in: Capsule())
     }
 }
 
@@ -310,13 +298,13 @@ private struct ContinueReadingShelf: View {
     @Binding var selectedPaperID: Paper.ID?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 7) {
             Label("Continue Reading", systemImage: "bookmark.fill")
                 .font(.headline)
                 .foregroundStyle(.primary)
 
             ScrollView(.horizontal) {
-                HStack(spacing: 10) {
+                HStack(spacing: 8) {
                     ForEach(papers) { paper in
                         Button {
                             withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
@@ -345,11 +333,11 @@ private struct ContinueReadingShelf: View {
                                     .font(.caption.monospacedDigit())
                                     .foregroundStyle(.secondary)
                             }
-                            .padding(12)
-                            .frame(width: 220, height: 126, alignment: .leading)
-                            .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 10))
+                            .padding(9)
+                            .frame(width: 190, height: 104, alignment: .leading)
+                            .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
                             .overlay {
-                                RoundedRectangle(cornerRadius: 10)
+                                RoundedRectangle(cornerRadius: 8)
                                     .stroke(.quaternary, lineWidth: 1)
                             }
                         }

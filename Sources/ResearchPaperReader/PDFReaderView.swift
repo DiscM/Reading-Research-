@@ -91,7 +91,6 @@ struct PDFReaderView: NSViewRepresentable {
         context.coordinator.parent = self
 
         if nsView.document?.documentURL != url {
-            context.coordinator.cleanupAnnotations(in: nsView)
             nsView.document = PDFDocument(url: url)
             nsView.autoScales = true
         }
@@ -182,21 +181,6 @@ struct PDFReaderView: NSViewRepresentable {
 
         deinit {
             NotificationCenter.default.removeObserver(self)
-        }
-
-        @MainActor
-        func cleanupAnnotations(in pdfView: PDFView) {
-            guard let document = pdfView.document else { return }
-            for i in 0..<document.pageCount {
-                guard let page = document.page(at: i) else { continue }
-                let toRemove = page.annotations.filter { annotation in
-                    let name = annotation.value(forAnnotationKey: .name) as? String
-                    return name == "ResearchPaperReader" || name.flatMap(UUID.init(uuidString:)) != nil
-                }
-                for annotation in toRemove {
-                    page.removeAnnotation(annotation)
-                }
-            }
         }
 
         @MainActor

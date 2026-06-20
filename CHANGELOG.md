@@ -1,5 +1,47 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Living product development path** — Added `PRODUCT_DEVELOPMENT_PATH.md` with a Mermaid product mind map, five prioritized delivery waves, a reconciled shipped/partial/planned capability audit, implementation checklists, dependency graph, and definition of done.
+- **Research Hub** — Added an integrated five-tab workspace for library organization, evidence comparison, semantic search and chat, synthesis writing, citation graphs, discovery, and alerts.
+- **Document types and inference** — Added `DocumentKind` enum (`researchPaper`, `lectureSlides`, `studyNotes`, `bookChapter`, `generalPDF`) and rule-based heuristic inference during PDF import.
+- **Bulk selection and deletion** — Added library select mode, allowing bulk selection of papers and batch deletion with confirmation in the toolbar.
+- **Continue Reading shelf** — Added a horizontal scrollable shelf on the selection screen displaying papers currently in progress with reading percentages.
+- **Reading position resume** — Added tracking for the last read page/timestamp and a preference to automatically navigate back to the last read page when opening a document.
+- **Collections and compound smart folders** — Added nested manual collections plus saved folders that match one or every rule across text, tags, authors, venues, years, document types, and reading states.
+- **Citation import, export, and deduplication** — Added BibTeX/RIS paste and file import, BibTeX/RIS clipboard and file export, stable citation keys, DOI/title fingerprint merging, and duplicate PDF-import merging that preserves existing notes and tags.
+- **Cross-paper evidence tables** — Added editable, source-linked comparison matrices with configurable columns, suggested method/sample/finding/limitation values, page fields, and per-cell verification state.
+- **Local semantic search and grounded chat** — Added on-device sentence-embedding search with a lexical fallback, ranked page-level evidence cards, and extractive library answers that cite their local sources.
+- **Synthesis and writing workspaces** — Added persistent multi-paper workspaces, evidence-table attachment, citation-aware outline generation, editable drafts, and clipboard export.
+- **Citation graph and research discovery** — Added reference parsing, a visual local/external citation graph, CrossRef discovery, saved discovered citations, and persistent topic, author, and incoming-citation alerts. Incoming-citation monitoring resolves DOI records and citing works through OpenAlex.
+- **Codex run action** — Added a project environment action wired to the existing macOS build-and-run script.
+
+### Changed
+
+- **Roadmap documentation links** — Updated the README and design specification to use the product development path alongside this changelog as the execution reference.
+- **Semantic search status correction** — Corrected the design specification to show local embeddings and semantic search as not yet implemented.
+- **Separate research-state persistence** — Added a backward-compatible `research-state.json` store so new cross-paper data does not change the existing `library.json` format.
+- **Compact Research Hub layout** — Replaced the height-collapsing tab and split containers with full-height segmented workspaces and fixed desktop panes, tightened creation sidebars, reduced header and helper-text scale, and compressed evidence, graph, discovery, and alert surfaces.
+- **Denser library browsing** — Reduced paper-card padding and spacing, shortened abstract previews, narrowed sort controls, and compacted Continue Reading cards so more documents remain visible without scrolling.
+- **Code optimizations across the codebase** — Consolidated duplicate logic and removed dead code across 10 source files:
+  - **Normalized DOI handling** — Extracted a shared `String.normalizedDOI` extension used by `CitationRecord`, `CitationGraphService`, `DiscoveryService`, `MetadataService`, and `PaperStore`, replacing five inline normalizations.
+  - **Static regex compilation** — Made BibTeX entry, BibTeX field, DOI, year, and reference-line patterns module-wide constants so `NSRegularExpression` objects compile once at launch instead of on every parse or extraction call.
+  - **Annotation sync** — Removed redundant `cleanupAnnotations()` calls from `PDFReaderView.updateNSView` — `syncAnnotations()` already removes stale annotations before re-adding them.
+  - **`ReadingStatus.color`** — Added a computed property so `SidebarPaperRow` and `PaperCard` no longer duplicate the 14-line color switch.
+  - **`reEnrich()`** — Eliminated a redundant `firstIndex(where:)` scan (was doing two lookups when one sufficed).
+  - **`pageTexts(for:)`** — Switched from O(n²) `String.index(startIndex, offsetBy:)` per page to incremental traversal, making multi-page semantic-search chunk extraction linear.
+  - **`duplicatePaperIndex()`** — Replaced closure-based `firstIndex(where:)` pattern that re-normalized every paper's DOI on each comparison with a `for`-`enumerated()` loop that normalizes the candidate once.
+  - **`[weak self]` in debounced save tasks** — Added `[weak self]` to `scheduleSave()` and `scheduleResearchSave()` Task closures to prevent subtle retain cycles.
+
+### Fixed
+
+- **Quit while Research Hub is open** — Replaced the modal Research Hub sheet with an in-window workspace and added toolbar and keyboard navigation back to the library, allowing standard macOS Quit events to terminate immediately.
+- **Legacy note decoding** — Text notes created before area annotations now default missing crop fields safely instead of preventing the entire library from loading.
+- **Cross-feature deletion cleanup** — Deleting a paper now removes dangling collection memberships, evidence rows, and synthesis-workspace membership.
+- **Research Hub split-view sizing** — Empty library tools now fill the sheet instead of collapsing their controls to intrinsic height.
+
 ## v0.9.1 — 2026-06-19
 
 ### Fixed

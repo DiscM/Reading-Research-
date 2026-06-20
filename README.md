@@ -10,14 +10,18 @@ Built with SwiftUI and PDFKit. Designed for graduate students, researchers, and 
 - **Sidebar paper list** — The library sidebar shows a filterable, sortable list of all papers with status color dot, title, authors, and note count. Sort by Recent, Title, Author, or Year. Filter by reading status.
 - **PDF import** — Drag-and-drop from Finder onto the card grid, or open-panel import (`⌘I` / `⌘O`); metadata extracted from PDF attributes and enriched via CrossRef/arXiv lookups, with AI-powered fallback extraction.
 - **Full-text search** — Every word in every paper is extracted on import. Search titles, authors, tags, notes, and PDF body text with 300ms debounced full-text matching.
+- **Collections & smart folders** — Organize papers into reusable nested collections, or create live folders from compound metadata, status, tag, author, venue, year, document-type, and full-text rules.
+- **Citation library** — Import BibTeX or RIS from pasted text or files, merge DOI/title duplicates, generate stable citation keys, and copy or save the complete library as BibTeX or RIS. Duplicate PDF imports are merged without discarding existing notes or tags.
 - **Reader** — PDFKit-based reader with continuous scroll, zoom controls (toolbar + trackpad), find within paper (`⌘F`) with native highlights and chevron navigation, go-to-page dialog (`⌘G`), collapsible inspector, and keyboard navigation.
 - **Section-aware navigation** — On import, the app detects common academic paper sections (Abstract, Introduction, Method, Results, Conclusion, etc.) using numbered-header-aware parsing. Click a section in the sidebar outline to jump the PDF to that page.
 - **Color-coded highlights** — Annotations render as native PDFKit highlights directly on the page. Color per kind: yellow (highlight), orange (claim), green (evidence), blue (method), red (limitation), purple (question), gray (definition). Hovering over a text highlight for 2 seconds opens a floating popover displaying its category and body content.
 - **PDF Area Notes (Image Crop Annotation)** — Annotate charts, tables, equations, or visual figures directly. Drag-select a crop box to capture a region of a page as a high-res image thumbnail associated with your note. Area notes display as colored rectangular highlights with transparent fills on the PDF page, and clicking an area note scrolls the viewer to automatically center on its coordinates.
 - **Typed notes** — Save structured notes anchored to selected text or visual areas. Jump to any note's page by clicking it in the inspector's Notes list, and delete individual notes using the trash icon. Type Picker shows a live color swatch of the selected highlight kind. Export to Markdown. Shortcut: `⌘N`.
 - **On-device AI** — Summarize papers (`⌘S`), extract claims/methods/evidence/limitations, or explain selected passages. Results shown in collapsible Summary and Explanation sections. All processing stays local — no API keys, no cloud calls, no data leaving your Mac.
+- **Local semantic search & grounded library chat** — Search across papers and notes with Apple's on-device sentence embeddings and a lexical fallback. Ask a library-wide question and receive an extractive answer whose evidence cards link back to source pages.
+- **Cross-paper evidence & writing workspaces** — Build editable comparison tables with source-anchored, verifiable cells, then generate a multi-paper literature-review outline and continue writing beside its citation keys.
+- **Citation graph, discovery & alerts** — Parse local reference lists into a visual graph, search CrossRef without uploading PDF content, save discovered citations, and monitor topics, authors, or new works citing a DOI. Citation alerts use OpenAlex and refresh stale enabled alerts when opened.
 - **Metadata enrichment & editing** — On import, papers are enriched via CrossRef (DOI lookups), arXiv API (arXiv ID lookups), and heuristic/AI text extraction. Correct details (title, authors, year, venue, abstract) and manage tags manually via the details editor. DOI, arXiv ID, and venue are shown on paper cards.
-- **Debounced persistence** — Library changes write to disk at most once per second, batching rapid mutations into a single save.
 - **Privacy controls** — AI mode selector (Private Local, Balanced, Best AI, Custom) with clear status text.
 
 ## Quick Start
@@ -69,6 +73,7 @@ open Package.swift
    - **AI** — Click "Summarize" (`⌘S`) for a local heuristic summary, or use "Extract" to find claims/methods/evidence/limitations, or select text and click "Explain Selection". Results appear in collapsible Summary and Explanation sections.
 5. **Navigate** — Use the toolbar zoom controls (`+`/`-`), the find bar (`⌘F`), or go-to-page dialog (`⌘G`). Click a section in the sidebar's paper list to jump the PDF to that page.
 6. **Export** — Click "Export" in the AI tab to save notes and AI summaries as Markdown.
+7. **Research across papers** — Open **Research Hub** from the toolbar to manage collections and citations, create evidence tables and synthesis workspaces, run semantic search or grounded chat, inspect the citation graph, discover papers, and manage research alerts.
 
 ## Architecture
 
@@ -83,9 +88,21 @@ Sources/ResearchPaperReader/
   ReaderWorkspace.swift          — HSplitView: PDF reader + inspector (Notes / AI), find bar, collapsible sections
   LocalPaperAI.swift             — Stateless enum, heuristic text + Core ML + Foundation Models router
   MetadataService.swift          — CrossRef/arXiv API lookups, AI metadata extraction, enrichment pipeline
+  ResearchModels.swift           — Collections, citations, evidence, synthesis, semantic, graph, discovery, and alert models
+  ResearchServices.swift         — Citation parsing/export, semantic retrieval, evidence synthesis, graph extraction, CrossRef/OpenAlex discovery
+  ResearchHubView.swift          — Integrated library, evidence, search/chat, synthesis, graph, discovery, and alerts workspace
   SettingsView.swift             — AI mode, provider, and privacy toggles
   WindowBoundsEnforcer.swift     — NSViewRepresentable enforcing minimum window size
 ```
+
+### Performance
+
+- **Debounced persistence** — Library saves batch rapid mutations (highlighting, status changes) into a single disk write at most once per second. Destructive operations (import, delete) flush immediately.
+- **Debounced full-text search** — Metadata search runs instantly on each keystroke; full-text body search waits for a 300ms typing pause.
+- **Shared regex compilation** — BibTeX, RIS, DOI, and reference-marker patterns are compiled once at module load instead of on each parse call.
+- **Normalized DOI deduplication** — A single shared `String.normalizedDOI` extension eliminates redundant inline normalization across citation, metadata, and discovery services.
+- **Linear page-text extraction** — Semantic search chunk building uses incremental `String.Index` traversal instead of per-page O(n) offsets, keeping extraction O(n) for the full document.
+- **Duplicate switch elimination** — `ReadingStatus.color` removes two identical 14-line switch statements across view files.
 
 ### Design principles
 
@@ -104,10 +121,15 @@ Sources/ResearchPaperReader/
 | 4 | Local AI & retrieval (heuristic summarization, extraction, explain selection) | ✅ Done |
 | 5 | Metadata enrichment (CrossRef, arXiv, heuristic/AI metadata extraction) | ✅ Done |
 | 6 | Preview features (find within paper, go-to-page, zoom controls) | ✅ Done |
-| 7 | Cloud & BYOK (model router, provider settings, privacy gates) | 🔲 Not started |
-| 8 | Sync (iCloud metadata sync, multi-device) | 🔲 Not started |
+| 7 | Research library (collections, smart folders, citations, duplicate merging) | ✅ Done |
+| 8 | Cross-paper research (evidence tables, semantic search/chat, synthesis workspace) | ✅ Done |
+| 9 | Discovery (citation graph, CrossRef discovery, topic/author/citation alerts) | ✅ Done |
+| 10 | Cloud & BYOK (secure model router, provider credentials, privacy gates) | 🔲 Not started |
+| 11 | Sync (iCloud metadata sync, multi-device) | 🔲 Not started |
 
 See [`research-paper-reader-design.md`](research-paper-reader-design.md) for the full product specification.
+
+See [`PRODUCT_DEVELOPMENT_PATH.md`](PRODUCT_DEVELOPMENT_PATH.md) for the living product mind map, competitive feature additions, dependency order, and reconciled implementation backlog. Feature completion should be checked against both that document and [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Tech Stack
 

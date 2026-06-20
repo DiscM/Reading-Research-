@@ -129,6 +129,52 @@ struct ModelStabilityTests {
         #expect(decodedNote.imageFileName == "crop_123.png")
     }
 
+    @Test func legacyTextNotesDefaultAreaFields() throws {
+        let json = """
+        {
+          "id": "4D36E96E-7B6A-4E8A-9B2A-1D0D760741A1",
+          "kind": "Claim",
+          "quote": "Legacy quote",
+          "body": "Legacy body",
+          "page": 3,
+          "createdAt": 0
+        }
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+        let note = try decoder.decode(PaperNote.self, from: Data(json.utf8))
+
+        #expect(!note.isAreaNote)
+        #expect(note.rectX == nil)
+        #expect(note.imageFileName == nil)
+        #expect(note.body == "Legacy body")
+    }
+
+    @Test func documentKindInferenceWorks() {
+        // DOI/arXiv present
+        #expect(PaperStore.inferDocumentKind(filename: "doc", text: "", doi: "10.1234/test", arxivId: "") == .researchPaper)
+        #expect(PaperStore.inferDocumentKind(filename: "doc", text: "", doi: "", arxivId: "arXiv:2101.12345") == .researchPaper)
+        
+        // Slides keywords in name/text
+        #expect(PaperStore.inferDocumentKind(filename: "lecture-1.pdf", text: "", doi: "", arxivId: "") == .lectureSlides)
+        #expect(PaperStore.inferDocumentKind(filename: "week-3_slides.pdf", text: "", doi: "", arxivId: "") == .lectureSlides)
+        #expect(PaperStore.inferDocumentKind(filename: "doc", text: "learning objectives: understand swift development", doi: "", arxivId: "") == .lectureSlides)
+        
+        // Notes keywords in name/text
+        #expect(PaperStore.inferDocumentKind(filename: "my-handout.pdf", text: "", doi: "", arxivId: "") == .studyNotes)
+        #expect(PaperStore.inferDocumentKind(filename: "doc", text: "this is class notes for week 1", doi: "", arxivId: "") == .studyNotes)
+        
+        // Book chapter keywords
+        #expect(PaperStore.inferDocumentKind(filename: "textbook-ch1.pdf", text: "", doi: "", arxivId: "") == .bookChapter)
+        #expect(PaperStore.inferDocumentKind(filename: "doc", text: "see chapter 4 for details", doi: "", arxivId: "") == .bookChapter)
+        
+        // Academic signals >= 2
+        #expect(PaperStore.inferDocumentKind(filename: "doc", text: "abstract introduction references", doi: "", arxivId: "") == .researchPaper)
+        
+        // General fallback
+        #expect(PaperStore.inferDocumentKind(filename: "doc.pdf", text: "some generic text content", doi: "", arxivId: "") == .generalPDF)
+    }
+
     private func makePaper(title: String, text: String = "") -> Paper {
         Paper(
             title: title,

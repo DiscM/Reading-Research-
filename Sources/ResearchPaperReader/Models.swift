@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import SwiftUI
 
 enum DocumentKind: String, CaseIterable, Codable, Identifiable, Sendable {
     case researchPaper = "Research Paper"
@@ -46,6 +47,18 @@ enum ReadingStatus: String, CaseIterable, Codable, Identifiable, Sendable {
     case archived = "Archived"
 
     var id: String { rawValue }
+
+    var color: Color {
+        switch self {
+        case .unread:    .gray
+        case .skimmed:   .blue
+        case .reading:   .green
+        case .read:      .indigo
+        case .cited:     .purple
+        case .rejected:  .red
+        case .archived:  .secondary
+        }
+    }
 }
 
 enum HighlightKind: String, CaseIterable, Codable, Identifiable, Sendable {
@@ -112,6 +125,55 @@ struct PaperNote: Identifiable, Codable, Equatable, Sendable {
     var rectWidth: Double? = nil
     var rectHeight: Double? = nil
     var imageFileName: String? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, quote, body, page, createdAt
+        case isAreaNote, rectX, rectY, rectWidth, rectHeight, imageFileName
+    }
+
+    init(
+        id: UUID = UUID(),
+        kind: HighlightKind,
+        quote: String,
+        body: String,
+        page: Int?,
+        createdAt: Date = Date(),
+        isAreaNote: Bool = false,
+        rectX: Double? = nil,
+        rectY: Double? = nil,
+        rectWidth: Double? = nil,
+        rectHeight: Double? = nil,
+        imageFileName: String? = nil
+    ) {
+        self.id = id
+        self.kind = kind
+        self.quote = quote
+        self.body = body
+        self.page = page
+        self.createdAt = createdAt
+        self.isAreaNote = isAreaNote
+        self.rectX = rectX
+        self.rectY = rectY
+        self.rectWidth = rectWidth
+        self.rectHeight = rectHeight
+        self.imageFileName = imageFileName
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        kind = try container.decodeIfPresent(HighlightKind.self, forKey: .kind) ?? .highlight
+        quote = try container.decodeIfPresent(String.self, forKey: .quote) ?? ""
+        body = try container.decodeIfPresent(String.self, forKey: .body) ?? ""
+        page = try container.decodeIfPresent(Int.self, forKey: .page)
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        isAreaNote = try container.decodeIfPresent(Bool.self, forKey: .isAreaNote) ?? false
+        rectX = try container.decodeIfPresent(Double.self, forKey: .rectX)
+        rectY = try container.decodeIfPresent(Double.self, forKey: .rectY)
+        rectWidth = try container.decodeIfPresent(Double.self, forKey: .rectWidth)
+        rectHeight = try container.decodeIfPresent(Double.self, forKey: .rectHeight)
+        imageFileName = try container.decodeIfPresent(String.self, forKey: .imageFileName)
+    }
 }
 
 struct Paper: Identifiable, Equatable, Sendable {
