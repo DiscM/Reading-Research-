@@ -1,29 +1,31 @@
 import AppKit
 import Foundation
+import Observation
 import PDFKit
 import SwiftUI
 import UniformTypeIdentifiers
 
 @MainActor
-final class PaperStore: ObservableObject {
-    @Published var papers: [Paper] = [] {
+@Observable
+final class PaperStore {
+    var papers: [Paper] = [] {
         didSet {
             guard !isLoading else { return }
             scheduleSave()
         }
     }
 
-    @Published var researchState = ResearchState() {
+    var researchState = ResearchState() {
         didSet {
             guard !isLoading else { return }
             scheduleResearchSave()
         }
     }
 
-    @Published var lastError: String?
-    @Published var lastNotice: String?
-    @Published var isImporting = false
-    @Published var enrichmentCount = 0
+    var lastError: String?
+    var lastNotice: String?
+    var isImporting = false
+    var enrichmentCount = 0
 
     private let fileManager = FileManager.default
     private let appDirectory: URL
@@ -295,7 +297,6 @@ final class PaperStore: ObservableObject {
     func reEnrich(_ paper: Paper) async {
         guard let index = papers.firstIndex(where: { $0.id == paper.id }) else { return }
         let enriched = await MetadataService.enrich(papers[index])
-        objectWillChange.send()
         papers[index] = enriched
         scheduleSave()
     }

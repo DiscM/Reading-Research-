@@ -9,7 +9,7 @@ enum SortOrder: String, CaseIterable, Identifiable {
 }
 
 struct SelectionScreen: View {
-    @EnvironmentObject private var store: PaperStore
+    @Environment(PaperStore.self) private var store
     @Binding var selectedPaperID: Paper.ID?
     @Binding var searchText: String
     @Binding var debouncedSearch: String
@@ -53,47 +53,25 @@ struct SelectionScreen: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "doc.richtext")
-                .font(.system(size: 48))
-                .foregroundStyle(.secondary)
-                .symbolEffect(.bounce, options: .nonRepeating)
-
-            Text("Your document library is empty.")
-                .font(.title3)
-                .foregroundStyle(.secondary)
-
-            Text("Import research papers, lecture slides, study notes, or other PDFs.")
-                .font(.callout)
-                .foregroundStyle(.tertiary)
-
+        ContentUnavailableView {
+            Label("Document Library", systemImage: "doc.richtext")
+        } description: {
+            Text("Import research papers, lecture slides, study notes, or other PDFs to get started.")
+        } actions: {
             Button {
                 store.importWithOpenPanel()
             } label: {
                 Label("Import PDFs", systemImage: "plus")
             }
+            .help("Import PDF documents into your library")
             .buttonStyle(.borderedProminent)
-            .padding(.top, 8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var noMatchState: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 36))
-                .foregroundStyle(.secondary)
-                .symbolEffect(.pulse, options: .nonRepeating)
-
-            Text("No documents match your search.")
-                .font(.title3)
-                .foregroundStyle(.secondary)
-
-            Text("Try adjusting the search text or status filter.")
-                .font(.callout)
-                .foregroundStyle(.tertiary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        ContentUnavailableView.search(text: searchText)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var content: some View {
@@ -335,7 +313,7 @@ private struct ContinueReadingShelf: View {
                             }
                             .padding(9)
                             .frame(width: 190, height: 104, alignment: .leading)
-                            .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
                             .overlay {
                                 RoundedRectangle(cornerRadius: 8)
                                     .stroke(.quaternary, lineWidth: 1)

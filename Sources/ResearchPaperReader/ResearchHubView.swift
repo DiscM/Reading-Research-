@@ -12,7 +12,7 @@ private enum ResearchHubTab: String, CaseIterable, Identifiable {
 }
 
 struct ResearchHubView: View {
-    @EnvironmentObject private var store: PaperStore
+    @Environment(PaperStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @State private var selectedTab: ResearchHubTab = .library
     let onOpenPaper: (Paper.ID, Int?) -> Void
@@ -67,7 +67,7 @@ struct ResearchHubView: View {
 }
 
 private struct LibraryOrganizationView: View {
-    @EnvironmentObject private var store: PaperStore
+    @Environment(PaperStore.self) private var store
     @State private var mode = 0
 
     var body: some View {
@@ -96,7 +96,7 @@ private struct LibraryOrganizationView: View {
 }
 
 private struct CollectionsView: View {
-    @EnvironmentObject private var store: PaperStore
+    @Environment(PaperStore.self) private var store
     @State private var selectedID: UUID?
     @State private var name = ""
     @State private var parentID: UUID?
@@ -108,11 +108,12 @@ private struct CollectionsView: View {
                 HStack {
                     TextField("Collection name", text: $name)
                     Button("Add") {
-                        store.createCollection(name: name, parentID: parentID)
-                        selectedID = store.researchState.collections.last?.id
-                        name = ""
-                    }
-                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            store.createCollection(name: name, parentID: parentID)
+                            selectedID = store.researchState.collections.last?.id
+                            name = ""
+                        }
+                        .help("Create new collection")
+                        .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
                 Picker("Parent", selection: $parentID) {
                     Text("Top level").tag(nil as UUID?)
@@ -136,6 +137,7 @@ private struct CollectionsView: View {
                                 store.deleteCollection(collection.id)
                                 if selectedID == collection.id { selectedID = nil }
                             }
+                            .help("Delete this collection")
                         }
                     }
                 }
@@ -172,7 +174,7 @@ private struct CollectionsView: View {
 }
 
 private struct SmartFoldersView: View {
-    @EnvironmentObject private var store: PaperStore
+    @Environment(PaperStore.self) private var store
     @State private var name = ""
     @State private var field: SmartFolderField = .allText
     @State private var value = ""
@@ -200,6 +202,7 @@ private struct SmartFoldersView: View {
                         pendingRules.append(SmartFolderRule(field: field, value: clean))
                         value = ""
                     }
+                    .help("Add this filtering rule")
                     .disabled(value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     Toggle("Match every rule", isOn: $matchAll).toggleStyle(.checkbox)
                 }
@@ -211,7 +214,7 @@ private struct SmartFoldersView: View {
                             .buttonStyle(.plain)
                     }
                 }
-                Button("Create Smart Folder") {
+                    Button("Create Smart Folder") {
                     var rules = pendingRules
                     let clean = value.trimmingCharacters(in: .whitespacesAndNewlines)
                     if !clean.isEmpty { rules.append(SmartFolderRule(field: field, value: clean)) }
@@ -219,6 +222,7 @@ private struct SmartFoldersView: View {
                     selectedID = store.researchState.smartFolders.last?.id
                     name = ""; value = ""; pendingRules = []
                 }
+                .help("Create a dynamic folder that auto-filters papers by rules")
                 .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && pendingRules.isEmpty))
 
                 List(selection: $selectedID) {
@@ -226,6 +230,7 @@ private struct SmartFoldersView: View {
                         Label(folder.name, systemImage: "folder.badge.gearshape").tag(folder.id)
                             .contextMenu {
                                 Button("Delete", role: .destructive) { store.deleteSmartFolder(folder.id) }
+                            .help("Delete this smart folder")
                             }
                     }
                 }
@@ -258,7 +263,7 @@ private struct SmartFoldersView: View {
 }
 
 private struct CitationLibraryView: View {
-    @EnvironmentObject private var store: PaperStore
+    @Environment(PaperStore.self) private var store
     @State private var importText = ""
     @State private var report = ""
     @State private var exportFormat = 0
@@ -279,6 +284,7 @@ private struct CitationLibraryView: View {
                     .overlay { RoundedRectangle(cornerRadius: 6).stroke(.quaternary) }
                 HStack {
                     Button("Import File") { importFile() }
+                    .help("Open a file picker to import citations")
                     Button("Import") {
                         do {
                             let result = try store.importCitations(importText)
@@ -288,6 +294,7 @@ private struct CitationLibraryView: View {
                             report = error.localizedDescription
                         }
                     }
+                    .help("Parse and import the entered citation text")
                     .disabled(importText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     Text(report).font(.caption).foregroundStyle(.secondary)
                 }
@@ -307,7 +314,9 @@ private struct CitationLibraryView: View {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(exportText, forType: .string)
                     }
+                    .help("Copy citations to clipboard")
                     Button("Save Export") { saveExport() }
+                    .help("Save citations to a file")
                 }
                 List {
                     ForEach(store.allCitationRecords()) { record in
@@ -357,7 +366,7 @@ private struct CitationLibraryView: View {
 }
 
 private struct EvidenceTablesView: View {
-    @EnvironmentObject private var store: PaperStore
+    @Environment(PaperStore.self) private var store
     @State private var selectedID: UUID?
     @State private var selectedPaperIDs = Set<UUID>()
     @State private var name = "Evidence Review"
@@ -380,6 +389,7 @@ private struct EvidenceTablesView: View {
                     selectedID = store.researchState.evidenceTables.last?.id
                     selectedPaperIDs = []
                 }
+                .help("Build an evidence table from the selected papers")
                 .disabled(selectedPaperIDs.isEmpty)
                 Divider()
                 List(selection: $selectedID) {
@@ -387,6 +397,7 @@ private struct EvidenceTablesView: View {
                         Label(table.name, systemImage: "tablecells").tag(table.id)
                             .contextMenu {
                                 Button("Delete", role: .destructive) { store.deleteEvidenceTable(table.id) }
+                                .help("Delete this evidence table")
                             }
                     }
                 }
@@ -416,7 +427,7 @@ private struct EvidenceTablesView: View {
 }
 
 private struct EvidenceTableEditor: View {
-    @EnvironmentObject private var store: PaperStore
+    @Environment(PaperStore.self) private var store
     @Binding var table: EvidenceTable
     @State private var newColumn = ""
 
@@ -433,6 +444,7 @@ private struct EvidenceTableEditor: View {
                     for row in table.rows.indices { table.rows[row].cells.append(EvidenceCell(columnID: column.id)) }
                     table.updatedAt = Date(); newColumn = ""
                 }
+                .help("Add a new evidence column to the table")
             }
 
             ScrollView([.horizontal, .vertical]) {
@@ -476,7 +488,7 @@ private struct EvidenceTableEditor: View {
 }
 
 private struct LibrarySearchChatView: View {
-    @EnvironmentObject private var store: PaperStore
+    @Environment(PaperStore.self) private var store
     @State private var query = ""
     @State private var results: [SemanticSearchResult] = []
     @State private var answer = ""
@@ -492,9 +504,11 @@ private struct LibrarySearchChatView: View {
                     .textFieldStyle(.roundedBorder)
                     .onSubmit(performSearch)
                 Button("Search", action: performSearch).disabled(query.count < 2)
+                    .help("Search across all documents in your library")
                 Button("Answer from Evidence") {
                     answer = SemanticSearchService.groundedAnswer(question: query, results: results)
                 }
+                .help("Generate a grounded answer from the search results")
                 .disabled(results.isEmpty)
             }
 
@@ -537,7 +551,7 @@ private struct LibrarySearchChatView: View {
 }
 
 private struct SynthesisWorkspacesView: View {
-    @EnvironmentObject private var store: PaperStore
+    @Environment(PaperStore.self) private var store
     @State private var selectedID: UUID?
     @State private var name = "Literature Synthesis"
     @State private var selectedPapers = Set<UUID>()
@@ -566,12 +580,12 @@ private struct SynthesisWorkspacesView: View {
                     store.createWorkspace(name: name, paperIDs: selectedPapers, evidenceTableID: evidenceTableID)
                     selectedID = store.researchState.workspaces.last?.id
                     selectedPapers = []
-                }.disabled(selectedPapers.isEmpty || name.isEmpty)
+                }.help("Create a new synthesis workspace").disabled(selectedPapers.isEmpty || name.isEmpty)
                 Divider()
                 List(selection: $selectedID) {
                     ForEach(store.researchState.workspaces) { workspace in
                         Label(workspace.name, systemImage: "square.and.pencil").tag(workspace.id)
-                            .contextMenu { Button("Delete", role: .destructive) { store.deleteWorkspace(workspace.id) } }
+                            .contextMenu { Button("Delete", role: .destructive) { store.deleteWorkspace(workspace.id) }.help("Delete this workspace") }
                     }
                 }
             }
@@ -593,7 +607,7 @@ private struct SynthesisWorkspacesView: View {
 }
 
 private struct WorkspaceEditor: View {
-    @EnvironmentObject private var store: PaperStore
+    @Environment(PaperStore.self) private var store
     @Binding var workspace: SynthesisWorkspace
 
     var body: some View {
@@ -601,10 +615,11 @@ private struct WorkspaceEditor: View {
             HStack {
                 TextField("Workspace name", text: $workspace.name).font(.headline)
                 Button("Generate Evidence Outline") { store.generateOutline(for: workspace.id) }
+                .help("Auto-generate an outline from collected evidence")
                 Button("Copy Draft") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(workspace.draft, forType: .string)
-                }.disabled(workspace.draft.isEmpty)
+                }.help("Copy the draft text to clipboard").disabled(workspace.draft.isEmpty)
             }
             HStack {
                 Text("\(workspace.paperIDs.count) sources").font(.caption).foregroundStyle(.secondary)
@@ -624,6 +639,7 @@ private struct WorkspaceEditor: View {
                         Text("Draft").font(.headline)
                         Spacer()
                         Button("Use Outline as Draft") { workspace.draft = workspace.outline }
+                            .help("Replace the draft with the current outline")
                             .disabled(workspace.outline.isEmpty)
                     }
                     TextEditor(text: $workspace.draft).font(.system(.body, design: .serif))
@@ -656,7 +672,7 @@ private struct DiscoveryAndGraphView: View {
 }
 
 private struct CitationGraphView: View {
-    @EnvironmentObject private var store: PaperStore
+    @Environment(PaperStore.self) private var store
     private var edges: [CitationEdge] { CitationGraphService.edges(for: store.papers) }
 
     var body: some View {
@@ -719,7 +735,7 @@ private struct CitationGraphCanvas: View {
 }
 
 private struct PaperDiscoveryView: View {
-    @EnvironmentObject private var store: PaperStore
+    @Environment(PaperStore.self) private var store
     @State private var query = ""
     @State private var results: [DiscoveryPaper] = []
     @State private var isSearching = false
@@ -732,10 +748,11 @@ private struct PaperDiscoveryView: View {
             HStack {
                 TextField("Topic, author, title, or DOI", text: $query).onSubmit(search)
                 Button("Search", action: search).disabled(query.isEmpty || isSearching)
+                .help("Search for papers on CrossRef")
                 if isSearching { ProgressView().controlSize(.small) }
                 Button("Save as Alert") {
                     store.createAlert(name: query, kind: .query, query: query)
-                }.disabled(query.isEmpty)
+                }.help("Create a recurring search alert").disabled(query.isEmpty)
             }
             List(results) { result in
                 HStack(alignment: .top) {
@@ -756,6 +773,7 @@ private struct PaperDiscoveryView: View {
                             record.citationKey = CitationService.citationKey(for: record)
                             store.researchState.citations = CitationService.deduplicated(store.researchState.citations + [record])
                         }
+                        .help("Add this paper to your citation library")
                     }
                 }
             }
@@ -773,7 +791,7 @@ private struct PaperDiscoveryView: View {
 }
 
 private struct AlertsView: View {
-    @EnvironmentObject private var store: PaperStore
+    @Environment(PaperStore.self) private var store
     @State private var name = ""
     @State private var query = ""
     @State private var kind: ResearchAlertKind = .query
@@ -788,7 +806,7 @@ private struct AlertsView: View {
                 Button("Create Alert") {
                     store.createAlert(name: name, kind: kind, query: query)
                     name = ""; query = ""
-                }.disabled(name.isEmpty || query.isEmpty)
+                }.help("Create a new research alert").disabled(name.isEmpty || query.isEmpty)
                 List {
                     ForEach(store.researchState.alerts) { alert in
                         VStack(alignment: .leading) {
@@ -796,7 +814,9 @@ private struct AlertsView: View {
                             Text(alert.query).font(.caption).foregroundStyle(.secondary)
                             HStack {
                                 Button("Check Now") { Task { await store.refreshAlert(alert.id) } }
+                                .help("Run this alert now")
                                 Button("Delete", role: .destructive) { store.deleteAlert(alert.id) }
+                                .help("Delete this alert")
                             }.buttonStyle(.borderless)
                         }
                     }

@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ReaderWorkspace: View {
-    @EnvironmentObject private var store: PaperStore
+    @Environment(PaperStore.self) private var store
     @AppStorage("resumeLastReadLocation") private var resumeLastReadLocation = true
     @Binding var paper: Paper
     @Binding var navigateToPage: Int?
@@ -70,7 +70,7 @@ struct ReaderWorkspace: View {
                     )
                     .frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)
 
-                    // Floating hover popover
+                    // Floating hover popover with Liquid Glass material
                     if let noteID = hoveredNoteID,
                        let note = paper.notes.first(where: { $0.id == noteID }) {
                         VStack(alignment: .leading, spacing: 6) {
@@ -87,10 +87,9 @@ struct ReaderWorkspace: View {
                                 .foregroundStyle(.primary)
                         }
                         .padding(12)
-                        .background(.background)
-                        .cornerRadius(8)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
                         .shadow(color: .black.opacity(0.15), radius: 6, x: 0, y: 3)
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary, lineWidth: 1))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary.opacity(0.3), lineWidth: 1))
                         .frame(maxWidth: 260)
                         .position(x: hoveredNotePoint.x + 10, y: hoveredNotePoint.y + 20)
                         .transition(.opacity.combined(with: .scale(scale: 0.95)))
@@ -314,6 +313,7 @@ struct ReaderWorkspace: View {
                             tempImageFileName = nil
                             cropResult = nil
                         }
+                        .help("Discard the area selection")
                         .buttonStyle(.borderless)
                         .font(.caption)
                     }
@@ -369,6 +369,7 @@ struct ReaderWorkspace: View {
                 } label: {
                     Label("Save Note", systemImage: "square.and.pencil")
                 }
+                .help("Save the note to the document")
                 .buttonStyle(.borderedProminent)
                 .disabled(
                     (tempImageFileName == nil && selectedText.isEmpty) ||
@@ -482,6 +483,7 @@ struct ReaderWorkspace: View {
                             Label("Summarize", systemImage: "text.badge.checkmark")
                                 .frame(maxWidth: .infinity)
                         }
+                        .help("Generate or regenerate a summary of the document")
                         .buttonStyle(.borderedProminent)
                         .keyboardShortcut("s", modifiers: .command)
                         .disabled(isGeneratingAI)
@@ -503,6 +505,7 @@ struct ReaderWorkspace: View {
                             Label("Extract", systemImage: "line.3.horizontal.decrease.circle")
                                 .frame(maxWidth: .infinity)
                         }
+                        .help("Extract key information like claims, methods, or evidence")
                         .disabled(isGeneratingAI)
                     }
 
@@ -519,6 +522,7 @@ struct ReaderWorkspace: View {
                             Label("Explain Selection", systemImage: "questionmark.bubble")
                                 .frame(maxWidth: .infinity)
                         }
+                        .help("Get an AI explanation of the currently selected text")
                         .disabled(isGeneratingAI || selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                         Button {
@@ -527,6 +531,7 @@ struct ReaderWorkspace: View {
                             Label("Export", systemImage: "square.and.arrow.up")
                                 .frame(maxWidth: .infinity)
                         }
+                        .help("Export notes and annotations as Markdown")
                     }
                 }
 
@@ -611,6 +616,7 @@ struct ReaderWorkspace: View {
                 } label: {
                     Image(systemName: "chevron.up")
                 }
+                .help("Previous match")
                 .buttonStyle(.plain)
                 .disabled(findCurrentIndex <= 0)
 
@@ -619,6 +625,7 @@ struct ReaderWorkspace: View {
                 } label: {
                     Image(systemName: "chevron.down")
                 }
+                .help("Next match")
                 .buttonStyle(.plain)
                 .disabled(findCurrentIndex >= findMatchesCount - 1)
             }
@@ -629,11 +636,12 @@ struct ReaderWorkspace: View {
                 Image(systemName: "xmark")
                     .foregroundStyle(.secondary)
             }
+            .help("Close find bar")
             .buttonStyle(.plain)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(.bar)
+        .background(.thinMaterial)
     }
 
     private var goToPageSheet: some View {
@@ -651,6 +659,7 @@ struct ReaderWorkspace: View {
                     showGoToPage = false
                     goToPageNumber = ""
                 }
+                .help("Cancel and close")
                 .keyboardShortcut(.escape)
 
                 Button("Go") {
@@ -660,6 +669,7 @@ struct ReaderWorkspace: View {
                     showGoToPage = false
                     goToPageNumber = ""
                 }
+                .help("Navigate to the specified page")
                 .keyboardShortcut(.return)
                 .buttonStyle(.borderedProminent)
                 .disabled(Int(goToPageNumber) == nil)
@@ -737,7 +747,7 @@ private struct AIStatusBadge: View {
         .font(.caption.weight(.medium))
         .foregroundStyle(.secondary)
         .padding(8)
-        .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
         .help(LocalPaperAI.statusText)
     }
 }
@@ -778,6 +788,7 @@ private struct CollapsibleSection<Content: View>: View {
                 .padding(.vertical, 10)
                 .contentShape(Rectangle())
             }
+            .help(isExpanded ? "Collapse \(title)" : "Expand \(title)")
             .buttonStyle(.plain)
 
             if isExpanded {
@@ -787,7 +798,7 @@ private struct CollapsibleSection<Content: View>: View {
                     .padding(.bottom, 12)
             }
         }
-        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
@@ -816,6 +827,7 @@ private struct MetadataEditView: View {
                         .foregroundStyle(.secondary)
                         .imageScale(.large)
                 }
+                .help("Close metadata editor")
                 .buttonStyle(.plain)
             }
             .padding()
@@ -851,18 +863,19 @@ private struct MetadataEditView: View {
                                         HStack(spacing: 4) {
                                             Text(tag)
                                                 .font(.caption)
-                                            Button {
-                                                tags.removeAll { $0 == tag }
-                                            } label: {
-                                                Image(systemName: "xmark")
-                                                    .font(.system(size: 8, weight: .bold))
-                                            }
-                                            .buttonStyle(.plain)
-                                            .foregroundStyle(.secondary)
+                                        Button {
+                                            tags.removeAll { $0 == tag }
+                                        } label: {
+                                            Image(systemName: "xmark")
+                                                .font(.system(size: 8, weight: .bold))
+                                        }
+                                        .help("Remove this tag")
+                                        .buttonStyle(.plain)
+                                        .foregroundStyle(.secondary)
                                         }
                                         .padding(.horizontal, 8)
                                         .padding(.vertical, 4)
-                                        .background(.secondary.opacity(0.15), in: Capsule())
+                                        .background(.ultraThinMaterial, in: Capsule())
                                     }
                                 }
                             } else {
@@ -880,6 +893,7 @@ private struct MetadataEditView: View {
                                 Button(action: addTag) {
                                     Image(systemName: "plus")
                                 }
+                                .help("Add this tag")
                                 .disabled(newTag.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                             }
                         }
@@ -896,12 +910,14 @@ private struct MetadataEditView: View {
                 Button("Cancel") {
                     dismiss()
                 }
+                .help("Discard changes and close")
                 .keyboardShortcut(.escape)
 
                 Button("Save Changes") {
                     save()
                     dismiss()
                 }
+                .help("Save metadata changes")
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.return)
             }

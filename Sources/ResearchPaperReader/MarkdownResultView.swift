@@ -196,7 +196,7 @@ struct MarkdownResultView: View {
         case let .quote(text):
             HStack(alignment: .top, spacing: 10) {
                 Capsule()
-                    .fill(.secondary.opacity(0.45))
+                    .fill(.ultraThinMaterial)
                     .frame(width: 3)
                 Text(inlineMarkdown(text))
                     .foregroundStyle(.secondary)

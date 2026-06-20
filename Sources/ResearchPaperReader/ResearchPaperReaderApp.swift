@@ -7,12 +7,13 @@ private enum AppWindowMetrics {
 
 @main
 struct ResearchPaperReaderApp: App {
-    @StateObject private var store = PaperStore()
+    @State private var store = PaperStore()
 
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .environmentObject(store)
+                .environment(store)
+                .tint(.accentColor)
                 .frame(
                     minWidth: AppWindowMetrics.minimumSize.width,
                     minHeight: AppWindowMetrics.minimumSize.height

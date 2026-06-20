@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ContentView: View {
-    @EnvironmentObject private var store: PaperStore
+    @Environment(PaperStore.self) private var store
     @State private var selectedPaperID: Paper.ID?
     @State private var searchText = ""
     @State private var debouncedSearch = ""
@@ -58,6 +58,7 @@ struct ContentView: View {
                         } label: {
                             Label("Back to Library", systemImage: "chevron.left")
                         }
+                        .help("Return to document library")
                     }
 
                     Button {
@@ -65,6 +66,7 @@ struct ContentView: View {
                     } label: {
                         Label("Import PDFs", systemImage: "plus")
                     }
+                    .help("Import PDF documents into library")
                     .background {
                         Button("") { store.importWithOpenPanel() }
                             .keyboardShortcut("i", modifiers: .command)
@@ -80,6 +82,7 @@ struct ContentView: View {
                     } label: {
                         Label("Research Hub", systemImage: "point.3.connected.trianglepath.dotted")
                     }
+                    .help("Open research workspace with collections, citations, and discovery")
                     .keyboardShortcut("h", modifiers: [.command, .shift])
                 }
 
@@ -91,6 +94,7 @@ struct ContentView: View {
                 } label: {
                     Label(isSelecting ? "Done" : "Select", systemImage: isSelecting ? "checkmark.circle.fill" : "checkmark.circle")
                 }
+                .help(isSelecting ? "Finish selecting documents" : "Select multiple documents to batch delete")
             }
 
             if isSelecting && !selectedIDs.isEmpty {
@@ -100,6 +104,7 @@ struct ContentView: View {
                     } label: {
                         Label("Delete (\(selectedIDs.count))", systemImage: "trash")
                     }
+                    .help("Delete selected documents from library")
                 }
             }
         }
@@ -111,7 +116,7 @@ struct ContentView: View {
             navigateToPage = page
             showResearchHub = false
         }
-        .environmentObject(store)
+        .environment(store)
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Button {
@@ -119,6 +124,7 @@ struct ContentView: View {
                 } label: {
                     Label("Back to Library", systemImage: "chevron.left")
                 }
+                .help("Return to document library")
                 .keyboardShortcut("[", modifiers: .command)
             }
         }
@@ -139,7 +145,7 @@ struct ContentView: View {
                         .focused($searchFocused)
                 }
                 .padding(8)
-                .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
 
                 HStack(spacing: 8) {
                     Picker("Status", selection: $statusFilter) {
@@ -216,6 +222,7 @@ struct ContentView: View {
                             Label("Delete", systemImage: "trash")
                                 .font(.caption)
                         }
+                        .help("Delete selected documents")
                         .buttonStyle(.borderedProminent)
                         .tint(.red)
                         .controlSize(.small)
@@ -223,6 +230,7 @@ struct ContentView: View {
                         Button("Select All") {
                             selectedIDs = Set(sidebarPapers.map(\.id))
                         }
+                        .help("Select all visible documents")
                         .buttonStyle(.plain)
                         .font(.caption)
                         .foregroundStyle(.blue)
@@ -291,7 +299,7 @@ struct ContentView: View {
     private var detail: some View {
         if let selectedPaperBinding {
             ReaderWorkspace(paper: selectedPaperBinding, navigateToPage: $navigateToPage)
-                .environmentObject(store)
+                .environment(store)
                 .transition(.asymmetric(
                     insertion: .move(edge: .trailing).combined(with: .opacity),
                     removal: .move(edge: .leading).combined(with: .opacity)
@@ -303,7 +311,7 @@ struct ContentView: View {
                 debouncedSearch: $debouncedSearch,
                 statusFilter: $statusFilter
             )
-            .environmentObject(store)
+            .environment(store)
             .transition(.asymmetric(
                 insertion: .move(edge: .leading).combined(with: .opacity),
                 removal: .move(edge: .trailing).combined(with: .opacity)
