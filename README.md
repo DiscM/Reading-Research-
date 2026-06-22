@@ -4,6 +4,16 @@ A local-first, AI-assisted research paper reader for macOS. Import PDFs, read de
 
 Built with SwiftUI and PDFKit. Designed for graduate students, researchers, and anyone who reads dense technical literature.
 
+## Screenshots
+
+### Library
+
+![A populated research library with reading progress, metadata, search, filters, and sorting](screenshots/playtest-library.png)
+
+| PDF reading and notes | On-device research assistant |
+| --- | --- |
+| ![A PDF open beside the typed-notes inspector](screenshots/playtest-reader-notes.png) | ![A research paper open beside the local AI assistant](screenshots/playtest-reader-assistant.png) |
+
 ## Features
 
 - **Selection screen** — A visual card-based browser shows papers as rich cards with title, authors, abstract preview, reading status badge, import date, note count, year, venue, and tags. Sort by Recent, Title, Author, or Year with animated reordering.
