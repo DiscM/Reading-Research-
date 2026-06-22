@@ -37,6 +37,7 @@ final class PaperStore {
     private var saveTask: Task<Void, Never>?
     private var researchSaveTask: Task<Void, Never>?
     private var importTask: Task<Void, Never>?
+    private var alertMonitorTask: Task<Void, Never>?
 
     init(baseDirectory: URL? = nil) {
         if let baseDirectory {
@@ -54,6 +55,7 @@ final class PaperStore {
         try? fileManager.createDirectory(at: imagesDirectory, withIntermediateDirectories: true)
         load()
         loadResearchState()
+        startAlertMonitoring()
     }
 
     func importWithOpenPanel() {
@@ -225,12 +227,129 @@ final class PaperStore {
         researchState.citations.removeAll { $0.id == id }
     }
 
+    @discardableResult
+    func saveDiscoveryCitation(_ paper: DiscoveryPaper) -> Bool {
+        var record = CitationRecord(
+            title: paper.title,
+            authors: paper.authors,
+            year: paper.year,
+            venue: paper.venue,
+            doi: paper.doi,
+            abstract: paper.abstract,
+            source: .crossref
+        )
+        record.citationKey = CitationService.citationKey(for: record)
+        let wasSaved = isDiscoveryCitationSaved(paper)
+        researchState.citations = CitationService.deduplicated(researchState.citations + [record])
+        lastNotice = wasSaved
+            ? "“\(paper.title)” is already saved."
+            : "Saved “\(paper.title)” to the citation library."
+        return !wasSaved
+    }
+
+    func isDiscoveryCitationSaved(_ paper: DiscoveryPaper) -> Bool {
+        let fingerprint = DiscoveryService.discoveryFingerprint(paper)
+        return researchState.citations.contains { $0.fingerprint == fingerprint }
+            || papers.contains { CitationService.record(for: $0).fingerprint == fingerprint }
+    }
+
+    func removeDiscoveryCitation(_ paper: DiscoveryPaper) {
+        let fingerprint = DiscoveryService.discoveryFingerprint(paper)
+        researchState.citations.removeAll { $0.fingerprint == fingerprint }
+        lastNotice = "Removed “\(paper.title)” from saved citations."
+    }
+
+    var savedDiscoveryPapers: [DiscoveryPaper] {
+        researchState.citations.map { record in
+            DiscoveryPaper(
+                title: record.title,
+                authors: record.authors,
+                year: record.year,
+                venue: record.venue,
+                doi: record.doi,
+                abstract: record.abstract
+            )
+        }
+    }
+    func setDiscoveryFeedback(_ isRelevant: Bool, for paper: DiscoveryPaper) {
+        researchState.discoveryFeedback[paper.id] = isRelevant
+    }
+
+    func clearDismissedDiscoveryPapers() {
+        researchState.discoveryFeedback = researchState.discoveryFeedback.filter { $0.value }
+        lastNotice = "Restored hidden recommendations."
+    }
+
     // MARK: - Evidence and synthesis
 
     func createEvidenceTable(name: String, paperIDs: Set<UUID>) {
         let selected = papers.filter { paperIDs.contains($0.id) }
         guard !selected.isEmpty else { return }
         researchState.evidenceTables.append(EvidenceService.makeTable(name: name, papers: selected))
+        lastNotice = "Created evidence table with \(selected.count) source\(selected.count == 1 ? "" : "s")."
+    }
+
+    func addPapers(_ paperIDs: Set<UUID>, toEvidenceTable tableID: UUID) {
+        guard let index = researchState.evidenceTables.firstIndex(where: { $0.id == tableID }) else { return }
+        let existing = Set(researchState.evidenceTables[index].rows.map(\.paperID))
+        let additions = papers.filter { paperIDs.contains($0.id) && !existing.contains($0.id) }
+        guard !additions.isEmpty else { return }
+        let columns = researchState.evidenceTables[index].columns
+        researchState.evidenceTables[index].rows.append(contentsOf: additions.map {
+            EvidenceService.makeRow(for: $0, columns: columns)
+        })
+        researchState.evidenceTables[index].updatedAt = Date()
+        lastNotice = "Added \(additions.count) source\(additions.count == 1 ? "" : "s") to the evidence table."
+    }
+
+    func removePaper(_ paperID: UUID, fromEvidenceTable tableID: UUID) {
+        guard let index = researchState.evidenceTables.firstIndex(where: { $0.id == tableID }) else { return }
+        researchState.evidenceTables[index].rows.removeAll { $0.paperID == paperID }
+        researchState.evidenceTables[index].updatedAt = Date()
+    }
+
+    @discardableResult
+    func addEvidenceColumn(name: String, to tableID: UUID) -> Bool {
+        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty,
+              let tableIndex = researchState.evidenceTables.firstIndex(where: { $0.id == tableID }),
+              !researchState.evidenceTables[tableIndex].columns.contains(where: {
+                  $0.name.localizedCaseInsensitiveCompare(clean) == .orderedSame
+              }) else { return false }
+
+        let column = EvidenceColumn(name: clean)
+        researchState.evidenceTables[tableIndex].columns.append(column)
+        for rowIndex in researchState.evidenceTables[tableIndex].rows.indices {
+            let paperID = researchState.evidenceTables[tableIndex].rows[rowIndex].paperID
+            let suggestion = papers.first(where: { $0.id == paperID })
+                .map { EvidenceService.suggestedValue(clean, paper: $0) } ?? ""
+            researchState.evidenceTables[tableIndex].rows[rowIndex].cells.append(
+                EvidenceCell(columnID: column.id, value: suggestion, quote: suggestion)
+            )
+        }
+        researchState.evidenceTables[tableIndex].updatedAt = Date()
+        return true
+    }
+
+    @discardableResult
+    func deleteEvidenceColumn(_ columnID: EvidenceColumn.ID, from tableID: UUID) -> Bool {
+        guard let tableIndex = researchState.evidenceTables.firstIndex(where: { $0.id == tableID }),
+              researchState.evidenceTables[tableIndex].columns.count > 1,
+              let columnIndex = researchState.evidenceTables[tableIndex].columns.firstIndex(where: {
+                  $0.id == columnID
+              }) else { return false }
+        researchState.evidenceTables[tableIndex].columns.remove(at: columnIndex)
+        for rowIndex in researchState.evidenceTables[tableIndex].rows.indices {
+            researchState.evidenceTables[tableIndex].rows[rowIndex].cells.removeAll { $0.columnID == columnID }
+        }
+        researchState.evidenceTables[tableIndex].updatedAt = Date()
+        return true
+    }
+
+    func populateEmptyEvidenceCells(in tableID: UUID) {
+        guard let index = researchState.evidenceTables.firstIndex(where: { $0.id == tableID }) else { return }
+        EvidenceService.populateEmptyCells(in: &researchState.evidenceTables[index], papers: papers)
+        lastNotice = "Filled available evidence from local paper text."
     }
 
     func deleteEvidenceTable(_ id: UUID) {
@@ -272,19 +391,36 @@ final class PaperStore {
 
     // MARK: - Alerts
 
-    func createAlert(name: String, kind: ResearchAlertKind, query: String) {
+    @discardableResult
+    func createAlert(name: String, kind: ResearchAlertKind, query: String) -> Bool {
         let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let cleanQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleanName.isEmpty, !cleanQuery.isEmpty else { return }
+        let rawQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanQuery = kind == .citations ? rawQuery.normalizedDOI : rawQuery
+        guard !cleanName.isEmpty, !cleanQuery.isEmpty else { return false }
+        if kind == .citations, cleanQuery.range(of: #"^10\.\d{4,9}/\S+$"#, options: .regularExpression) == nil {
+            lastError = "Incoming-citation alerts require a valid DOI."
+            return false
+        }
+        guard !researchState.alerts.contains(where: { $0.kind == kind && $0.query.caseInsensitiveCompare(cleanQuery) == .orderedSame }) else {
+            lastNotice = "An alert for “\(cleanQuery)” already exists."
+            return false
+        }
         researchState.alerts.append(ResearchAlert(name: cleanName, kind: kind, query: cleanQuery))
+        lastNotice = "Created alert “\(cleanName)”."
+        return true
     }
 
-    func refreshAlert(_ id: UUID) async {
+    func refreshAlert(_ id: UUID, notify: Bool = false) async {
         guard let alert = researchState.alerts.first(where: { $0.id == id }) else { return }
         do {
             let updated = try await DiscoveryService.refresh(alert)
             guard let index = researchState.alerts.firstIndex(where: { $0.id == id }) else { return }
+            let existingIDs = Set(researchState.alerts[index].matches.map(\.id))
+            let newMatches = updated.matches.filter { !existingIDs.contains($0.id) }
             researchState.alerts[index] = updated
+            if notify, !newMatches.isEmpty {
+                await DiscoveryNotificationService.post(alertName: alert.name, matches: newMatches)
+            }
         } catch {
             lastError = "Could not refresh \(alert.name): \(error.localizedDescription)"
         }
@@ -292,6 +428,28 @@ final class PaperStore {
 
     func deleteAlert(_ id: UUID) {
         researchState.alerts.removeAll { $0.id == id }
+    }
+
+    private func startAlertMonitoring() {
+        alertMonitorTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                if UserDefaults.standard.bool(forKey: "automaticResearchAlerts") {
+                    let storedInterval = UserDefaults.standard.double(forKey: "researchAlertIntervalHours")
+                    let intervalHours = storedInterval > 0 ? storedInterval : 24
+                    let interval = intervalHours * 3_600
+                    let stale = self.researchState.alerts.filter { alert in
+                        guard alert.isEnabled else { return false }
+                        guard let checked = alert.lastChecked else { return true }
+                        return Date().timeIntervalSince(checked) >= interval
+                    }
+                    for alert in stale {
+                        await self.refreshAlert(alert.id, notify: true)
+                    }
+                }
+                try? await Task.sleep(for: .seconds(60))
+            }
+        }
     }
 
     func reEnrich(_ paper: Paper) async {

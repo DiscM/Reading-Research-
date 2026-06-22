@@ -33,8 +33,9 @@ struct PDFReaderView: NSViewRepresentable {
         Coordinator(self)
     }
 
-    func makeNSView(context: Context) -> CropPDFView {
-        let pdfView = CropPDFView()
+    func makeNSView(context: Context) -> CropPDFContainerView {
+        let containerView = CropPDFContainerView()
+        let pdfView = containerView.pdfView
         pdfView.autoScales = true
         pdfView.displayMode = .singlePageContinuous
         pdfView.displayDirection = .vertical
@@ -84,11 +85,12 @@ struct PDFReaderView: NSViewRepresentable {
         )
 
         context.coordinator.pdfView = pdfView
-        return pdfView
+        return containerView
     }
 
-    func updateNSView(_ nsView: CropPDFView, context: Context) {
+    func updateNSView(_ containerView: CropPDFContainerView, context: Context) {
         context.coordinator.parent = self
+        let nsView = containerView.pdfView
 
         if nsView.document?.documentURL != url {
             nsView.document = PDFDocument(url: url)
@@ -273,21 +275,47 @@ struct PDFReaderView: NSViewRepresentable {
     }
 }
 
+final class CropPDFContainerView: NSView {
+    let pdfView = CropPDFView()
+    private let selectionOverlay = CropSelectionOverlayView()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        installSubviews()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        installSubviews()
+    }
+
+    private func installSubviews() {
+        pdfView.frame = bounds
+        pdfView.autoresizingMask = [.width, .height]
+        addSubview(pdfView)
+
+        selectionOverlay.frame = bounds
+        selectionOverlay.autoresizingMask = [.width, .height]
+        selectionOverlay.wantsLayer = true
+        addSubview(selectionOverlay, positioned: .above, relativeTo: pdfView)
+        selectionOverlay.pdfView = pdfView
+
+        pdfView.onCropModeChanged = { [weak self] isActive in
+            self?.selectionOverlay.isCropModeActive = isActive
+        }
+    }
+}
+
 final class CropPDFView: PDFView {
     var isCropModeActive = false {
         didSet {
             window?.invalidateCursorRects(for: self)
-            if !isCropModeActive {
-                cropStartPoint = nil
-                cropEndPoint = nil
-            }
-            needsDisplay = true
+            onCropModeChanged?(isCropModeActive)
         }
     }
     
-    var cropStartPoint: CGPoint?
-    var cropEndPoint: CGPoint?
     var onCropCompleted: ((CGRect, PDFPage) -> Void)?
+    var onCropModeChanged: ((Bool) -> Void)?
     var onNoteHovered: ((UUID, CGPoint) -> Void)?
     var onNoteHoverEnded: (() -> Void)?
     
@@ -313,49 +341,6 @@ final class CropPDFView: PDFView {
         } else {
             super.resetCursorRects()
         }
-    }
-    
-    override func mouseDown(with event: NSEvent) {
-        guard isCropModeActive else {
-            super.mouseDown(with: event)
-            return
-        }
-        let point = convert(event.locationInWindow, from: nil)
-        cropStartPoint = point
-        cropEndPoint = point
-        needsDisplay = true
-    }
-    
-    override func mouseDragged(with event: NSEvent) {
-        guard isCropModeActive, cropStartPoint != nil else {
-            super.mouseDragged(with: event)
-            return
-        }
-        let point = convert(event.locationInWindow, from: nil)
-        cropEndPoint = point
-        needsDisplay = true
-    }
-    
-    override func mouseUp(with event: NSEvent) {
-        guard isCropModeActive, let start = cropStartPoint, let end = cropEndPoint else {
-            super.mouseUp(with: event)
-            return
-        }
-        let rect = CGRect(
-            x: min(start.x, end.x),
-            y: min(start.y, end.y),
-            width: abs(start.x - end.x),
-            height: abs(start.y - end.y)
-        )
-        if rect.width > 5 && rect.height > 5 {
-            if let page = page(for: start, nearest: true) {
-                let pageRect = convert(rect, to: page)
-                onCropCompleted?(pageRect, page)
-            }
-        }
-        cropStartPoint = nil
-        cropEndPoint = nil
-        needsDisplay = true
     }
     
     override func mouseMoved(with event: NSEvent) {
@@ -416,40 +401,116 @@ final class CropPDFView: PDFView {
             onNoteHoverEnded?()
         }
     }
-    
-    override func draw(_ rect: NSRect) {
-        super.draw(rect)
-        
-        if isCropModeActive, let start = cropStartPoint, let end = cropEndPoint {
-            let selectRect = CGRect(
-                x: min(start.x, end.x),
-                y: min(start.y, end.y),
-                width: abs(start.x - end.x),
-                height: abs(start.y - end.y)
-            )
-            
-            guard let context = NSGraphicsContext.current?.cgContext else { return }
-            
-            context.setFillColor(NSColor.black.withAlphaComponent(0.35).cgColor)
-            let path = CGMutablePath()
-            path.addRect(bounds)
-            path.addRect(selectRect)
-            context.addPath(path)
-            context.drawPath(using: .eoFill)
-            
-            context.setStrokeColor(NSColor.systemBlue.cgColor)
-            context.setLineWidth(2)
-            context.stroke(selectRect)
-            
-            let handleSize: CGFloat = 6
-            context.setFillColor(NSColor.systemBlue.cgColor)
-            let handles = [
-                CGRect(x: selectRect.minX - handleSize/2, y: selectRect.minY - handleSize/2, width: handleSize, height: handleSize),
-                CGRect(x: selectRect.maxX - handleSize/2, y: selectRect.minY - handleSize/2, width: handleSize, height: handleSize),
-                CGRect(x: selectRect.minX - handleSize/2, y: selectRect.maxY - handleSize/2, width: handleSize, height: handleSize),
-                CGRect(x: selectRect.maxX - handleSize/2, y: selectRect.maxY - handleSize/2, width: handleSize, height: handleSize)
-            ]
-            context.fill(handles)
+}
+
+private final class CropSelectionOverlayView: NSView {
+    weak var pdfView: CropPDFView?
+    var isCropModeActive = false {
+        didSet {
+            window?.invalidateCursorRects(for: self)
+            if !isCropModeActive {
+                clearSelection()
+            }
         }
+    }
+
+    private var selectionStart: CGPoint?
+    private var selectionEnd: CGPoint?
+
+    override var isOpaque: Bool { false }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        isCropModeActive ? self : nil
+    }
+
+    override func resetCursorRects() {
+        if isCropModeActive {
+            addCursorRect(bounds, cursor: .crosshair)
+        } else {
+            super.resetCursorRects()
+        }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard isCropModeActive else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        selectionStart = point
+        selectionEnd = point
+        needsDisplay = true
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard isCropModeActive, selectionStart != nil else { return }
+        selectionEnd = convert(event.locationInWindow, from: nil)
+        needsDisplay = true
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard isCropModeActive,
+              let start = selectionStart,
+              let end = selectionEnd,
+              let pdfView else {
+            clearSelection()
+            return
+        }
+
+        let selectionRect = normalizedSelectionRect(from: start, to: end)
+        if selectionRect.width > 5, selectionRect.height > 5 {
+            let startInPDFView = pdfView.convert(start, from: self)
+            let rectInPDFView = pdfView.convert(selectionRect, from: self)
+            if let page = pdfView.page(for: startInPDFView, nearest: true) {
+                let pageRect = pdfView.convert(rectInPDFView, to: page)
+                pdfView.onCropCompleted?(pageRect, page)
+            }
+        }
+
+        clearSelection()
+    }
+
+    private func clearSelection() {
+        selectionStart = nil
+        selectionEnd = nil
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+
+        guard let start = selectionStart,
+              let end = selectionEnd,
+              let context = NSGraphicsContext.current?.cgContext else {
+            return
+        }
+
+        let selectionRect = normalizedSelectionRect(from: start, to: end)
+
+        context.setFillColor(NSColor.black.withAlphaComponent(0.35).cgColor)
+        let dimmingPath = CGMutablePath()
+        dimmingPath.addRect(bounds)
+        dimmingPath.addRect(selectionRect)
+        context.addPath(dimmingPath)
+        context.drawPath(using: .eoFill)
+
+        context.setStrokeColor(NSColor.systemBlue.cgColor)
+        context.setLineWidth(2)
+        context.stroke(selectionRect)
+
+        let handleSize: CGFloat = 6
+        context.setFillColor(NSColor.systemBlue.cgColor)
+        context.fill([
+            CGRect(x: selectionRect.minX - handleSize / 2, y: selectionRect.minY - handleSize / 2, width: handleSize, height: handleSize),
+            CGRect(x: selectionRect.maxX - handleSize / 2, y: selectionRect.minY - handleSize / 2, width: handleSize, height: handleSize),
+            CGRect(x: selectionRect.minX - handleSize / 2, y: selectionRect.maxY - handleSize / 2, width: handleSize, height: handleSize),
+            CGRect(x: selectionRect.maxX - handleSize / 2, y: selectionRect.maxY - handleSize / 2, width: handleSize, height: handleSize)
+        ])
+    }
+
+    private func normalizedSelectionRect(from start: CGPoint, to end: CGPoint) -> CGRect {
+        CGRect(
+            x: min(start.x, end.x),
+            y: min(start.y, end.y),
+            width: abs(start.x - end.x),
+            height: abs(start.y - end.y)
+        )
     }
 }

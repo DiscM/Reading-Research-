@@ -17,8 +17,13 @@ private let bibTeXEntryRegex = try! NSRegularExpression(pattern: #"(?s)@(\w+)\s*
 private let bibFieldRegex = try! NSRegularExpression(pattern: #"(?is)(\w+)\s*=\s*(?:\{((?:[^{}]|\{[^{}]*\})*)\}|\"([^\"]*)\")\s*,?"#)
 let doiPattern = #"10\.\d{4,}/[^\s,;()\[\]{}]+"#
 let yearPattern = #"(?:19|20)\d{2}"#
-let referenceMarkerPattern = #"(?:\[\d+\]|^\d+[\.\)])"#
-let referenceLineCleanPattern = #"^\s*(?:\[\d+\]|\d+[\.\)])\s*"#
+let referenceMarkerPattern = #"^\s*(?:\[\d{1,4}\]|\d{1,4}[\.\)])\s+"#
+let referenceLineCleanPattern = #"^\s*(?:\[\d{1,4}\]|\d{1,4}[\.\)])\s+"#
+private let referenceHeadingPattern = #"(?im)^\s*(?:references|bibliography|works cited)\s*$"#
+private let referenceNoiseTerms = [
+    "addendum", "appendix", "all rights reserved", "copyright", "continued on",
+    "footer", "footnote", "supplementary material", "page intentionally left blank"
+]
 
 extension String {
     var normalizedDOI: String {
@@ -184,6 +189,17 @@ enum CitationService {
 }
 
 enum SemanticSearchService {
+    private static let minimumResultScore = 0.16
+    private static let minimumSemanticScore = 0.28
+    private static let maximumResultsPerPaper = 3
+    private static let searchStopWords: Set<String> = [
+        "about", "after", "also", "and", "are", "based", "been", "before", "being", "between",
+        "can", "could", "did", "does", "from", "have", "how", "into", "its", "may", "might",
+        "more", "most", "not", "our", "should", "than", "that", "the", "their", "then", "there",
+        "these", "they", "this", "those", "through", "using", "was", "were", "what", "when",
+        "where", "which", "while", "who", "why", "will", "with", "would", "your",
+    ]
+
     static func search(query: String, papers: [Paper], limit: Int = 12) -> [SemanticSearchResult] {
         let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard normalized.count >= 2 else { return [] }
@@ -192,6 +208,7 @@ enum SemanticSearchService {
 
         var results: [SemanticSearchResult] = []
         for paper in papers {
+            var paperResults: [SemanticSearchResult] = []
             for chunk in chunks(for: paper) {
                 let lexical = lexicalScore(query: normalized, text: chunk.text)
                 let semantic: Double
@@ -201,9 +218,11 @@ enum SemanticSearchService {
                     semantic = lexical
                 }
                 let metadataBoost = paper.title.localizedCaseInsensitiveContains(normalized) ? 0.2 : 0
-                let score = max(0, semantic) * 0.72 + lexical * 0.28 + metadataBoost
-                if score > 0.08 {
-                    results.append(SemanticSearchResult(
+                let score = max(0, semantic) * 0.60 + lexical * 0.40 + metadataBoost
+                let hasMeaningfulOverlap = lexicalMatchCount(query: normalized, text: chunk.text) > 0
+                let passesRelevanceGate = hasMeaningfulOverlap || semantic >= minimumSemanticScore
+                if passesRelevanceGate, score >= minimumResultScore {
+                    paperResults.append(SemanticSearchResult(
                         paperID: paper.id,
                         paperTitle: paper.title,
                         page: chunk.page,
@@ -212,6 +231,7 @@ enum SemanticSearchService {
                     ))
                 }
             }
+            results.append(contentsOf: paperResults.sorted { $0.score > $1.score }.prefix(maximumResultsPerPaper))
         }
         return Array(results.sorted { $0.score > $1.score }.prefix(limit))
     }
@@ -231,11 +251,11 @@ enum SemanticSearchService {
     private static func chunks(for paper: Paper) -> [(text: String, page: Int?)] {
         var chunks: [(String, Int?)] = []
         if !paper.abstract.isEmpty { chunks.append((paper.abstract, 1)) }
-        for section in paper.sections where !section.text.isEmpty {
+        for section in paper.sections where section.kind != .references && !section.text.isEmpty {
             chunks.append((String(section.text.prefix(1_500)), section.page))
         }
         if chunks.count < 2 {
-            let pages = pageTexts(for: paper)
+            let pages = pageTextsForSearch(for: paper)
             chunks.append(contentsOf: pages.enumerated().compactMap { index, text in
                 let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
                 return clean.isEmpty ? nil : (String(clean.prefix(1_500)), index + 1)
@@ -245,9 +265,9 @@ enum SemanticSearchService {
         return chunks
     }
 
-    private static func pageTexts(for paper: Paper) -> [String] {
-        let text = paper.allText
-        let offsets = paper.allTextPageOffsets
+    private static func pageTextsForSearch(for paper: Paper) -> [String] {
+        let text = searchableFullText(for: paper)
+        let offsets = paper.allTextPageOffsets.filter { $0 < text.count }
         guard !offsets.isEmpty else { return [String(text.prefix(3_000))] }
         var idx = text.startIndex
         return offsets.enumerated().map { index, start in
@@ -260,6 +280,24 @@ enum SemanticSearchService {
         }
     }
 
+    private static func searchableFullText(for paper: Paper) -> String {
+        let text = paper.allText
+        let headingPattern = #"(?im)^\s*(?:\d+[.\s]+)?(?:references|bibliography|works cited)\s*$"#
+        if let heading = text.range(of: headingPattern, options: .regularExpression) {
+            return String(text[..<heading.lowerBound])
+        }
+
+        if let references = paper.sections.first(where: { $0.kind == .references }),
+           !references.text.isEmpty {
+            let marker = String(references.text.prefix(160)).trimmingCharacters(in: .whitespacesAndNewlines)
+            if marker.count >= 20,
+               let range = text.range(of: marker, options: [.caseInsensitive, .diacriticInsensitive]) {
+                return String(text[..<range.lowerBound])
+            }
+        }
+        return text
+    }
+
     private static func lexicalScore(query: String, text: String) -> Double {
         let queryTokens = Set(tokens(query))
         guard !queryTokens.isEmpty else { return 0 }
@@ -267,15 +305,20 @@ enum SemanticSearchService {
         return Double(queryTokens.intersection(textTokens).count) / Double(queryTokens.count)
     }
 
+    private static func lexicalMatchCount(query: String, text: String) -> Int {
+        Set(tokens(query)).intersection(Set(tokens(text))).count
+    }
+
     private static func tokens(_ text: String) -> [String] {
-        text.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map { token in
+        text.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).compactMap { token in
             var value = String(token)
+            guard value.count > 2, !searchStopWords.contains(value) else { return nil }
             for suffix in ["ing", "ed", "es", "s"] where value.count > suffix.count + 3 && value.hasSuffix(suffix) {
                 value.removeLast(suffix.count)
                 break
             }
             return value
-        }.filter { $0.count > 2 }
+        }
     }
 
     private static func cosine(_ lhs: [Double], _ rhs: [Double]) -> Double {
@@ -302,12 +345,74 @@ enum EvidenceService {
 
     static func makeTable(name: String, papers: [Paper]) -> EvidenceTable {
         let columns = defaultColumnNames.map { EvidenceColumn(name: $0) }
-        let rows = papers.map { paper in
-            EvidenceRow(paperID: paper.id, cells: columns.map { column in
-                EvidenceCell(columnID: column.id, value: suggestedValue(column.name, paper: paper))
-            })
+        let rows = papers.map { makeRow(for: $0, columns: columns) }
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return EvidenceTable(name: cleanName.isEmpty ? "Evidence Review" : cleanName, columns: columns, rows: rows)
+    }
+
+    static func makeRow(for paper: Paper, columns: [EvidenceColumn]) -> EvidenceRow {
+        EvidenceRow(paperID: paper.id, cells: columns.map { column in
+            let suggestion = suggestedValue(column.name, paper: paper)
+            return EvidenceCell(columnID: column.id, value: suggestion, quote: suggestion)
+        })
+    }
+
+    static func populateEmptyCells(in table: inout EvidenceTable, papers: [Paper]) {
+        for rowIndex in table.rows.indices {
+            guard let paper = papers.first(where: { $0.id == table.rows[rowIndex].paperID }) else { continue }
+            for cellIndex in table.rows[rowIndex].cells.indices {
+                guard let column = table.columns.first(where: {
+                    $0.id == table.rows[rowIndex].cells[cellIndex].columnID
+                }) else { continue }
+                if table.rows[rowIndex].cells[cellIndex].value.isEmpty {
+                    table.rows[rowIndex].cells[cellIndex].value = suggestedValue(column.name, paper: paper)
+                }
+                if table.rows[rowIndex].cells[cellIndex].quote.isEmpty {
+                    table.rows[rowIndex].cells[cellIndex].quote = table.rows[rowIndex].cells[cellIndex].value
+                }
+            }
         }
-        return EvidenceTable(name: name, columns: columns, rows: rows)
+        table.updatedAt = Date()
+    }
+
+    static func csv(for table: EvidenceTable, papers: [Paper]) -> String {
+        let header = ["Source", "Authors", "Year"] + table.columns.map(\.name)
+        let rows = table.rows.map { row -> [String] in
+            let source = papers.first(where: { $0.id == row.paperID })
+            let values = table.columns.map { column in
+                row.cells.first(where: { $0.columnID == column.id })?.value ?? ""
+            }
+            return [source?.title ?? "Missing source", source?.authors ?? "", source?.year ?? ""] + values
+        }
+        return ([header] + rows).map { fields in
+            fields.map { value in
+                "\"\(value.replacingOccurrences(of: "\"", with: "\"\""))\""
+            }.joined(separator: ",")
+        }.joined(separator: "\n")
+    }
+
+    static func markdown(for table: EvidenceTable, papers: [Paper]) -> String {
+        let header = ["Source", "Authors", "Year"] + table.columns.map(\.name)
+        let rows = table.rows.map { row -> [String] in
+            let source = papers.first(where: { $0.id == row.paperID })
+            let values = table.columns.map { column in
+                row.cells.first(where: { $0.columnID == column.id })?.value ?? ""
+            }
+            return [source?.title ?? "Missing source", source?.authors ?? "", source?.year ?? ""] + values
+        }
+        let markdownRows = ([header] + [Array(repeating: "---", count: header.count)] + rows)
+            .map { fields in
+                "| " + fields.map(markdownTableCell).joined(separator: " | ") + " |"
+            }
+        return (["# \(table.name)", ""] + markdownRows).joined(separator: "\n") + "\n"
+    }
+
+    private static func markdownTableCell(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "|", with: "\\|")
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .joined(separator: "<br>")
     }
 
     static func outline(workspace: SynthesisWorkspace, papers: [Paper], table: EvidenceTable?) -> String {
@@ -338,7 +443,7 @@ enum EvidenceService {
         return lines.joined(separator: "\n")
     }
 
-    private static func suggestedValue(_ column: String, paper: Paper) -> String {
+    static func suggestedValue(_ column: String, paper: Paper) -> String {
         switch column {
         case "Research question": return paper.abstract.isEmpty ? "" : firstSentence(paper.abstract)
         case "Method": return sectionText(.method, paper: paper)
@@ -368,18 +473,27 @@ enum EvidenceService {
 
 enum CitationGraphService {
     static func edges(for papers: [Paper]) -> [CitationEdge] {
-        let doiToPaper = Dictionary(uniqueKeysWithValues: papers.compactMap { paper in
+        let doiToPaper = papers.reduce(into: [String: Paper.ID]()) { result, paper in
             let doi = paper.doi.normalizedDOI
-            return doi.isEmpty ? nil : (doi, paper.id)
-        })
+            if !doi.isEmpty { result[doi] = result[doi] ?? paper.id }
+        }
+        let fingerprintToPaper = papers.reduce(into: [String: Paper.ID]()) { result, paper in
+            let fingerprint = CitationService.record(for: paper).fingerprint
+            result[fingerprint] = result[fingerprint] ?? paper.id
+        }
         return papers.flatMap { paper in
             extractReferences(from: paper).map { reference in
-                CitationEdge(
+                let resolvedPaperID = doiToPaper[reference.doi.normalizedDOI]
+                    ?? fingerprintToPaper[reference.fingerprint]
+                return CitationEdge(
                     sourcePaperID: paper.id,
                     targetFingerprint: reference.fingerprint,
                     targetTitle: reference.title,
+                    targetAuthors: reference.authors,
+                    targetYear: reference.year,
+                    targetVenue: reference.venue,
                     targetDOI: reference.doi,
-                    targetPaperID: doiToPaper[reference.doi.normalizedDOI]
+                    targetPaperID: resolvedPaperID
                 )
             }
         }
@@ -387,36 +501,137 @@ enum CitationGraphService {
 
     static func extractReferences(from paper: Paper) -> [CitationRecord] {
         let referenceText = paper.sections.first(where: { $0.kind == .references })?.text
-            ?? String(paper.allText.suffix(min(20_000, paper.allText.count)))
-        let lines = referenceText.components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { $0.count > 25 }
-        return CitationService.deduplicated(lines.compactMap { line in
-            guard line.range(of: referenceMarkerPattern, options: .regularExpression) != nil else { return nil }
-            let doi = MetadataService.extractDOI(from: line) ?? ""
-            let year = line.range(of: yearPattern, options: .regularExpression).map { String(line[$0]) } ?? ""
-            let title = guessedTitle(from: line)
-            guard title.count > 5 else { return nil }
-            return CitationRecord(title: title, year: year, doi: doi, source: .extractedReference)
+            ?? inferredReferenceBlock(from: paper.allText)
+        guard !referenceText.isEmpty else { return [] }
+        return CitationService.deduplicated(referenceBlocks(in: referenceText).compactMap { reference in
+            guard !isReferenceNoise(reference) else { return nil }
+            let doi = MetadataService.extractDOI(from: reference) ?? ""
+            return parsedReference(reference, doi: doi)
         })
     }
 
-    private static func guessedTitle(from line: String) -> String {
+    /// PDF text extraction commonly wraps one bibliography entry over several lines. Build the
+    /// complete entry before parsing so a first-line author fragment is never mistaken for a title.
+    private static func referenceBlocks(in text: String) -> [String] {
+        var blocks: [String] = []
+        var current: String?
+
+        for rawLine in text.components(separatedBy: .newlines) {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty else { continue }
+
+            if line.range(of: referenceMarkerPattern, options: .regularExpression) != nil {
+                if let current { blocks.append(current) }
+                current = line
+                continue
+            }
+
+            guard let existing = current, isReferenceContinuation(line) else { continue }
+            current = joiningWrappedReferenceLine(existing, line)
+        }
+
+        if let current { blocks.append(current) }
+        return blocks
+    }
+
+    private static func isReferenceContinuation(_ line: String) -> Bool {
+        if line.range(of: #"^\d{1,3}$"#, options: .regularExpression) != nil { return false }
+        if line.range(of: referenceHeadingPattern, options: .regularExpression) != nil { return false }
+        if referenceNoiseTerms.contains(where: { line.localizedCaseInsensitiveContains($0) }) { return false }
+        return line.count > 1
+    }
+
+    private static func joiningWrappedReferenceLine(_ existing: String, _ continuation: String) -> String {
+        guard existing.hasSuffix("-") else { return existing + " " + continuation }
+
+        // A DOI's terminal hyphen is meaningful, while a prose line-break hyphen is not.
+        let tail = existing.suffix(120).lowercased()
+        if tail.contains("doi.org/") || tail.contains("doi:") {
+            return existing + continuation
+        }
+        return String(existing.dropLast()) + continuation
+    }
+
+    private static func inferredReferenceBlock(from text: String) -> String {
+        let tail = String(text.suffix(min(30_000, text.count)))
+        guard let heading = tail.range(of: referenceHeadingPattern, options: .regularExpression) else { return "" }
+        return String(tail[heading.upperBound...])
+    }
+
+    private static func isReferenceNoise(_ line: String) -> Bool {
         let cleaned = line.replacingOccurrences(of: referenceLineCleanPattern, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let lowercased = cleaned.lowercased()
+        guard !cleaned.hasPrefix("&"), !cleaned.hasPrefix("©") else { return true }
+        return referenceNoiseTerms.contains { lowercased.contains($0) }
+    }
+
+    private static func parsedReference(_ line: String, doi: String) -> CitationRecord? {
+        let cleaned = line.replacingOccurrences(of: referenceLineCleanPattern, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.hasPrefix("&"), !cleaned.hasPrefix("©") else { return nil }
         let parts = cleaned.components(separatedBy: ". ")
-        if parts.count >= 2 { return String(parts[1].prefix(300)) }
-        return String(cleaned.prefix(300))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let year = cleaned.range(of: yearPattern, options: .regularExpression).map { String(cleaned[$0]) } ?? ""
+        guard !year.isEmpty || !doi.isEmpty, parts.count >= 2 else { return nil }
+        let yearIndex = parts.firstIndex { part in !year.isEmpty && part.contains(year) }
+        var titleIndex = yearIndex == 1 && parts.count > 2 ? 2 : min(1, max(0, parts.count - 1))
+        while titleIndex < parts.count - 1 && isAuthorContinuation(parts[titleIndex]) {
+            titleIndex += 1
+        }
+        let title = String((parts.indices.contains(titleIndex) ? parts[titleIndex] : cleaned).prefix(300))
+        let authors = titleIndex > 0 ? parts[..<titleIndex].filter { !$0.contains(year) }.joined(separator: ". ") : ""
+        let titleWords = title.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+        let authorWords = authors.split(whereSeparator: { !$0.isLetter })
+        let lowercasedAuthors = authors.lowercased()
+        guard title.count >= 10,
+              titleWords.count >= 2,
+              authorWords.count >= 2,
+              !authors.hasPrefix("&"),
+              !authors.hasPrefix("©"),
+              !referenceNoiseTerms.contains(where: { lowercasedAuthors.contains($0) }) else { return nil }
+        let venueIndex = titleIndex + 1
+        let venue = parts.indices.contains(venueIndex) ? String(parts[venueIndex].prefix(200)) : ""
+        return CitationRecord(
+            title: title,
+            authors: authors,
+            year: year,
+            venue: venue,
+            doi: doi,
+            source: .extractedReference
+        )
+    }
+
+    private static func isAuthorContinuation(_ part: String) -> Bool {
+        let candidate = part.trimmingCharacters(in: .whitespacesAndNewlines)
+        if candidate.range(of: #"^(?:&|and)\s+"#, options: [.regularExpression, .caseInsensitive]) != nil {
+            return true
+        }
+        return candidate.range(
+            of: #"^[\p{L}'’\-]+,\s*(?:[\p{L}]\.?\s*){1,4}$"#,
+            options: .regularExpression
+        ) != nil
     }
 
 }
 
 enum DiscoveryService {
     static func search(query: String, rows: Int = 20) async throws -> [DiscoveryPaper] {
+        try await crossRefSearch(query: query, parameter: "query.bibliographic", rows: rows)
+    }
+
+    static func search(author: String, rows: Int = 20) async throws -> [DiscoveryPaper] {
+        try await crossRefSearch(query: author, parameter: "query.author", rows: rows)
+    }
+
+    private static func crossRefSearch(query: String, parameter: String, rows: Int) async throws -> [DiscoveryPaper] {
         let clean = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return [] }
         var components = URLComponents(string: "https://api.crossref.org/works")!
         components.queryItems = [
-            URLQueryItem(name: "query.bibliographic", value: clean),
+            URLQueryItem(name: parameter, value: clean),
             URLQueryItem(name: "rows", value: String(min(50, max(1, rows)))),
             URLQueryItem(name: "select", value: "DOI,title,author,published,container-title,abstract,is-referenced-by-count"),
             URLQueryItem(name: "mailto", value: "research-paper-reader@localhost"),
@@ -427,6 +642,27 @@ enum DiscoveryService {
             throw URLError(.badServerResponse)
         }
         return try decodeCrossRefResults(data)
+    }
+
+    static func recommendations(for paper: Paper, rows: Int = 20) async throws -> [DiscoveryPaper] {
+        let context = [paper.title, String(paper.abstract.prefix(280))]
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .joined(separator: " ")
+        let results = try await search(query: context, rows: rows + 5)
+        let localFingerprint = CitationService.record(for: paper).fingerprint
+        return Array(results.filter { result in
+            discoveryFingerprint(result) != localFingerprint
+                && result.doi.normalizedDOI != paper.doi.normalizedDOI
+        }.prefix(rows))
+    }
+
+    static func recommendations(for paper: DiscoveryPaper, rows: Int = 20) async throws -> [DiscoveryPaper] {
+        let results = try await search(query: paper.title, rows: rows + 5)
+        return Array(results.filter { $0.id != paper.id }.prefix(rows))
+    }
+
+    static func discoveryFingerprint(_ paper: DiscoveryPaper) -> String {
+        CitationRecord(title: paper.title, year: paper.year, doi: paper.doi).fingerprint
     }
 
     static func decodeCrossRefResults(_ data: Data) throws -> [DiscoveryPaper] {
@@ -459,7 +695,7 @@ enum DiscoveryService {
         case .query:
             results = try await search(query: alert.query, rows: 15)
         case .author:
-            results = try await search(query: "author:\(alert.query)", rows: 15)
+            results = try await search(author: alert.query, rows: 15)
         case .citations:
             results = try await citingWorks(doi: alert.query, rows: 15)
         }
@@ -472,7 +708,9 @@ enum DiscoveryService {
         let normalized = doi.normalizedDOI
         guard !normalized.isEmpty else { return [] }
         let encodedDOI = normalized.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? normalized
-        let lookupURL = URL(string: "https://api.openalex.org/works/https://doi.org/\(encodedDOI)")!
+        var lookupComponents = URLComponents(string: "https://api.openalex.org/works/https://doi.org/\(encodedDOI)")!
+        lookupComponents.queryItems = openAlexIdentityQueryItems()
+        guard let lookupURL = lookupComponents.url else { return [] }
         let (lookupData, lookupResponse) = try await URLSession.shared.data(from: lookupURL)
         guard let lookupHTTP = lookupResponse as? HTTPURLResponse, 200..<300 ~= lookupHTTP.statusCode else {
             throw URLError(.resourceUnavailable)
@@ -483,8 +721,7 @@ enum DiscoveryService {
         components.queryItems = [
             URLQueryItem(name: "filter", value: "cites:\(shortID)"),
             URLQueryItem(name: "per-page", value: String(min(50, max(1, rows)))),
-            URLQueryItem(name: "mailto", value: "research-paper-reader@localhost"),
-        ]
+        ] + openAlexIdentityQueryItems()
         guard let url = components.url else { return [] }
         let (data, response) = try await URLSession.shared.data(from: url)
         guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
@@ -495,6 +732,13 @@ enum DiscoveryService {
 
     static func decodeOpenAlexResults(_ data: Data) throws -> [DiscoveryPaper] {
         try JSONDecoder().decode(OpenAlexResult.self, from: data).results.map(\.discoveryPaper)
+    }
+
+    private static func openAlexIdentityQueryItems() -> [URLQueryItem] {
+        let apiKey = UserDefaults.standard.string(forKey: "openAlexAPIKey")?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !apiKey.isEmpty { return [URLQueryItem(name: "api_key", value: apiKey)] }
+        return [URLQueryItem(name: "mailto", value: "research-paper-reader@localhost")]
     }
 
     private struct CrossRefEnvelope: Decodable {
@@ -562,5 +806,23 @@ enum DiscoveryService {
     private struct OpenAlexSource: Decodable {
         var displayName: String?
         enum CodingKeys: String, CodingKey { case displayName = "display_name" }
+    }
+}
+
+enum DiscoveryLinkService {
+    static func onlineURL(for paper: DiscoveryPaper) -> URL? {
+        let doi = paper.doi.normalizedDOI
+        if !doi.isEmpty {
+            return URL(string: "https://doi.org/\(doi)")
+        }
+
+        let title = paper.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return nil }
+        var components = URLComponents(string: "https://search.crossref.org/search/works")
+        components?.queryItems = [
+            URLQueryItem(name: "q", value: title),
+            URLQueryItem(name: "from_ui", value: "yes"),
+        ]
+        return components?.url
     }
 }

@@ -136,10 +136,11 @@ Work top to bottom within a wave unless a task is explicitly marked independent.
 
 - [x] **DISC-00: Online paper discovery.** Search CrossRef explicitly without uploading local document content and save results into the citation library.
 - [x] **DISC-01a: Local citation graph.** Parse reference lists and display local papers, external references, and resolved local links.
-- [ ] **DISC-01b: Interactive graph import.** Add node selection, detailed author/date inspection, and direct graph-node import.
-- [ ] **DISC-02: Recommendations.** Generate similar-paper suggestions from collection embeddings and citation neighbors; accept “more like this” and “not relevant” feedback.
+- [x] **DISC-01b: Interactive graph import.** Add node selection, detailed author/date inspection, local/online opening, pan and zoom, and direct graph-node import.
+- [x] **DISC-02: Recommendations.** Generate similar-paper suggestions from source metadata and citation neighbors; accept “more like this” and persistent “not relevant” feedback.
 - [x] **DISC-03a: Research alerts.** Persist and refresh opt-in topic, author, and incoming DOI-citation alerts using CrossRef and OpenAlex.
-- [ ] **DISC-03b: Background notifications.** Add scheduled checks, arXiv-category monitors, and system notifications outside the Research Hub.
+- [x] **DISC-03b: Background notifications.** Add scheduled checks while the app is running and system notifications outside the Research Hub.
+- [ ] **DISC-03c: Extended monitors.** Add arXiv-category monitors and an optional helper for checks while the app is not running.
 - [ ] **EVAL-01: Study snapshot.** Extract study design, population, sample size, controls, datasets, outcomes, and uncertainty with direct source anchors.
 - [ ] **EVAL-02: Claim verification.** Find supporting and conflicting passages across the local library, distinguish model inference from citation evidence, and avoid presenting a single opaque quality score.
 

@@ -76,17 +76,17 @@ struct SelectionScreen: View {
 
     private var content: some View {
         ScrollView {
-            LazyVStack(spacing: 8) {
+            LazyVStack(spacing: 12) {
                 header
-                    .padding(.horizontal, 12)
-                    .padding(.top, 4)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 14)
 
                 if showsContinueReading {
                     ContinueReadingShelf(
                         papers: Array(continueReadingPapers.prefix(6)),
                         selectedPaperID: $selectedPaperID
                     )
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, 20)
                 }
 
                 ForEach(papers) { paper in
@@ -97,11 +97,12 @@ struct SelectionScreen: View {
                             }
                         }
                         .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .top)))
-                        .padding(.horizontal, 12)
+                        .padding(.horizontal, 20)
                 }
             }
-            .padding(.vertical, 8)
+            .padding(.bottom, 24)
         }
+        .background(SolarpunkTheme.canvas)
         .scrollIndicators(.hidden)
         .animation(.spring(response: 0.35, dampingFraction: 0.9), value: sortOrder)
         .animation(.spring(response: 0.35, dampingFraction: 0.9), value: statusFilter?.rawValue)
@@ -109,12 +110,24 @@ struct SelectionScreen: View {
     }
 
     private var header: some View {
-        HStack {
-            Text("\(papers.count) document\(papers.count == 1 ? "" : "s")")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.secondary)
+        HStack(alignment: .bottom, spacing: 20) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Your living library")
+                    .font(.system(.title, design: .rounded, weight: .bold))
+
+                Text("Tend ideas, trace evidence, and return to what matters.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
 
             Spacer()
+
+            Label("\(papers.count) document\(papers.count == 1 ? "" : "s")", systemImage: "books.vertical.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(SolarpunkTheme.spruce)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(SolarpunkTheme.lichen.opacity(0.22), in: Capsule())
 
             Picker("Sort", selection: $sortOrder) {
                 ForEach(SortOrder.allCases) { order in
@@ -122,9 +135,10 @@ struct SelectionScreen: View {
                 }
             }
             .pickerStyle(.segmented)
-            .frame(width: 280)
+            .frame(width: 230)
             .labelsHidden()
         }
+        .padding(.vertical, 8)
     }
 }
 
@@ -170,7 +184,7 @@ private struct PaperCard: View {
                 if !paper.abstract.isEmpty {
                     Text(paper.abstract)
                         .font(.callout)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .padding(.top, 5)
                 }
@@ -192,7 +206,7 @@ private struct PaperCard: View {
                     if let lastReadPage = paper.lastReadPage, lastReadPage > 1 {
                         Label("Page \(lastReadPage)", systemImage: "bookmark.fill")
                             .font(.caption)
-                            .foregroundStyle(.green)
+                            .foregroundStyle(SolarpunkTheme.moss)
                     }
 
                     if !paper.year.isEmpty {
@@ -210,19 +224,19 @@ private struct PaperCard: View {
                     if !paper.doi.isEmpty {
                         Text("DOI")
                             .font(.caption2.weight(.medium))
-                            .foregroundStyle(.blue)
+                            .foregroundStyle(SolarpunkTheme.fern)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 2)
-                            .background(.blue.opacity(0.1), in: Capsule())
+                            .background(SolarpunkTheme.fern.opacity(0.1), in: Capsule())
                     }
 
                     if !paper.arxivId.isEmpty {
                         Text("arXiv")
                             .font(.caption2.weight(.medium))
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(SolarpunkTheme.clay)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 2)
-                            .background(.orange.opacity(0.1), in: Capsule())
+                            .background(SolarpunkTheme.clay.opacity(0.1), in: Capsule())
                     }
 
                     if !paper.tags.isEmpty {
@@ -240,15 +254,7 @@ private struct PaperCard: View {
             }
             .padding(10)
         }
-        .background(
-            RoundedRectangle(cornerRadius: 9)
-                .fill(.background)
-                .shadow(color: .black.opacity(0.05), radius: 2, y: 1)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 9)
-                .strokeBorder(.quaternary, lineWidth: 1)
-        )
+        .solarpunkCard(cornerRadius: 12)
         .scaleEffect(isSelected ? 0.97 : 1)
         .opacity(isSelected ? 0.6 : 1)
     }
@@ -279,7 +285,7 @@ private struct ContinueReadingShelf: View {
         VStack(alignment: .leading, spacing: 7) {
             Label("Continue Reading", systemImage: "bookmark.fill")
                 .font(.headline)
-                .foregroundStyle(.primary)
+                .foregroundStyle(SolarpunkTheme.spruce)
 
             ScrollView(.horizontal) {
                 HStack(spacing: 8) {
@@ -304,7 +310,7 @@ private struct ContinueReadingShelf: View {
 
                                 if let progress = paper.readingProgress {
                                     ProgressView(value: progress)
-                                        .tint(.green)
+                                        .tint(SolarpunkTheme.fern)
                                 }
 
                                 Text(pageLabel(for: paper))
@@ -313,11 +319,7 @@ private struct ContinueReadingShelf: View {
                             }
                             .padding(9)
                             .frame(width: 190, height: 104, alignment: .leading)
-                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(.quaternary, lineWidth: 1)
-                            }
+                            .solarpunkCard(cornerRadius: 10)
                         }
                         .buttonStyle(.plain)
                     }

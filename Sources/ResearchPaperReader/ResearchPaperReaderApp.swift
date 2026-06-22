@@ -13,7 +13,7 @@ struct ResearchPaperReaderApp: App {
         WindowGroup {
             ContentView()
                 .environment(store)
-                .tint(.accentColor)
+                .tint(SolarpunkTheme.fern)
                 .frame(
                     minWidth: AppWindowMetrics.minimumSize.width,
                     minHeight: AppWindowMetrics.minimumSize.height

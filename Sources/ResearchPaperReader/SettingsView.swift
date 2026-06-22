@@ -6,6 +6,9 @@ struct SettingsView: View {
     @AppStorage("cloudProcessingEnabled") private var cloudProcessingEnabled = false
     @AppStorage("byokProvider") private var byokProvider = ""
     @AppStorage("resumeLastReadLocation") private var resumeLastReadLocation = true
+    @AppStorage("automaticResearchAlerts") private var automaticResearchAlerts = false
+    @AppStorage("researchAlertIntervalHours") private var researchAlertIntervalHours = 24.0
+    @AppStorage("openAlexAPIKey") private var openAlexAPIKey = ""
 
     private let aiModes = [
         "Private Local",
@@ -23,6 +26,34 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section("Research Discovery") {
+                Toggle("Automatically check research alerts", isOn: $automaticResearchAlerts)
+                    .onChange(of: automaticResearchAlerts) { _, enabled in
+                        guard enabled else { return }
+                        Task {
+                            if !(await DiscoveryNotificationService.requestAuthorization()) {
+                                automaticResearchAlerts = false
+                            }
+                        }
+                    }
+
+                Picker("Check every", selection: $researchAlertIntervalHours) {
+                    Text("6 hours").tag(6.0)
+                    Text("12 hours").tag(12.0)
+                    Text("Daily").tag(24.0)
+                    Text("Every 3 days").tag(72.0)
+                }
+                .disabled(!automaticResearchAlerts)
+
+                Text("Enabled alerts are checked while the app is running. New matches appear as macOS notifications; no PDF content is uploaded.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                SecureField("OpenAlex API key (for incoming-citation alerts)", text: $openAlexAPIKey)
+                    .textFieldStyle(.roundedBorder)
             }
 
             Section("AI Mode") {

@@ -15,11 +15,11 @@ Built with SwiftUI and PDFKit. Designed for graduate students, researchers, and 
 - **Reader** — PDFKit-based reader with continuous scroll, zoom controls (toolbar + trackpad), find within paper (`⌘F`) with native highlights and chevron navigation, go-to-page dialog (`⌘G`), collapsible inspector, and keyboard navigation.
 - **Section-aware navigation** — On import, the app detects common academic paper sections (Abstract, Introduction, Method, Results, Conclusion, etc.) using numbered-header-aware parsing. Click a section in the sidebar outline to jump the PDF to that page.
 - **Color-coded highlights** — Annotations render as native PDFKit highlights directly on the page. Color per kind: yellow (highlight), orange (claim), green (evidence), blue (method), red (limitation), purple (question), gray (definition). Hovering over a text highlight for 2 seconds opens a floating popover displaying its category and body content.
-- **PDF Area Notes (Image Crop Annotation)** — Annotate charts, tables, equations, or visual figures directly. Drag-select a crop box to capture a region of a page as a high-res image thumbnail associated with your note. Area notes display as colored rectangular highlights with transparent fills on the PDF page, and clicking an area note scrolls the viewer to automatically center on its coordinates.
+- **PDF Area Notes (Image Crop Annotation)** — Annotate charts, tables, equations, or visual figures directly. Activate the green dashed-square Area Note tool, then drag across the PDF; a live marquee dims the surrounding page and shows a blue crop border with corner handles. Releasing the drag captures the region as a high-resolution image thumbnail associated with your note. Saved area notes display as colored rectangular highlights with transparent fills, and clicking one automatically centers the PDF on its coordinates.
 - **Typed notes** — Save structured notes anchored to selected text or visual areas. Jump to any note's page by clicking it in the inspector's Notes list, and delete individual notes using the trash icon. Type Picker shows a live color swatch of the selected highlight kind. Export to Markdown. Shortcut: `⌘N`.
 - **On-device AI** — Summarize papers (`⌘S`), extract claims/methods/evidence/limitations, or explain selected passages. Results shown in collapsible Summary and Explanation sections. All processing stays local — no API keys, no cloud calls, no data leaving your Mac.
 - **Local semantic search & grounded library chat** — Search across papers and notes with Apple's on-device sentence embeddings and a lexical fallback. Ask a library-wide question and receive an extractive answer whose evidence cards link back to source pages.
-- **Cross-paper evidence & writing workspaces** — Build editable comparison tables with source-anchored, verifiable cells, then generate a multi-paper literature-review outline and continue writing beside its citation keys.
+- **Cross-paper evidence & writing workspaces** — Build editable comparison tables with source-anchored, verifiable cells, export them as Markdown or CSV, then generate a multi-paper literature-review outline and continue writing beside its citation keys.
 - **Citation graph, discovery & alerts** — Parse local reference lists into a visual graph, search CrossRef without uploading PDF content, save discovered citations, and monitor topics, authors, or new works citing a DOI. Citation alerts use OpenAlex and refresh stale enabled alerts when opened.
 - **Metadata enrichment & editing** — On import, papers are enriched via CrossRef (DOI lookups), arXiv API (arXiv ID lookups), and heuristic/AI text extraction. Correct details (title, authors, year, venue, abstract) and manage tags manually via the details editor. DOI, arXiv ID, and venue are shown on paper cards.
 - **Privacy controls** — AI mode selector (Private Local, Balanced, Best AI, Custom) with clear status text.
@@ -69,11 +69,11 @@ open Package.swift
 2. **Browse & filter** — The detail pane shows papers as visual cards. Press `⌘F` to focus the sidebar search and filter by title, author, or any text in the PDF body. Use the status filter below the search bar to narrow by reading status (Unread, Reading, Read, etc.).
 3. **Sort** — Use the segmented sort picker at the top of the card grid to order by Recent (default), Title, Author, or Year. Cards animate into their new positions.
 4. **Read** — Click any card to open the reader with an animated slide transition. The PDF fills the left pane (collapsible with the sidebar toolbar button); the right pane has two tabs:
-   - **Notes** — Select text in the PDF, choose a highlight type (color swatch shown), add your notes, and save. Existing notes render as colored highlights on the PDF. Shortcut: `⌘N`.
+   - **Notes** — Select text in the PDF, choose a highlight type (color swatch shown), add your notes, and save. For a visual area, activate the green dashed-square Area Note toolbar button and drag over the PDF; the blue marquee appears during the drag. Existing notes render as colored highlights on the PDF. Shortcut: `⌘N`.
    - **AI** — Click "Summarize" (`⌘S`) for a local heuristic summary, or use "Extract" to find claims/methods/evidence/limitations, or select text and click "Explain Selection". Results appear in collapsible Summary and Explanation sections.
 5. **Navigate** — Use the toolbar zoom controls (`+`/`-`), the find bar (`⌘F`), or go-to-page dialog (`⌘G`). Click a section in the sidebar's paper list to jump the PDF to that page.
 6. **Export** — Click "Export" in the AI tab to save notes and AI summaries as Markdown.
-7. **Research across papers** — Open **Research Hub** from the toolbar to manage collections and citations, create evidence tables and synthesis workspaces, run semantic search or grounded chat, inspect the citation graph, discover papers, and manage research alerts.
+7. **Research across papers** — Open **Research Hub** from the toolbar to manage collections and citations, create evidence tables and synthesis workspaces, run semantic search or grounded chat, inspect the citation graph, discover papers, and manage research alerts. To export a comparison, open an evidence table and choose **Table Actions → Export Markdown…** (or **Export CSV…**).
 
 ## Architecture
 
@@ -90,6 +90,7 @@ Sources/ResearchPaperReader/
   MetadataService.swift          — CrossRef/arXiv API lookups, AI metadata extraction, enrichment pipeline
   ResearchModels.swift           — Collections, citations, evidence, synthesis, semantic, graph, discovery, and alert models
   ResearchServices.swift         — Citation parsing/export, semantic retrieval, evidence synthesis, graph extraction, CrossRef/OpenAlex discovery
+  EvidenceWorkspaceView.swift    — Evidence-table comparison, editing, verification, and Markdown/CSV export
   ResearchHubView.swift          — Integrated library, evidence, search/chat, synthesis, graph, discovery, and alerts workspace
   SettingsView.swift             — AI mode, provider, and privacy toggles
   WindowBoundsEnforcer.swift     — NSViewRepresentable enforcing minimum window size

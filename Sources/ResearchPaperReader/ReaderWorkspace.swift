@@ -31,6 +31,7 @@ struct ReaderWorkspace: View {
     @State private var tempImageFileName: String? = nil
     @State private var hoveredNotePoint: CGPoint = .zero
     @State private var navigateToRect: CGRect? = nil
+    @State private var inspectorMode = 0
 
     private var extractionKinds: [HighlightKind] {
         switch paper.documentKind {
@@ -107,19 +108,23 @@ struct ReaderWorkspace: View {
                     VStack(spacing: 0) {
                         PaperInspectorHeader(paper: $paper)
 
-                        TabView {
-                            notesPanel
-                                .tabItem {
-                                    Label("Notes", systemImage: "note.text")
-                                }
-
-                            aiPanel
-                                .tabItem {
-                                    Label("AI", systemImage: "sparkles")
-                                }
+                        Picker("Inspector", selection: $inspectorMode) {
+                            Label("Notes", systemImage: "note.text").tag(0)
+                            Label("Assistant", systemImage: "sparkles").tag(1)
                         }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .padding(10)
+
+                        Divider()
+
+                        Group {
+                            if inspectorMode == 0 { notesPanel } else { aiPanel }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                     .frame(width: 360)
+                    .background(SolarpunkTheme.sidebar)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
@@ -159,7 +164,7 @@ struct ReaderWorkspace: View {
                     isCropModeActive.toggle()
                 } label: {
                     Image(systemName: isCropModeActive ? "square.dashed.inset.filled" : "square.dashed")
-                        .foregroundStyle(isCropModeActive ? .blue : .primary)
+                        .foregroundStyle(isCropModeActive ? SolarpunkTheme.fern : .primary)
                 }
                 .help("Area Note (Drag to select area)")
 
@@ -727,7 +732,7 @@ private struct PaperInspectorHeader: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(.bar)
+        .background(SolarpunkTheme.raisedSurface)
         .sheet(isPresented: $showEditMetadata) {
             MetadataEditView(paper: $paper)
         }
@@ -748,6 +753,7 @@ private struct AIStatusBadge: View {
         .foregroundStyle(.secondary)
         .padding(8)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(SolarpunkTheme.hairline))
         .help(LocalPaperAI.statusText)
     }
 }
@@ -798,7 +804,8 @@ private struct CollapsibleSection<Content: View>: View {
                     .padding(.bottom, 12)
             }
         }
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .background(SolarpunkTheme.surface, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(SolarpunkTheme.hairline))
     }
 }
 

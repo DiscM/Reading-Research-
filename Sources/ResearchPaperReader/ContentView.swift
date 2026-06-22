@@ -44,7 +44,7 @@ struct ContentView: View {
     private var library: some View {
         NavigationSplitView {
             sidebar
-                .navigationSplitViewColumnWidth(min: 240, ideal: 300)
+                .navigationSplitViewColumnWidth(min: 250, ideal: 292, max: 340)
         } detail: {
             detail
                 .transition(.opacity)
@@ -133,9 +133,22 @@ struct ContentView: View {
     @ViewBuilder
     private var sidebar: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Document Library")
-                    .font(.title2.bold())
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 10) {
+                    Image(systemName: "leaf.fill")
+                        .font(.title3)
+                        .foregroundStyle(SolarpunkTheme.fern)
+                        .frame(width: 32, height: 32)
+                        .background(SolarpunkTheme.fern.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Canopy")
+                            .font(.headline.weight(.bold))
+                        Text("Research library")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
 
                 HStack {
                     Image(systemName: "magnifyingglass")
@@ -145,7 +158,8 @@ struct ContentView: View {
                         .focused($searchFocused)
                 }
                 .padding(8)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                .background(SolarpunkTheme.surface, in: RoundedRectangle(cornerRadius: 9))
+                .overlay(RoundedRectangle(cornerRadius: 9).stroke(SolarpunkTheme.hairline))
 
                 HStack(spacing: 8) {
                     Picker("Status", selection: $statusFilter) {
@@ -243,10 +257,23 @@ struct ContentView: View {
             }
 
             if !isSelecting {
-                Text("\(store.papers.count) document\(store.papers.count == 1 ? "" : "s") in library")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .padding(.bottom, 8)
+                HStack {
+                    Label("\(store.papers.count) document\(store.papers.count == 1 ? "" : "s")", systemImage: "books.vertical")
+                    Spacer()
+                    Button {
+                        showResearchHub = true
+                    } label: {
+                        Label("Research Hub", systemImage: "point.3.connected.trianglepath.dotted")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(SolarpunkTheme.fern)
+                    .help("Open Research Hub")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal)
+                .padding(.vertical, 10)
+                .background(SolarpunkTheme.raisedSurface.opacity(0.7))
             }
         }
         .onTapGesture { searchFocused = false }
@@ -264,6 +291,7 @@ struct ContentView: View {
                 debouncedSearch = newValue
             }
         }
+        .background(SolarpunkTheme.sidebar)
     }
 
     private func deleteSelected() {
@@ -331,7 +359,7 @@ private struct SidebarPaperRow: View {
             HStack(spacing: 6) {
                 if isSelecting {
                     Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                        .foregroundStyle(isSelected ? .blue : .gray.opacity(0.3))
+                        .foregroundStyle(isSelected ? SolarpunkTheme.fern : .gray.opacity(0.3))
                         .font(.caption)
                         .frame(width: 16)
                 }
@@ -361,9 +389,10 @@ private struct SidebarPaperRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.vertical, 8)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .background(isSelected ? SolarpunkTheme.fern.opacity(0.12) : Color.clear)
     }
 }

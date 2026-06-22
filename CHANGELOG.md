@@ -4,6 +4,10 @@
 
 ### Added
 
+- **Complete evidence workspace** — Rebuilt the Research Hub Evidence tab with comparison navigation, source selection, seeded extraction fields and excerpts, coverage and verification metrics, row filters, editable fields, source management, local refill, provenance controls, and CSV export.
+- **Evidence-table Markdown export** — Added a native save action to export Research evidence tables as `.md` files, including source metadata and every comparison field. Multiline values and Markdown table delimiters are escaped for valid, readable output.
+- **Complete discovery save workflows** — Added an in-place Saved page for discovered citations, persistent saved-state indicators across recommendations, graph results, and alerts, idempotent duplicate handling, removal, paged loading, hidden-recommendation restoration, alert query validation, duplicate-alert prevention, expanded alert results, and visible progress/confirmation feedback.
+- **Interactive research discovery** — Added selectable citation-graph nodes, hover emphasis, pan and zoom, node details, local-paper navigation, external citation import, DOI/CrossRef opening, related-paper recommendations, persistent relevance feedback, richer reference parsing, title/year graph resolution, automatic alert checks, and macOS notifications while the app is running.
 - **Living product development path** — Added `PRODUCT_DEVELOPMENT_PATH.md` with a Mermaid product mind map, five prioritized delivery waves, a reconciled shipped/partial/planned capability audit, implementation checklists, dependency graph, and definition of done.
 - **Research Hub** — Added an integrated five-tab workspace for library organization, evidence comparison, semantic search and chat, synthesis writing, citation graphs, discovery, and alerts.
 - **Document types and inference** — Added `DocumentKind` enum (`researchPaper`, `lectureSlides`, `studyNotes`, `bookChapter`, `generalPDF`) and rule-based heuristic inference during PDF import.
@@ -20,6 +24,7 @@
 
 ### Changed
 
+- **Solarpunk workspace redesign** — Remodeled the library, reader inspector, and Research Hub around a Zotero-inspired source-list/content/inspector hierarchy. Added a unified adaptive forest palette with spruce, moss, fern, lichen, sunlight, clay, and parchment surfaces for light and dark appearances.
 - **Roadmap documentation links** — Updated the README and design specification to use the product development path alongside this changelog as the execution reference.
 - **Semantic search status correction** — Corrected the design specification to show local embeddings and semantic search as not yet implemented.
 - **Separate research-state persistence** — Added a backward-compatible `research-state.json` store so new cross-paper data does not change the existing `library.json` format.
@@ -37,6 +42,13 @@
 
 ### Fixed
 
+- **Area Note selection marquee** — The active Area Note overlay now captures the crop drag above PDFKit's internal page views, reliably displaying the live dimmed selection, blue border, and corner handles before creating the existing image crop.
+- **Responsive Evidence matrix** — Evidence fields now paginate according to the available detail width, with a fixed source column, visible previous/next controls, and a Jump to Field menu. Metrics and editing controls reflow at compact window sizes, preventing findings and actions from rendering off-screen.
+- **Evidence tab crash paths** — Removed an invalid root-window dismiss from source navigation and replaced table, row, column, and cell index bindings with stable ID-based lookups. Destructive Evidence actions now safely no-op if their target disappeared during a SwiftUI update.
+- Citation graph references are now reconstructed across wrapped PDF lines, ignore page/footer fragments, retain complete publication titles, and use those full titles when opening an external search.
+
+- **Citation graph false references** — Tightened external-reference extraction to require line-leading citation markers, plausible author/title structure, and a year or DOI. Arbitrary document tails, addenda, footer/copyright text, continuation labels, and orphaned ampersand author fragments are no longer emitted as graph nodes.
+- **External-reference online search** — Corrected title-only citation links to use Crossref’s `/search/works?q=…&from_ui=yes` route, so the metadata search opens with the reference title populated. DOI-bearing references still resolve directly through doi.org.
 - **Quit while Research Hub is open** — Replaced the modal Research Hub sheet with an in-window workspace and added toolbar and keyboard navigation back to the library, allowing standard macOS Quit events to terminate immediately.
 - **Legacy note decoding** — Text notes created before area annotations now default missing crop fields safely instead of preventing the entire library from loading.
 - **Cross-feature deletion cleanup** — Deleting a paper now removes dangling collection memberships, evidence rows, and synthesis-workspace membership.

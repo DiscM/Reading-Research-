@@ -181,6 +181,9 @@ struct CitationEdge: Identifiable, Equatable, Sendable {
     var sourcePaperID: UUID
     var targetFingerprint: String
     var targetTitle: String
+    var targetAuthors: String
+    var targetYear: String
+    var targetVenue: String
     var targetDOI: String
     var targetPaperID: UUID?
 }
@@ -192,9 +195,10 @@ struct ResearchState: Codable, Equatable, Sendable {
     var evidenceTables: [EvidenceTable] = []
     var workspaces: [SynthesisWorkspace] = []
     var alerts: [ResearchAlert] = []
+    var discoveryFeedback: [String: Bool] = [:]
 
     enum CodingKeys: String, CodingKey {
-        case collections, smartFolders, citations, evidenceTables, workspaces, alerts
+        case collections, smartFolders, citations, evidenceTables, workspaces, alerts, discoveryFeedback
     }
 
     init(
@@ -203,7 +207,8 @@ struct ResearchState: Codable, Equatable, Sendable {
         citations: [CitationRecord] = [],
         evidenceTables: [EvidenceTable] = [],
         workspaces: [SynthesisWorkspace] = [],
-        alerts: [ResearchAlert] = []
+        alerts: [ResearchAlert] = [],
+        discoveryFeedback: [String: Bool] = [:]
     ) {
         self.collections = collections
         self.smartFolders = smartFolders
@@ -211,6 +216,7 @@ struct ResearchState: Codable, Equatable, Sendable {
         self.evidenceTables = evidenceTables
         self.workspaces = workspaces
         self.alerts = alerts
+        self.discoveryFeedback = discoveryFeedback
     }
 
     init(from decoder: Decoder) throws {
@@ -221,5 +227,6 @@ struct ResearchState: Codable, Equatable, Sendable {
         evidenceTables = try container.decodeIfPresent([EvidenceTable].self, forKey: .evidenceTables) ?? []
         workspaces = try container.decodeIfPresent([SynthesisWorkspace].self, forKey: .workspaces) ?? []
         alerts = try container.decodeIfPresent([ResearchAlert].self, forKey: .alerts) ?? []
+        discoveryFeedback = try container.decodeIfPresent([String: Bool].self, forKey: .discoveryFeedback) ?? [:]
     }
 }

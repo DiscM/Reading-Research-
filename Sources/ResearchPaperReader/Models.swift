@@ -50,12 +50,12 @@ enum ReadingStatus: String, CaseIterable, Codable, Identifiable, Sendable {
 
     var color: Color {
         switch self {
-        case .unread:    .gray
-        case .skimmed:   .blue
-        case .reading:   .green
-        case .read:      .indigo
-        case .cited:     .purple
-        case .rejected:  .red
+        case .unread:    SolarpunkTheme.lichen
+        case .skimmed:   SolarpunkTheme.fern
+        case .reading:   SolarpunkTheme.moss
+        case .read:      SolarpunkTheme.spruce
+        case .cited:     SolarpunkTheme.sunlight
+        case .rejected:  SolarpunkTheme.clay
         case .archived:  .secondary
         }
     }
