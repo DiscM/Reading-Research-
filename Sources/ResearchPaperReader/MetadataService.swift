@@ -32,13 +32,6 @@ struct MetadataService {
         if p.doi.isEmpty, let doi = extractDOI(from: firstPage) { p.doi = doi }
         if p.arxivId.isEmpty, let arxiv = extractArxivID(from: firstPage) { p.arxivId = arxiv }
 
-        if !p.doi.isEmpty {
-            if let result = await lookupCrossRef(doi: p.doi) {
-                apply(result, to: &p)
-                return p
-            }
-        }
-
         if !p.arxivId.isEmpty {
             if let result = await lookupArxiv(id: p.arxivId) {
                 apply(result, to: &p)
@@ -77,39 +70,6 @@ struct MetadataService {
             }
         }
         return nil
-    }
-
-    private static func lookupCrossRef(doi: String) async -> (title: String, authors: String, year: String, abstract: String, venue: String)? {
-        guard let encoded = doi.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
-              let url = URL(string: "https://api.crossref.org/works/\(encoded)") else { return nil }
-
-        do {
-            let (data, _) = try await URLSession.shared.data(from: url)
-            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let message = json["message"] as? [String: Any] else { return nil }
-
-            let title = (message["title"] as? [String])?.first ?? ""
-            let authors: String = {
-                guard let items = message["author"] as? [[String: String]] else { return "" }
-                return items.compactMap { [$0["given"], $0["family"]].compactMap { $0 }.joined(separator: " ") }.joined(separator: ", ")
-            }()
-            let year: String = {
-                let parts = (message["published-print"] as? [String: Any])?["date-parts"] as? [Int]
-                    ?? (message["published-online"] as? [String: Any])?["date-parts"] as? [Int]
-                    ?? (message["issued"] as? [String: Any])?["date-parts"] as? [Int]
-                return parts?.first.map(String.init) ?? ""
-            }()
-            let abstract: String = {
-                guard let raw = message["abstract"] as? String else { return "" }
-                return raw.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-            }()
-            let venue = (message["container-title"] as? [String])?.first ?? ""
-
-            return (title, authors, year, abstract, venue)
-        } catch {
-            return nil
-        }
     }
 
     private static func lookupArxiv(id: String) async -> (title: String, authors: String, year: String, abstract: String, venue: String)? {

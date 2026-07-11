@@ -70,7 +70,7 @@ enum CitationImportSource: String, Codable, Sendable {
     case ris = "RIS"
     case manual = "Manual"
     case extractedReference = "Extracted reference"
-    case crossref = "CrossRef"
+    case arxiv = "arXiv"
 }
 
 struct CitationRecord: Identifiable, Codable, Equatable, Sendable {

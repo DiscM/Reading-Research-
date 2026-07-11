@@ -31,6 +31,12 @@ extension String {
             .replacingOccurrences(of: "https://doi.org/", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
+
+    func xmlSlice(from: String, to: String) -> String? {
+        guard let start = range(of: from)?.upperBound,
+              let end = self[start...].range(of: to)?.lowerBound else { return nil }
+        return String(self[start..<end])
+    }
 }
 
 enum CitationService {
@@ -619,32 +625,99 @@ enum CitationGraphService {
 
 enum DiscoveryService {
     static func search(query: String, rows: Int = 20) async throws -> [DiscoveryPaper] {
-        try await crossRefSearch(query: query, parameter: "query.bibliographic", rows: rows)
+        try await arxivSearch(query: query, rows: rows)
     }
 
     static func search(author: String, rows: Int = 20) async throws -> [DiscoveryPaper] {
-        try await crossRefSearch(query: author, parameter: "query.author", rows: rows)
+        try await arxivSearch(query: author, rows: rows)
     }
 
-    private static func crossRefSearch(query: String, parameter: String, rows: Int) async throws -> [DiscoveryPaper] {
+    static func isArxivQuery(_ query: String) -> Bool {
         let clean = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty else { return [] }
-        var components = URLComponents(string: "https://api.crossref.org/works")!
-        components.queryItems = [
-            URLQueryItem(name: parameter, value: clean),
-            URLQueryItem(name: "rows", value: String(min(50, max(1, rows)))),
-            URLQueryItem(name: "select", value: "DOI,title,author,published,container-title,abstract,is-referenced-by-count"),
-            URLQueryItem(name: "mailto", value: "research-paper-reader@localhost"),
-        ]
-        guard let url = components.url else { return [] }
-        let (data, response) = try await URLSession.shared.data(from: url)
-        guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
-            throw URLError(.badServerResponse)
+        if clean.range(of: #"^\d{4}\.\d{4,5}$"#, options: .regularExpression) != nil { return true }
+        if clean.localizedCaseInsensitiveContains("arXiv") { return true }
+        if clean.range(of: #"arXiv:"#, options: [.regularExpression, .caseInsensitive]) != nil { return true }
+        if clean.range(of: #"arxiv\.org/(?:abs|pdf)/"#, options: [.regularExpression, .caseInsensitive]) != nil { return true }
+        if isArxivDOI(clean) { return true }
+        return false
+    }
+
+    static func isArxivDOI(_ doi: String) -> Bool {
+        doi.lowercased().range(of: #"10\.48550/arxiv"#, options: .regularExpression) != nil
+    }
+
+    static func extractArxivID(from query: String) -> String? {
+        let clean = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let match = clean.range(of: #"\d{4}\.\d{4,5}"#, options: .regularExpression) {
+            return String(clean[match])
         }
-        return try decodeCrossRefResults(data)
+        return nil
+    }
+
+    static func arxivSearch(query: String, rows: Int = 20) async throws -> [DiscoveryPaper] {
+        let param: String
+        if let arxivID = extractArxivID(from: query) {
+            param = "id_list=\(arxivID)"
+        } else {
+            let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+            param = "search_query=all:\(encoded)"
+        }
+        guard let url = URL(string: "https://export.arxiv.org/api/query?\(param)&max_results=\(min(50, max(1, rows)))&start=0") else { return [] }
+        let (data, response) = try await URLSession.shared.data(from: url)
+        guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else { throw URLError(.badServerResponse) }
+        return try parseArxivXML(data)
+    }
+
+    private static func parseArxivXML(_ data: Data) throws -> [DiscoveryPaper] {
+        guard let xml = String(data: data, encoding: .utf8) else { return [] }
+        var results: [DiscoveryPaper] = []
+        var remainder = xml
+        while let entryStart = remainder.range(of: "<entry>"),
+              let entryEnd = remainder.range(of: "</entry>") {
+            let entry = String(remainder[entryStart.upperBound..<entryEnd.lowerBound])
+            let clean: (String) -> String = { s in
+                s.replacingOccurrences(of: "<![CDATA[", with: "")
+                    .replacingOccurrences(of: "]]>", with: "")
+                    .components(separatedBy: .whitespacesAndNewlines)
+                    .filter { !$0.isEmpty }
+                    .joined(separator: " ")
+            }
+            let title = entry.xmlSlice(from: "<title>", to: "</title>").map(clean) ?? ""
+            guard !title.isEmpty else { remainder = String(remainder[entryEnd.upperBound...]); continue }
+            var names: [String] = []
+            var authRemainder = entry
+            while let nameStart = authRemainder.range(of: "<name>"),
+                  let nameEnd = authRemainder.range(of: "</name>") {
+                names.append(clean(String(authRemainder[nameStart.upperBound..<nameEnd.lowerBound])))
+                authRemainder = String(authRemainder[nameEnd.upperBound...])
+            }
+            let year: String = {
+                guard let published = entry.xmlSlice(from: "<published>", to: "</published>") else { return "" }
+                return String(clean(published).prefix(4))
+            }()
+            let summary = entry.xmlSlice(from: "<summary>", to: "</summary>").map(clean) ?? ""
+            results.append(DiscoveryPaper(
+                title: title,
+                authors: names.joined(separator: ", "),
+                year: year,
+                venue: "arXiv",
+                doi: "",
+                abstract: summary,
+                citedByCount: 0
+            ))
+            remainder = String(remainder[entryEnd.upperBound...])
+        }
+        return results
     }
 
     static func recommendations(for paper: Paper, rows: Int = 20) async throws -> [DiscoveryPaper] {
+        if paper.title.localizedCaseInsensitiveContains("arXiv") || !paper.arxivId.isEmpty || isArxivDOI(paper.doi) {
+            let id = paper.arxivId.isEmpty ? paper.doi : paper.arxivId
+            return try await arxivSearch(query: id, rows: rows + 5)
+                .filter { $0.title != paper.title }
+                .prefix(rows)
+                .map { $0 }
+        }
         let context = [paper.title, String(paper.abstract.prefix(280))]
             .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             .joined(separator: " ")
@@ -657,34 +730,18 @@ enum DiscoveryService {
     }
 
     static func recommendations(for paper: DiscoveryPaper, rows: Int = 20) async throws -> [DiscoveryPaper] {
+        if paper.title.localizedCaseInsensitiveContains("arXiv") || paper.venue == "arXiv" || isArxivDOI(paper.doi) {
+            return try await arxivSearch(query: paper.title, rows: rows + 5)
+                .filter { $0.title != paper.title }
+                .prefix(rows)
+                .map { $0 }
+        }
         let results = try await search(query: paper.title, rows: rows + 5)
         return Array(results.filter { $0.id != paper.id }.prefix(rows))
     }
 
     static func discoveryFingerprint(_ paper: DiscoveryPaper) -> String {
         CitationRecord(title: paper.title, year: paper.year, doi: paper.doi).fingerprint
-    }
-
-    static func decodeCrossRefResults(_ data: Data) throws -> [DiscoveryPaper] {
-        let envelope = try JSONDecoder().decode(CrossRefEnvelope.self, from: data)
-        return envelope.message.items.compactMap { item in
-            guard let title = item.title?.first, !title.isEmpty else { return nil }
-            let authors = (item.author ?? []).map { author in
-                [author.given, author.family].compactMap { $0 }.joined(separator: " ")
-            }.joined(separator: ", ")
-            let year = item.published?.dateParts.first?.first.map(String.init) ?? ""
-            let abstract = (item.abstract ?? "")
-                .replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression)
-            return DiscoveryPaper(
-                title: title,
-                authors: authors,
-                year: year,
-                venue: item.containerTitle?.first ?? "",
-                doi: item.doi ?? "",
-                abstract: abstract,
-                citedByCount: item.citedByCount ?? 0
-            )
-        }
     }
 
     static func refresh(_ alert: ResearchAlert) async throws -> ResearchAlert {
@@ -741,34 +798,6 @@ enum DiscoveryService {
         return [URLQueryItem(name: "mailto", value: "research-paper-reader@localhost")]
     }
 
-    private struct CrossRefEnvelope: Decodable {
-        var message: Message
-        struct Message: Decodable { var items: [Item] }
-    }
-
-    private struct Item: Decodable {
-        var doi: String?
-        var title: [String]?
-        var author: [Author]?
-        var published: Published?
-        var containerTitle: [String]?
-        var abstract: String?
-        var citedByCount: Int?
-
-        enum CodingKeys: String, CodingKey {
-            case doi = "DOI"
-            case title, author, published, abstract
-            case containerTitle = "container-title"
-            case citedByCount = "is-referenced-by-count"
-        }
-    }
-
-    private struct Author: Decodable { var given: String?; var family: String? }
-    private struct Published: Decodable {
-        var dateParts: [[Int]]
-        enum CodingKeys: String, CodingKey { case dateParts = "date-parts" }
-    }
-
     private struct OpenAlexResult: Decodable { var results: [OpenAlexWork] }
     private struct OpenAlexWork: Decodable {
         var id: String
@@ -811,17 +840,16 @@ enum DiscoveryService {
 
 enum DiscoveryLinkService {
     static func onlineURL(for paper: DiscoveryPaper) -> URL? {
-        let doi = paper.doi.normalizedDOI
-        if !doi.isEmpty {
-            return URL(string: "https://doi.org/\(doi)")
+        if let arxivID = DiscoveryService.extractArxivID(from: paper.title) {
+            return URL(string: "https://arxiv.org/abs/\(arxivID)")
         }
 
         let title = paper.title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return nil }
-        var components = URLComponents(string: "https://search.crossref.org/search/works")
+        var components = URLComponents(string: "https://arxiv.org/search/")
         components?.queryItems = [
-            URLQueryItem(name: "q", value: title),
-            URLQueryItem(name: "from_ui", value: "yes"),
+            URLQueryItem(name: "query", value: title),
+            URLQueryItem(name: "searchtype", value: "all"),
         ]
         return components?.url
     }

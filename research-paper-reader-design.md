@@ -837,7 +837,7 @@ BYOK can be available in Pro or Teams while still charging for app features, syn
 - ✅ **Highlighting** (color-coded PDFKit annotations per highlight kind)
 - ✅ **Notes** (typed notes anchored to selected text + page number)
 - ✅ **Paper library** (sidebar list + visual card grid)
-- ✅ **Metadata extraction** (PDF attributes + CrossRef/arXiv API + heuristic/AI)
+- ✅ **Metadata extraction** (PDF attributes + arXiv API + heuristic/AI)
 - ✅ **Tags** (stored per paper, shown on cards)
 - ✅ **Reading status** (7 states, filterable + filterable/sortable)
 - ✅ **Full-text search** (debounced, across metadata + PDF body)
@@ -859,7 +859,7 @@ BYOK can be available in Pro or Teams while still charging for app features, syn
 - ✅ **Local semantic retrieval** (on-device sentence embeddings + lexical fallback)
 - ✅ **Grounded library chat** (extractive answers with page-linked evidence)
 - ✅ **Synthesis writing workspaces** (multi-paper outlines, citation keys, editable drafts)
-- ✅ **Citation graph, discovery, and alerts** (local graph + CrossRef/OpenAlex workflows)
+- ✅ **Citation graph, discovery, and alerts** (local graph + arXiv/OpenAlex workflows)
 
 ### MVP Not Yet
 
@@ -954,7 +954,7 @@ Goals:
 
 Steps:
 
-1. ✅ CrossRef DOI lookup.
+1. ✅ arXiv API lookup.
 2. ✅ arXiv API lookup.
 3. ✅ Heuristic metadata extraction from first page.
 4. ✅ Foundation Model extraction (macOS 26+, conditional).

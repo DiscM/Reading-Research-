@@ -236,7 +236,7 @@ final class PaperStore {
             venue: paper.venue,
             doi: paper.doi,
             abstract: paper.abstract,
-            source: .crossref
+            source: .arxiv
         )
         record.citationKey = CitationService.citationKey(for: record)
         let wasSaved = isDiscoveryCitationSaved(paper)

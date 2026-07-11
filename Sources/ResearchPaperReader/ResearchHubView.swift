@@ -1345,7 +1345,7 @@ private struct PaperDiscoveryView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Discover papers").font(.headline)
-                    Text("CrossRef search is explicit; local PDF text is never uploaded.")
+                    Text("Searches arXiv. Local PDF text is never uploaded.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -1362,7 +1362,7 @@ private struct PaperDiscoveryView: View {
                 HStack {
                     TextField("Topic, author, title, or DOI", text: $query).onSubmit(search)
                     Button("Search", action: search).disabled(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSearching)
-                    .help("Search for papers on CrossRef")
+                    .help("Search for papers on arXiv")
                     Button("Save as Alert") {
                         store.createAlert(name: query, kind: .query, query: query)
                     }.help("Create a recurring search alert").disabled(query.isEmpty)
@@ -1388,7 +1388,7 @@ private struct PaperDiscoveryView: View {
                 }
             }
 
-            if isSearching { ProgressView(discoveryMode == 0 ? "Searching CrossRef…" : "Growing recommendations…").controlSize(.small) }
+            if isSearching { ProgressView(discoveryMode == 0 ? "Searching…" : "Growing recommendations…").controlSize(.small) }
 
             List(visibleResults) { result in
                 let isSaved = store.isDiscoveryCitationSaved(result)
@@ -1483,8 +1483,9 @@ private struct PaperDiscoveryView: View {
         resultLimit = max(20, resultLimit)
         isSearching = true
         Task {
-            do { results = try await DiscoveryService.search(query: query, rows: resultLimit) }
-            catch { store.lastError = "Discovery failed: \(error.localizedDescription)" }
+            do {
+                results = try await DiscoveryService.search(query: query, rows: resultLimit)
+            } catch { store.lastError = "Discovery failed: \(error.localizedDescription)" }
             isSearching = false
         }
     }

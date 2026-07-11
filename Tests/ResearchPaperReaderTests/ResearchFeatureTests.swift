@@ -328,7 +328,7 @@ struct ResearchFeatureTests {
 
         let externalPaper = DiscoveryPaper(title: references[1].title)
         let url = try #require(DiscoveryLinkService.onlineURL(for: externalPaper))
-        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "q" }?.value
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "query" }?.value
         #expect(query == references[1].title)
     }
 
@@ -372,29 +372,29 @@ struct ResearchFeatureTests {
     }
 
     @Test func discoveryProviderPayloadsDecodeIntoCommonResults() throws {
-        let crossRef = Data(#"{"message":{"items":[{"DOI":"10.1/crossref","title":["CrossRef Result"],"author":[{"given":"Ada","family":"Lovelace"}],"published":{"date-parts":[[2026]]},"container-title":["Journal"],"is-referenced-by-count":7}]}}"#.utf8)
         let openAlex = Data(#"{"results":[{"id":"https://openalex.org/W1","title":"Citing Work","doi":"https://doi.org/10.1/citing","publication_year":2025,"cited_by_count":3,"authorships":[{"author":{"display_name":"Grace Hopper"}}],"primary_location":{"source":{"display_name":"Proceedings"}}}]}"#.utf8)
 
-        let crossRefResults = try DiscoveryService.decodeCrossRefResults(crossRef)
         let openAlexResults = try DiscoveryService.decodeOpenAlexResults(openAlex)
 
-        #expect(crossRefResults.first?.title == "CrossRef Result")
-        #expect(crossRefResults.first?.authors == "Ada Lovelace")
         #expect(openAlexResults.first?.title == "Citing Work")
         #expect(openAlexResults.first?.doi == "10.1/citing")
         #expect(openAlexResults.first?.venue == "Proceedings")
     }
 
-    @Test func discoveryOnlineLinksResolveDOIsAndPopulateCrossRefSearch() throws {
-        let doiPaper = DiscoveryPaper(title: "A DOI Paper", doi: "https://doi.org/10.1000/example")
-        #expect(DiscoveryLinkService.onlineURL(for: doiPaper)?.absoluteString == "https://doi.org/10.1000/example")
-
+    @Test func discoveryOnlineLinksAllOpenToArxivSearch() throws {
         let titlePaper = DiscoveryPaper(title: "Ecological Interfaces for Local AI")
         let url = try #require(DiscoveryLinkService.onlineURL(for: titlePaper))
         let components = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false))
-        #expect(components.path == "/search/works")
-        #expect(components.queryItems?.first(where: { $0.name == "q" })?.value == titlePaper.title)
-        #expect(components.queryItems?.first(where: { $0.name == "from_ui" })?.value == "yes")
+        #expect(components.host == "arxiv.org")
+        #expect(components.path == "/search/")
+        #expect(components.queryItems?.first(where: { $0.name == "query" })?.value == titlePaper.title)
+        #expect(components.queryItems?.first(where: { $0.name == "searchtype" })?.value == "all")
+    }
+
+    @Test func discoveryArxivTitleQueriesRouteToArxiv() throws {
+        let paper = DiscoveryPaper(title: "arXiv:2606.12345: Solar Interfaces")
+        let url = try #require(DiscoveryLinkService.onlineURL(for: paper))
+        #expect(url.absoluteString == "https://arxiv.org/abs/2606.12345")
     }
 
     @Test @MainActor func recommendedPapersSaveOncePersistAndCanBeRemoved() throws {
