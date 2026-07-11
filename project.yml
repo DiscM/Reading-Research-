@@ -1,0 +1,47 @@
+name: Canopy
+options:
+  minimumXcodeGenVersion: 2.44.1
+  deploymentTarget:
+    macOS: "15.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: 6.0
+    MACOSX_DEPLOYMENT_TARGET: 15.0
+packages:
+  CanopyCore:
+    path: Packages/CanopyCore
+targets:
+  Canopy:
+    type: application
+    platform: macOS
+    sources:
+      - path: Canopy
+    dependencies:
+      - package: CanopyCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.discm.Canopy
+        PRODUCT_NAME: Canopy
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Canopy
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
+        CODE_SIGN_ENTITLEMENTS: Canopy/Resources/Canopy.entitlements
+        ENABLE_APP_SANDBOX: YES
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_STYLE: Automatic
+    scheme:
+      testTargets:
+        - CanopyTests
+  CanopyTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: CanopyTests
+    dependencies:
+      - target: Canopy
+      - package: CanopyCore
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+
