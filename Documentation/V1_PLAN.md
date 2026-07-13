@@ -111,6 +111,7 @@ Canopy reads embedded PDF metadata locally and validates every field before assi
 ```text
 Canopy app target
   App/                 scenes and commands
+  Stores/              scene-scoped workflows, annotation session, and Undo coordination
   Views/               library, reader, and inspector composition
   Resources/           entitlements and assets
 
@@ -124,7 +125,11 @@ PDFKit adapters remain in the app/platform layer. Core logic accepts value repre
 
 ## Implementation slices
 
+Status labels describe the current branch, not release readiness. The release gate below remains authoritative.
+
 ### 0. Foundation
+
+**Status: Implemented.**
 
 - Generate the Xcode project and establish App Store sandbox entitlements.
 - Discard the unshipped scaffold's development SwiftData container; replace its draft schema rather than migrating it. No real user library data exists yet.
@@ -133,6 +138,8 @@ PDFKit adapters remain in the app/platform layer. Core logic accepts value repre
 - Add temporary and on-disk persistence test helpers.
 
 ### 1. Import and document identity
+
+**Status: Partially implemented.** The functional Add Papers foundation, identity checks, duplicate review, storage choices, progress, summaries, and exact-match repair or relocation are available. The remaining recovery surfaces, removal workflows, and background availability work stay in this slice.
 
 - Implement open-panel and drag-and-drop Add Batches.
 - Route the sidebar toolbar button, File → Add Papers (`⌘O`), and library drag-and-drop through one shared Add Batch workflow. After selection or drop, show the same compact sheet with file count, total size, **Reference Originals** selected by default, **Keep Copies in Canopy**, Add Papers, and Cancel.
@@ -163,12 +170,16 @@ PDFKit adapters remain in the app/platform layer. Core logic accepts value repre
 
 ### 2. Library
 
+**Status: Partially implemented.** Validated local metadata extraction, deterministic title inference, alphabetical browsing, and basic metadata/note search are available. Paper Info editing, recent-history presentation and sorting controls, and complete removal semantics remain.
+
 - Implement validated metadata extraction and editable fields.
 - Add deterministic first-page title inference.
 - Add recent and alphabetical sections, clear-history action, sorting, and tier-one search.
 - Implement precise removal semantics for referenced and managed files.
 
 ### 3. Reader and resume
+
+**Status: Implemented.** Source identity is verified before the current session applies reading state or loads annotations. Reader-state persistence failures are surfaced with retry behavior.
 
 - Wrap PDFKit with continuous scrolling and navigation controls.
 - Implement document-local find.
@@ -177,12 +188,16 @@ PDFKit adapters remain in the app/platform layer. Core logic accepts value repre
 
 ### 4. Highlights and notes
 
+**Status: Implemented.** Highlights are stored separately from PDF bytes and rendered as temporary PDFKit overlays. A scene-scoped annotation session prevents stale annotations from appearing before current-source verification and exposes retryable verification or load failures. Create, delete, and note-edit operations support native Undo and Redo.
+
 - Capture composite selection anchors and render PDFKit overlays.
 - Add the accessible contextual color palette.
 - Implement the page-ordered inspector and navigation to anchors.
 - Add debounced notes, explicit critical saves, persistence errors, and Undo.
 
 ### 5. Release hardening
+
+**Status: Pending.** Feature-level accessibility affordances and automated coverage exist, but the complete fixture, accessibility, appearance, packaging, and App Store passes have not been performed.
 
 - Complete keyboard and VoiceOver coverage.
 - Validate light, dark, increased-contrast, and differentiate-without-color modes.
