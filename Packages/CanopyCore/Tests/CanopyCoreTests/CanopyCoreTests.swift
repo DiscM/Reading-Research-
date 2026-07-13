@@ -315,6 +315,123 @@ struct CanopyCoreTests {
         ))
     }
 
+    @MainActor
+    @Test("annotation lifecycle survives reopening and preserves its composite anchor")
+    func annotationLifecycleRoundTrip() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let storeURL = directory.appendingPathComponent("Canopy.store")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let paperID = UUID()
+        let annotationID: UUID
+        let anchor = AnnotationAnchor(
+            pageIndex: 2,
+            quadrilaterals: [
+                AnnotationQuadrilateral(
+                    upperLeft: AnnotationPoint(x: 10, y: 80),
+                    upperRight: AnnotationPoint(x: 90, y: 80),
+                    lowerLeft: AnnotationPoint(x: 10, y: 64),
+                    lowerRight: AnnotationPoint(x: 90, y: 64)
+                ),
+                AnnotationQuadrilateral(
+                    upperLeft: AnnotationPoint(x: 10, y: 60),
+                    upperRight: AnnotationPoint(x: 140, y: 60),
+                    lowerLeft: AnnotationPoint(x: 10, y: 44),
+                    lowerRight: AnnotationPoint(x: 140, y: 44)
+                )
+            ],
+            selectedText: "A composite selection",
+            contextBefore: "before ",
+            contextAfter: " after"
+        )
+
+        do {
+            let configuration = ModelConfiguration(url: storeURL)
+            let container = try ModelContainer(
+                for: Schema(versionedSchema: CanopySchemaV1.self),
+                migrationPlan: CanopyMigrationPlan.self,
+                configurations: configuration
+            )
+            let repository = LibraryRepository(container: container)
+            let paper = Paper(
+                id: paperID,
+                fingerprint: Data(repeating: 3, count: 32),
+                title: "Annotated Paper",
+                storageMode: .managedCopy,
+                sourceFilename: "annotated.pdf",
+                sourceFileSize: 1_024,
+                pageCount: 5
+            )
+            try repository.insert(paper)
+            let annotations = try repository.createAnnotations(
+                paperID: paperID,
+                anchors: [anchor],
+                color: .purple,
+                note: "Initial note"
+            )
+            annotationID = try #require(annotations.first).id
+        }
+
+        let configuration = ModelConfiguration(url: storeURL)
+        let reopened = try ModelContainer(
+            for: Schema(versionedSchema: CanopySchemaV1.self),
+            migrationPlan: CanopyMigrationPlan.self,
+            configurations: configuration
+        )
+        let repository = LibraryRepository(container: reopened)
+        let annotation = try #require(try repository.annotations(paperID: paperID).first)
+        #expect(annotation.id == annotationID)
+        #expect(annotation.anchor == anchor)
+        #expect(annotation.color == .purple)
+        #expect(annotation.note == "Initial note")
+
+        try repository.updateAnnotationNote(annotationID: annotationID, note: "Edited note")
+        let snapshot = try repository.deleteAnnotation(annotationID: annotationID)
+        #expect(try repository.annotations(paperID: paperID).isEmpty)
+
+        let restored = try repository.restoreAnnotation(snapshot)
+        #expect(restored.note == "Edited note")
+        #expect(restored.anchor == anchor)
+        #expect(try repository.annotations(paperID: paperID).map(\.id) == [annotationID])
+    }
+
+    @MainActor
+    @Test("annotation changes are blocked when source identity is not verified")
+    func annotationsRequireVerifiedSource() throws {
+        let container = try CanopyModelContainer.make(inMemory: true)
+        let repository = LibraryRepository(container: container)
+        let paper = Paper(
+            fingerprint: Data(repeating: 2, count: 32),
+            title: "Changed Source",
+            storageMode: .referenced,
+            sourceState: .sourceChanged,
+            sourceFilename: "changed.pdf",
+            sourceFileSize: 20,
+            pageCount: 1
+        )
+        try repository.insert(paper)
+        let anchor = AnnotationAnchor(
+            pageIndex: 0,
+            quadrilaterals: [
+                AnnotationQuadrilateral(
+                    upperLeft: AnnotationPoint(x: 0, y: 10),
+                    upperRight: AnnotationPoint(x: 10, y: 10),
+                    lowerLeft: AnnotationPoint(x: 0, y: 0),
+                    lowerRight: AnnotationPoint(x: 10, y: 0)
+                )
+            ],
+            selectedText: "Blocked"
+        )
+
+        #expect(throws: LibraryRepositoryError.annotationsUnavailable) {
+            _ = try repository.annotations(paperID: paper.id)
+        }
+        #expect(throws: LibraryRepositoryError.annotationsUnavailable) {
+            _ = try repository.createAnnotations(paperID: paper.id, anchors: [anchor], color: .yellow)
+        }
+    }
+
     @Test("source access rejects changed PDF bytes before opening")
     func sourceAccessRejectsChangedContent() throws {
         let fixture = try TemporaryFile(contents: Data("original-pdf".utf8), filename: "paper.pdf")

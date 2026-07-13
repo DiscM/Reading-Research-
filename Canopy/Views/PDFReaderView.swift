@@ -10,6 +10,13 @@ struct PDFReaderView: View {
     let paper: Paper?
     let repository: LibraryRepository
     @Binding var inspectorPresented: Bool
+    let annotationNavigation: AnnotationNavigation?
+    @Binding var focusedAnnotationID: UUID?
+    let annotationUndoTarget: AnnotationUndoTarget
+    let annotationSession: AnnotationSession
+    @Binding var reloadToken: UUID
+
+    @Environment(\.undoManager) private var undoManager
 
     @State private var documentSession: PDFDocumentSession?
     @State private var restoredState: PaperReaderState?
@@ -24,7 +31,6 @@ struct PDFReaderView: View {
     @State private var pendingSave: PendingReaderSave?
     @State private var failedSave: PendingReaderSave?
     @State private var persistenceErrorMessage: String?
-    @State private var reloadToken = UUID()
     @FocusState private var findFieldFocused: Bool
 
     private var pageCount: Int { documentSession?.document.pageCount ?? 0 }
@@ -51,6 +57,11 @@ struct PDFReaderView: View {
                         matches: matches,
                         matchesVersion: matchesVersion,
                         selectedMatchIndex: selectedMatchIndex,
+                        annotations: annotationSession.paperID == paper?.id && annotationSession.isSourceVerified
+                            ? annotationSession.annotations
+                            : [],
+                        annotationNavigation: annotationNavigation,
+                        onCreateAnnotations: createAnnotations,
                         onSnapshotChange: updateSnapshot
                     )
                     .id(documentSession.paperID)
@@ -98,7 +109,7 @@ struct PDFReaderView: View {
             flushPendingSave()
         }
         .alert(
-            "Couldn’t Save Reading Progress",
+            "Couldn’t Save Changes",
             isPresented: Binding(
                 get: { persistenceErrorMessage != nil },
                 set: { if !$0 { persistenceErrorMessage = nil } }
@@ -111,7 +122,7 @@ struct PDFReaderView: View {
                 failedSave = nil
             }
         } message: {
-            Text(persistenceErrorMessage ?? "Canopy could not save this Paper’s reading position.")
+            Text(persistenceErrorMessage ?? "Canopy could not save changes to this Paper.")
         }
     }
 
@@ -210,6 +221,7 @@ struct PDFReaderView: View {
     @MainActor
     private func loadPaper() {
         flushPendingSave()
+        annotationSession.beginVerification(paperID: paper?.id)
         documentSession = nil
         restoredState = nil
         loadError = nil
@@ -238,11 +250,19 @@ struct PDFReaderView: View {
                 persistenceErrorMessage = error.localizedDescription
             }
             documentSession = session
+            annotationSession.sourceVerified(paperID: paper.id, repository: repository)
         } catch let error as PaperSourceAccessError {
-            loadError = PDFReaderLoadError(error)
+            let readerError = PDFReaderLoadError(error)
+            annotationSession.verificationFailed(paperID: paper.id, message: readerError.message)
+            loadError = readerError
         } catch let error as PDFReaderLoadError {
+            annotationSession.verificationFailed(paperID: paper.id, message: error.message)
             loadError = error
         } catch {
+            annotationSession.verificationFailed(
+                paperID: paper.id,
+                message: PDFReaderLoadError.cannotOpen.message
+            )
             loadError = .cannotOpen
         }
     }
@@ -332,6 +352,43 @@ struct PDFReaderView: View {
         let current = selectedMatchIndex ?? -1
         selectedMatchIndex = (current + 1) % matches.count
     }
+
+    private func createAnnotations(
+        anchors: [AnnotationAnchor],
+        color: HighlightColor,
+        addNote: Bool
+    ) {
+        guard let paper else { return }
+        do {
+            let annotations = try repository.createAnnotations(
+                paperID: paper.id,
+                anchors: anchors,
+                color: color
+            )
+            let annotationIDs = annotations.map(\.id)
+            AnnotationUndo.registerUndoForCreation(
+                annotationIDs: annotationIDs,
+                repository: repository,
+                target: annotationUndoTarget,
+                undoManager: undoManager,
+                onChange: { annotationSession.reload(repository: repository) },
+                onError: { persistenceErrorMessage = $0.localizedDescription }
+            )
+            annotationSession.reload(repository: repository)
+
+            if addNote, let annotationID = annotationIDs.first {
+                inspectorPresented = true
+                focusedAnnotationID = annotationID
+            }
+        } catch {
+            persistenceErrorMessage = error.localizedDescription
+        }
+    }
+}
+
+struct AnnotationNavigation: Equatable {
+    let id = UUID()
+    let annotationID: UUID
 }
 
 private struct PendingReaderSave: Equatable {

@@ -28,6 +28,27 @@ public final class Annotation {
         set { colorRawValue = newValue.rawValue }
     }
 
+    public var anchor: AnnotationAnchor? {
+        guard let decoded = try? AnnotationAnchorCoding.decode(quadrilaterals) else { return nil }
+        return AnnotationAnchor(
+            pageIndex: pageIndex,
+            quadrilaterals: decoded,
+            selectedText: selectedText,
+            contextBefore: contextBefore,
+            contextAfter: contextAfter
+        )
+    }
+
+    public static func sortedInPageOrder(_ annotations: [Annotation]) -> [Annotation] {
+        annotations.sorted { lhs, rhs in
+            if lhs.pageIndex != rhs.pageIndex { return lhs.pageIndex < rhs.pageIndex }
+            let lhsTop = lhs.anchor?.quadrilaterals.first?.top ?? 0
+            let rhsTop = rhs.anchor?.quadrilaterals.first?.top ?? 0
+            if lhsTop != rhsTop { return lhsTop > rhsTop }
+            return lhs.createdAt < rhs.createdAt
+        }
+    }
+
     public init(
         id: UUID = UUID(),
         pageIndex: Int,
@@ -52,5 +73,26 @@ public final class Annotation {
         self.updatedAt = createdAt
         self.paper = paper
     }
-}
 
+    public convenience init(
+        id: UUID = UUID(),
+        anchor: AnnotationAnchor,
+        color: HighlightColor,
+        note: String = "",
+        createdAt: Date = .now,
+        paper: Paper? = nil
+    ) throws {
+        try self.init(
+            id: id,
+            pageIndex: anchor.pageIndex,
+            quadrilaterals: AnnotationAnchorCoding.encode(anchor.quadrilaterals),
+            selectedText: anchor.selectedText,
+            contextBefore: anchor.contextBefore,
+            contextAfter: anchor.contextAfter,
+            color: color,
+            note: note,
+            createdAt: createdAt,
+            paper: paper
+        )
+    }
+}

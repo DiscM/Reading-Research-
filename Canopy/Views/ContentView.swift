@@ -12,6 +12,11 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var selectedPaperID: UUID?
     @State private var inspectorPresented = true
+    @State private var annotationNavigation: AnnotationNavigation?
+    @State private var focusedAnnotationID: UUID?
+    @State private var annotationUndoTarget = AnnotationUndoTarget()
+    @State private var annotationSession = AnnotationSession()
+    @State private var readerReloadToken = UUID()
     @State private var fileImporterPresented = false
     @State private var workflow = AddPapersWorkflow()
 
@@ -33,10 +38,25 @@ struct ContentView: View {
             PDFReaderView(
                 paper: selectedPaper,
                 repository: repository,
-                inspectorPresented: $inspectorPresented
+                inspectorPresented: $inspectorPresented,
+                annotationNavigation: annotationNavigation,
+                focusedAnnotationID: $focusedAnnotationID,
+                annotationUndoTarget: annotationUndoTarget,
+                annotationSession: annotationSession,
+                reloadToken: $readerReloadToken
             )
                 .inspector(isPresented: $inspectorPresented) {
-                    AnnotationInspectorView(hasSelection: selectedPaperID != nil)
+                    AnnotationInspectorView(
+                        paper: selectedPaper,
+                        repository: repository,
+                        focusedAnnotationID: $focusedAnnotationID,
+                        annotationUndoTarget: annotationUndoTarget,
+                        annotationSession: annotationSession,
+                        onRetrySource: { readerReloadToken = UUID() },
+                        onNavigate: { annotationID in
+                            annotationNavigation = AnnotationNavigation(annotationID: annotationID)
+                        }
+                    )
                         .inspectorColumnWidth(min: 260, ideal: 320, max: 420)
                 }
         }
@@ -54,6 +74,11 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .openPaperRequested)) { notification in
             selectedPaperID = notification.object as? UUID
+        }
+        .onChange(of: selectedPaperID) {
+            annotationNavigation = nil
+            focusedAnnotationID = nil
+            annotationSession.beginVerification(paperID: selectedPaperID)
         }
         .sheet(isPresented: $workflow.isStorageChoicePresented) {
             AddBatchStorageSheet(workflow: workflow) {

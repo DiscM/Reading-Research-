@@ -8,12 +8,18 @@ public enum ApprovedPaperSource: Sendable {
 
 public enum LibraryRepositoryError: LocalizedError, Equatable {
     case paperNotFound
+    case annotationNotFound
+    case annotationsUnavailable
+    case invalidAnnotationAnchor
     case contentIdentityMismatch
     case incompatibleStorageMode
 
     public var errorDescription: String? {
         switch self {
         case .paperNotFound: "The Paper is no longer in the library."
+        case .annotationNotFound: "The annotation is no longer attached to this Paper."
+        case .annotationsUnavailable: "Canopy must verify the Paper's original Source PDF before changing its annotations."
+        case .invalidAnnotationAnchor: "The selected text could not be anchored in this PDF."
         case .contentIdentityMismatch: "The selected PDF does not match the Paper's original content."
         case .incompatibleStorageMode: "This source operation is not valid for the Paper's storage mode."
         }
@@ -162,6 +168,158 @@ public final class LibraryRepository {
         )
     }
 
+    public func annotations(paperID: UUID) throws -> [Annotation] {
+        guard let paper = try paper(id: paperID) else {
+            throw LibraryRepositoryError.paperNotFound
+        }
+        guard paper.sourceState == .available else {
+            throw LibraryRepositoryError.annotationsUnavailable
+        }
+        return Annotation.sortedInPageOrder(paper.annotations)
+    }
+
+    @discardableResult
+    public func createAnnotations(
+        paperID: UUID,
+        anchors: [AnnotationAnchor],
+        color: HighlightColor,
+        note: String = ""
+    ) throws -> [Annotation] {
+        guard let paper = try paper(id: paperID) else {
+            throw LibraryRepositoryError.paperNotFound
+        }
+        guard paper.sourceState == .available else {
+            throw LibraryRepositoryError.annotationsUnavailable
+        }
+        guard !anchors.isEmpty,
+              anchors.allSatisfy({
+                  $0.pageIndex >= 0
+                      && $0.pageIndex < max(paper.pageCount, 1)
+                      && !$0.quadrilaterals.isEmpty
+                      && !$0.selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+              }) else {
+            throw LibraryRepositoryError.invalidAnnotationAnchor
+        }
+
+        do {
+            let annotations = try anchors.map { anchor in
+                let annotation = try Annotation(anchor: anchor, color: color, note: note, paper: paper)
+                context.insert(annotation)
+                return annotation
+            }
+            try context.save()
+            return Annotation.sortedInPageOrder(annotations)
+        } catch {
+            context.rollback()
+            throw error
+        }
+    }
+
+    public func updateAnnotationNote(annotationID: UUID, note: String, at date: Date = .now) throws {
+        guard let annotation = try annotation(id: annotationID) else {
+            throw LibraryRepositoryError.annotationNotFound
+        }
+        guard annotation.paper?.sourceState == .available else {
+            throw LibraryRepositoryError.annotationsUnavailable
+        }
+        guard annotation.note != note else { return }
+        annotation.note = note
+        annotation.updatedAt = date
+        do {
+            try context.save()
+        } catch {
+            context.rollback()
+            throw error
+        }
+    }
+
+    @discardableResult
+    public func deleteAnnotation(annotationID: UUID) throws -> AnnotationSnapshot {
+        guard let snapshot = try deleteAnnotations(annotationIDs: [annotationID]).first else {
+            throw LibraryRepositoryError.annotationNotFound
+        }
+        return snapshot
+    }
+
+    @discardableResult
+    public func deleteAnnotations(annotationIDs: [UUID]) throws -> [AnnotationSnapshot] {
+        guard !annotationIDs.isEmpty else { return [] }
+        let annotationsByID = Dictionary(
+            uniqueKeysWithValues: try context.fetch(FetchDescriptor<Annotation>()).map { ($0.id, $0) }
+        )
+        let annotations = try annotationIDs.map { annotationID in
+            guard let annotation = annotationsByID[annotationID], let paper = annotation.paper else {
+                throw LibraryRepositoryError.annotationNotFound
+            }
+            guard paper.sourceState == .available else {
+                throw LibraryRepositoryError.annotationsUnavailable
+            }
+            return annotation
+        }
+        let snapshots = annotations.compactMap { annotation in
+            annotation.paper.map { AnnotationSnapshot(annotation: annotation, paperID: $0.id) }
+        }
+        for annotation in annotations {
+            context.delete(annotation)
+        }
+        do {
+            try context.save()
+            return snapshots
+        } catch {
+            context.rollback()
+            throw error
+        }
+    }
+
+    @discardableResult
+    public func restoreAnnotation(_ snapshot: AnnotationSnapshot) throws -> Annotation {
+        guard let annotation = try restoreAnnotations([snapshot]).first else {
+            throw LibraryRepositoryError.annotationNotFound
+        }
+        return annotation
+    }
+
+    @discardableResult
+    public func restoreAnnotations(_ snapshots: [AnnotationSnapshot]) throws -> [Annotation] {
+        guard !snapshots.isEmpty else { return [] }
+        let papers = Dictionary(
+            uniqueKeysWithValues: try context.fetch(FetchDescriptor<Paper>()).map { ($0.id, $0) }
+        )
+        do {
+            let snapshotPapers = try snapshots.map { snapshot in
+                guard let paper = papers[snapshot.paperID] else {
+                    throw LibraryRepositoryError.paperNotFound
+                }
+                guard paper.sourceState == .available else {
+                    throw LibraryRepositoryError.annotationsUnavailable
+                }
+                return (snapshot, paper)
+            }
+            let annotations = snapshotPapers.map { snapshot, paper in
+                let annotation = Annotation(
+                    id: snapshot.id,
+                    pageIndex: snapshot.pageIndex,
+                    quadrilaterals: snapshot.quadrilaterals,
+                    selectedText: snapshot.selectedText,
+                    contextBefore: snapshot.contextBefore,
+                    contextAfter: snapshot.contextAfter,
+                    color: snapshot.color,
+                    note: snapshot.note,
+                    createdAt: snapshot.createdAt,
+                    paper: paper
+                )
+                annotation.updatedAt = snapshot.updatedAt
+                context.insert(annotation)
+                return annotation
+            }
+            try context.save()
+            return annotations
+        } catch {
+            context.rollback()
+            throw error
+        }
+    }
+
     public func sourceAccess(
         paperID: UUID,
         managedStore: ManagedPaperStore? = nil
@@ -233,5 +391,40 @@ public final class LibraryRepository {
             paper.lastOpenedAt = nil
         }
         try save()
+    }
+
+    private func annotation(id: UUID) throws -> Annotation? {
+        var descriptor = FetchDescriptor<Annotation>(predicate: #Predicate { $0.id == id })
+        descriptor.fetchLimit = 1
+        return try context.fetch(descriptor).first
+    }
+
+}
+
+public struct AnnotationSnapshot: Equatable, Sendable {
+    public let id: UUID
+    public let paperID: UUID
+    public let pageIndex: Int
+    public let quadrilaterals: Data
+    public let selectedText: String
+    public let contextBefore: String
+    public let contextAfter: String
+    public let color: HighlightColor
+    public let note: String
+    public let createdAt: Date
+    public let updatedAt: Date
+
+    public init(annotation: Annotation, paperID: UUID) {
+        id = annotation.id
+        self.paperID = paperID
+        pageIndex = annotation.pageIndex
+        quadrilaterals = annotation.quadrilaterals
+        selectedText = annotation.selectedText
+        contextBefore = annotation.contextBefore
+        contextAfter = annotation.contextAfter
+        color = annotation.color
+        note = annotation.note
+        createdAt = annotation.createdAt
+        updatedAt = annotation.updatedAt
     }
 }
