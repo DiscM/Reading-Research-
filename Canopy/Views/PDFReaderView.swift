@@ -22,6 +22,9 @@ struct PDFReaderView: View {
     @State private var matchesVersion = UUID()
     @State private var selectedMatchIndex: Int?
     @State private var pendingSave: PendingReaderSave?
+    @State private var failedSave: PendingReaderSave?
+    @State private var persistenceErrorMessage: String?
+    @State private var reloadToken = UUID()
     @FocusState private var findFieldFocused: Bool
 
     private var pageCount: Int { documentSession?.document.pageCount ?? 0 }
@@ -52,24 +55,31 @@ struct PDFReaderView: View {
                     )
                     .id(documentSession.paperID)
                 } else if let loadError {
-                    ContentUnavailableView(
-                        loadError.title,
-                        systemImage: loadError.systemImage,
-                        description: Text(loadError.message)
-                    )
+                    VStack(spacing: 12) {
+                        ContentUnavailableView(
+                            loadError.title,
+                            systemImage: loadError.systemImage,
+                            description: Text(loadError.message)
+                        )
+                        if loadError == .sourceUnavailable {
+                            Button("Retry") {
+                                reloadToken = UUID()
+                            }
+                        }
+                    }
                 } else {
                     ProgressView("Opening Paper…")
                 }
             }
         }
-        .task(id: paper?.id) {
+        .task(id: loadTaskID) {
             loadPaper()
         }
         .task(id: pendingSave) {
             guard let pendingSave else { return }
             try? await Task.sleep(for: .milliseconds(650))
             guard !Task.isCancelled, pendingSave == self.pendingSave else { return }
-            try? repository.saveReaderState(paperID: pendingSave.paperID, state: pendingSave.state)
+            persist(pendingSave)
         }
         .task(id: findTaskID) {
             try? await Task.sleep(for: .milliseconds(200))
@@ -87,6 +97,26 @@ struct PDFReaderView: View {
         .onDisappear {
             flushPendingSave()
         }
+        .alert(
+            "Couldn’t Save Reading Progress",
+            isPresented: Binding(
+                get: { persistenceErrorMessage != nil },
+                set: { if !$0 { persistenceErrorMessage = nil } }
+            )
+        ) {
+            if failedSave != nil {
+                Button("Retry", action: retryFailedSave)
+            }
+            Button("Dismiss", role: .cancel) {
+                failedSave = nil
+            }
+        } message: {
+            Text(persistenceErrorMessage ?? "Canopy could not save this Paper’s reading position.")
+        }
+    }
+
+    private var loadTaskID: String {
+        "\(paper?.id.uuidString ?? "none"):\(reloadToken.uuidString)"
     }
 
     private var findTaskID: String {
@@ -184,11 +214,8 @@ struct PDFReaderView: View {
         restoredState = nil
         loadError = nil
         findQuery = ""
-        matches = []
-        matchesVersion = UUID()
-        selectedMatchIndex = nil
+        clearFindMatches()
         pageEntry = "1"
-        pendingSave = nil
         guard let paper else { return }
 
         inspectorPresented = paper.isInspectorPresented
@@ -205,8 +232,12 @@ struct PDFReaderView: View {
                 )
                 pageEntry = String(savedState.pageIndex + 1)
             }
+            do {
+                try repository.recordPaperOpened(paperID: paper.id)
+            } catch {
+                persistenceErrorMessage = error.localizedDescription
+            }
             documentSession = session
-            try repository.recordPaperOpened(paperID: paper.id)
         } catch let error as PaperSourceAccessError {
             loadError = PDFReaderLoadError(error)
         } catch let error as PDFReaderLoadError {
@@ -237,8 +268,28 @@ struct PDFReaderView: View {
 
     private func flushPendingSave() {
         guard let pendingSave else { return }
-        try? repository.saveReaderState(paperID: pendingSave.paperID, state: pendingSave.state)
-        self.pendingSave = nil
+        persist(pendingSave)
+    }
+
+    private func persist(_ save: PendingReaderSave) {
+        do {
+            try repository.saveReaderState(paperID: save.paperID, state: save.state)
+            if pendingSave == save {
+                pendingSave = nil
+            }
+            if failedSave?.paperID == save.paperID {
+                failedSave = nil
+                persistenceErrorMessage = nil
+            }
+        } catch {
+            failedSave = save
+            persistenceErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func retryFailedSave() {
+        guard let failedSave else { return }
+        persist(failedSave)
     }
 
     private func goToEnteredPage() {
@@ -251,21 +302,23 @@ struct PDFReaderView: View {
 
     private func updateFindMatches() {
         guard let document = documentSession?.document else {
-            matches = []
-            matchesVersion = UUID()
-            selectedMatchIndex = nil
+            clearFindMatches()
             return
         }
         let query = findQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else {
-            matches = []
-            matchesVersion = UUID()
-            selectedMatchIndex = nil
+            clearFindMatches()
             return
         }
         matches = document.findString(query, withOptions: .caseInsensitive)
         matchesVersion = UUID()
         selectedMatchIndex = matches.isEmpty ? nil : 0
+    }
+
+    private func clearFindMatches() {
+        matches = []
+        matchesVersion = UUID()
+        selectedMatchIndex = nil
     }
 
     private func previousMatch() {
@@ -302,7 +355,7 @@ private final class PDFDocumentSession {
     }
 }
 
-private enum PDFReaderLoadError: Error {
+private enum PDFReaderLoadError: Error, Equatable {
     case sourceUnavailable
     case sourceMissing
     case sourceChanged

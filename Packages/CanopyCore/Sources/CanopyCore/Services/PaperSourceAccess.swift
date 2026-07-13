@@ -16,10 +16,8 @@ public final class PaperSourceAccess {
 
     public init(paper: Paper, managedStore suppliedManagedStore: ManagedPaperStore? = nil) throws {
         switch paper.sourceState {
-        case .available:
+        case .available, .sourceUnavailable:
             break
-        case .sourceUnavailable:
-            throw PaperSourceAccessError.sourceUnavailable
         case .brokenReference:
             throw PaperSourceAccessError.sourceMissing
         case .sourceChanged:

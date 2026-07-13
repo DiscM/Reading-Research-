@@ -171,7 +171,7 @@ public final class LibraryRepository {
         }
         do {
             let access = try PaperSourceAccess(paper: paper, managedStore: managedStore)
-            if access.attributesChanged {
+            if access.attributesChanged || paper.sourceState != .available {
                 paper.sourceFileSize = access.verifiedFileSize
                 paper.sourceModificationDate = access.verifiedModificationDate
                 paper.sourceState = .available

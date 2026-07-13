@@ -380,6 +380,35 @@ struct CanopyCoreTests {
         }
         #expect(paper.sourceState == .sourceChanged)
     }
+
+    @MainActor
+    @Test("retry returns a transiently unavailable source to healthy")
+    func retryUnavailableSource() throws {
+        let fixture = try TemporaryFile(contents: Data("available-again".utf8), filename: "paper.pdf")
+        defer { fixture.remove() }
+        let attributes = try FileManager.default.attributesOfItem(atPath: fixture.url.path)
+        let modificationDate = try #require(attributes[.modificationDate] as? Date)
+        let container = try CanopyModelContainer.make(inMemory: true)
+        let repository = LibraryRepository(container: container)
+        let paper = Paper(
+            fingerprint: try DocumentFingerprint.sha256(of: fixture.url),
+            title: "Available Again",
+            storageMode: .managedCopy,
+            sourceState: .sourceUnavailable,
+            managedRelativePath: fixture.url.lastPathComponent,
+            sourceFilename: fixture.url.lastPathComponent,
+            sourceFileSize: Int64(Data("available-again".utf8).count),
+            sourceModificationDate: modificationDate
+        )
+        try repository.insert(paper)
+
+        _ = try repository.sourceAccess(
+            paperID: paper.id,
+            managedStore: ManagedPaperStore(rootURL: fixture.directory)
+        )
+
+        #expect(paper.sourceState == .available)
+    }
 }
 
 private struct StubDocumentAnalyzer: DocumentAnalyzing {

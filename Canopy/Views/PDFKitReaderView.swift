@@ -88,6 +88,18 @@ struct PDFKitReaderView: NSViewRepresentable {
                     }
                 })
             }
+            for scrollView in scrollViews(in: pdfView) {
+                scrollView.contentView.postsBoundsChangedNotifications = true
+                observers.append(center.addObserver(
+                    forName: NSView.boundsDidChangeNotification,
+                    object: scrollView.contentView,
+                    queue: .main
+                ) { [weak self] _ in
+                    MainActor.assumeIsolated {
+                        self?.publishSnapshot()
+                    }
+                })
+            }
         }
 
         func detach() {
@@ -187,6 +199,16 @@ struct PDFKitReaderView: NSViewRepresentable {
                 viewport: viewport,
                 zoomScale: pdfView.scaleFactor
             ))
+        }
+
+        private func scrollViews(in view: NSView) -> [NSScrollView] {
+            view.subviews.flatMap { subview in
+                if let scrollView = subview as? NSScrollView {
+                    [scrollView] + scrollViews(in: scrollView)
+                } else {
+                    scrollViews(in: subview)
+                }
+            }
         }
     }
 }
