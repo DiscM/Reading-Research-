@@ -29,6 +29,8 @@ Canopy requires macOS 15+, Xcode 26, and XcodeGen.
 ./script/build_and_run.sh
 ```
 
+The default command builds the Release configuration, replaces `/Applications/Canopy.app`, and opens that installed bundle. Use `./script/build_and_run.sh --debug` only when you explicitly want a temporary Debug build under the staged DerivedData directory.
+
 Generate the Xcode project without launching the app:
 
 ```sh
