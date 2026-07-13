@@ -80,6 +80,8 @@ struct PDFKitReaderView: NSViewRepresentable {
         private var lastAnnotationNavigationID: UUID?
         private var overlayAnnotations: [(page: PDFPage, annotation: PDFAnnotation)] = []
         private var highlightPopover: NSPopover?
+        private var pendingHighlightPresentation: Task<Void, Never>?
+        private var presentedSelectionSignature: PDFSelectionSignature?
         private var isUpdatingSearchSelection = false
         private var isRestoring = false
 
@@ -235,9 +237,13 @@ struct PDFKitReaderView: NSViewRepresentable {
         }
 
         private func selectionChanged() {
+            pendingHighlightPresentation?.cancel()
+            pendingHighlightPresentation = nil
+
             guard !isUpdatingSearchSelection,
                   parent.matches.isEmpty,
                   let pdfView,
+                  let document = pdfView.document,
                   let selection = pdfView.currentSelection,
                   let text = selection.string,
                   !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -245,6 +251,41 @@ struct PDFKitReaderView: NSViewRepresentable {
                 return
             }
 
+            guard let signature = selectionSignature(selection, in: document) else {
+                closeHighlightPopover()
+                return
+            }
+            if signature == presentedSelectionSignature, highlightPopover?.isShown == true {
+                return
+            }
+
+            dismissHighlightPopover()
+            pendingHighlightPresentation = Task { @MainActor [weak self, weak pdfView] in
+                do {
+                    try await Task.sleep(for: .milliseconds(180))
+                } catch {
+                    return
+                }
+                guard let self,
+                      let pdfView,
+                      self.pdfView === pdfView,
+                      pdfView.document === document,
+                      let currentSelection = pdfView.currentSelection,
+                      self.selectionSignature(currentSelection, in: document) == signature else { return }
+                self.pendingHighlightPresentation = nil
+                self.presentHighlightPopover(
+                    for: currentSelection,
+                    signature: signature,
+                    in: pdfView
+                )
+            }
+        }
+
+        private func presentHighlightPopover(
+            for selection: PDFSelection,
+            signature: PDFSelectionSignature,
+            in pdfView: PDFView
+        ) {
             let anchors = captureAnchors(from: selection, in: pdfView)
             guard !anchors.isEmpty,
                   let firstPage = selection.pages.first,
@@ -253,10 +294,9 @@ struct PDFKitReaderView: NSViewRepresentable {
                 return
             }
 
-            closeHighlightPopover()
             let popover = NSPopover()
             popover.behavior = .transient
-            popover.animates = true
+            popover.animates = false
             popover.contentSize = NSSize(width: 520, height: 126)
             popover.contentViewController = NSHostingController(rootView: HighlightPaletteView { [weak self] color, addNote in
                 guard let self else { return }
@@ -269,6 +309,28 @@ struct PDFKitReaderView: NSViewRepresentable {
             let selectionRect = pdfView.convert(selection.bounds(for: firstPage), from: firstPage)
             popover.show(relativeTo: selectionRect, of: pdfView, preferredEdge: .maxY)
             highlightPopover = popover
+            presentedSelectionSignature = signature
+        }
+
+        private func selectionSignature(
+            _ selection: PDFSelection,
+            in document: PDFDocument
+        ) -> PDFSelectionSignature? {
+            let ranges = selection.pages.flatMap { page -> [PDFSelectionRange] in
+                let pageIndex = document.index(for: page)
+                guard pageIndex != NSNotFound else { return [] }
+                return (0..<selection.numberOfTextRanges(on: page)).compactMap { rangeIndex in
+                    let range = selection.range(at: rangeIndex, on: page)
+                    guard range.location != NSNotFound, range.length > 0 else { return nil }
+                    return PDFSelectionRange(
+                        pageIndex: pageIndex,
+                        location: range.location,
+                        length: range.length
+                    )
+                }
+            }
+            guard !ranges.isEmpty else { return nil }
+            return PDFSelectionSignature(ranges: ranges)
         }
 
         private func captureAnchors(from selection: PDFSelection, in pdfView: PDFView) -> [AnnotationAnchor] {
@@ -362,8 +424,15 @@ struct PDFKitReaderView: NSViewRepresentable {
         }
 
         private func closeHighlightPopover() {
+            pendingHighlightPresentation?.cancel()
+            pendingHighlightPresentation = nil
+            dismissHighlightPopover()
+        }
+
+        private func dismissHighlightPopover() {
             highlightPopover?.close()
             highlightPopover = nil
+            presentedSelectionSignature = nil
         }
 
         private func publishSnapshot() {
@@ -399,6 +468,16 @@ struct PDFKitReaderView: NSViewRepresentable {
             }
         }
     }
+}
+
+private struct PDFSelectionSignature: Equatable {
+    let ranges: [PDFSelectionRange]
+}
+
+private struct PDFSelectionRange: Equatable {
+    let pageIndex: Int
+    let location: Int
+    let length: Int
 }
 
 private struct AnnotationSignature: Equatable {
