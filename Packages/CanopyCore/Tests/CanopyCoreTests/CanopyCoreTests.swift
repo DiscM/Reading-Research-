@@ -775,6 +775,85 @@ struct CanopyCoreTests {
     }
 
     @MainActor
+    @Test("applying an explicit Paper Info snapshot preserves mixed provenance atomically")
+    func applyingPaperInfoSnapshotPreservesMixedProvenance() throws {
+        let container = try CanopyModelContainer.make(inMemory: true)
+        let repository = LibraryRepository(container: container)
+        let originalAuthorID = UUID()
+        let manualAuthorID = UUID()
+        let parsedAuthorID = UUID()
+        let paper = Paper(
+            fingerprint: Data(repeating: 22, count: 32),
+            title: "Original Metadata",
+            titleProvenance: .filenameFallback,
+            publicationYear: 2022,
+            publicationYearProvenance: .embeddedMetadata,
+            doi: "10.1000/original",
+            doiProvenance: .embeddedMetadata,
+            storageMode: .referenced,
+            sourceFilename: "mixed-provenance.pdf",
+            sourceFileSize: 2_048,
+            authorCredits: [
+                AuthorCredit(
+                    id: originalAuthorID,
+                    position: 0,
+                    displayName: "Original Author",
+                    familyName: "Author",
+                    provenance: .embeddedMetadata
+                ),
+                AuthorCredit(
+                    id: manualAuthorID,
+                    position: 1,
+                    displayName: "Manual Curator",
+                    familyName: "Curator",
+                    provenance: .userEntry
+                )
+            ]
+        )
+        try repository.insert(paper)
+        let before = try repository.paperInfoSnapshot(paperID: paper.id)
+        let target = PaperInfoSnapshot(
+            paperID: paper.id,
+            title: "Freshly Parsed Title",
+            titleProvenance: .firstPage,
+            publicationYear: 2026,
+            publicationYearProvenance: .userEntry,
+            doi: "10.1000/original",
+            doiProvenance: .embeddedMetadata,
+            arxivID: "2607.01234",
+            arxivIDProvenance: .firstPage,
+            authorCredits: [
+                AuthorCreditSnapshot(
+                    id: originalAuthorID,
+                    position: 0,
+                    displayName: "Original Author",
+                    familyName: "Author",
+                    provenance: .embeddedMetadata
+                ),
+                AuthorCreditSnapshot(
+                    id: manualAuthorID,
+                    position: 1,
+                    displayName: "Manual Curator",
+                    familyName: "Curator",
+                    provenance: .userEntry
+                ),
+                AuthorCreditSnapshot(
+                    id: parsedAuthorID,
+                    position: 2,
+                    displayName: "Parsed Researcher",
+                    familyName: "Researcher",
+                    provenance: .firstPage
+                )
+            ]
+        )
+
+        let change = try repository.applyPaperInfoSnapshot(target)
+
+        #expect(change == PaperInfoChange(before: before, after: target))
+        #expect(try repository.paperInfoSnapshot(paperID: paper.id) == target)
+    }
+
+    @MainActor
     @Test("restoring Paper Info rejects inconsistent optional metadata provenance")
     func restoringPaperInfoRejectsInconsistentProvenance() throws {
         let container = try CanopyModelContainer.make(inMemory: true)

@@ -174,20 +174,102 @@ final class PaperInfoWorkflow {
     var draft = PaperInfoDraft()
     var isPresented = false
     var errorMessage: String?
+    private(set) var reparseState: PaperInfoReparseState = .idle
+    private(set) var reparseMessage: String?
+    var reparseErrorMessage: String?
+
+    private var acceptedReparsedMetadata: [PaperInfoMetadataField: PaperInfoReparseMetadata] = [:]
+    @ObservationIgnored private var activeReparseAnalysis: (
+        requestID: UUID,
+        task: Task<ParsedPaperMetadata, Error>
+    )?
 
     var hasChanges: Bool {
         guard let originalSnapshot else { return false }
         return draft != PaperInfoDraft(snapshot: originalSnapshot)
     }
 
+    var reparseProposal: PaperInfoReparseProposal? {
+        guard case let .reviewing(proposal) = reparseState else { return nil }
+        return proposal
+    }
+
+    var isReparsing: Bool {
+        guard case .loading = reparseState else { return false }
+        return true
+    }
+
+    var hasActiveReparse: Bool {
+        guard case .idle = reparseState else { return true }
+        return false
+    }
+
     func authorProvenance(id: UUID) -> MetadataProvenance {
-        guard let author = draft.authorCredits.first(where: { $0.id == id }),
-              let original = originalSnapshot?.authorCredits.first(where: { $0.id == id }),
-              author.displayName.trimmingCharacters(in: .whitespacesAndNewlines) == original.displayName,
-              author.familyName.trimmingCharacters(in: .whitespacesAndNewlines) == original.familyName else {
+        guard let author = draft.authorCredits.first(where: { $0.id == id }) else {
             return .userEntry
         }
-        return original.provenance
+        if let original = originalSnapshot?.authorCredits.first(where: { $0.id == id }),
+           PaperInfoMetadataNormalization.author(author)
+            == PaperInfoMetadataNormalization.author(original) {
+            return original.provenance
+        }
+        if let reparsed = acceptedReparsedMetadata[.authorCredits]?.authorCredits
+            .first(where: { $0.id == id }),
+           PaperInfoMetadataNormalization.author(author)
+            == PaperInfoMetadataNormalization.author(reparsed) {
+            return reparsed.provenance
+        }
+        return .userEntry
+    }
+
+    func provenance(for field: PaperInfoMetadataField) -> MetadataProvenance? {
+        guard let originalSnapshot else { return nil }
+        switch field {
+        case .title:
+            return scalarProvenance(
+                field: .title,
+                value: PaperInfoMetadataNormalization.title(draft.title),
+                originalValue: PaperInfoMetadataNormalization.title(originalSnapshot.title),
+                originalProvenance: originalSnapshot.titleProvenance,
+                reparsedValue: acceptedReparsedMetadata[.title]
+                    .map { PaperInfoMetadataNormalization.title($0.title) },
+                reparsedProvenance: acceptedReparsedMetadata[.title]?.titleProvenance
+            )
+        case .authorCredits:
+            return nil
+        case .publicationYear:
+            let text = draft.publicationYearText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return nil }
+            guard let value = Int(text) else { return .userEntry }
+            return optionalProvenance(
+                field: .publicationYear,
+                value: value,
+                originalValue: originalSnapshot.publicationYear,
+                originalProvenance: originalSnapshot.publicationYearProvenance,
+                reparsedValue: acceptedReparsedMetadata[.publicationYear]?.publicationYear,
+                reparsedProvenance: acceptedReparsedMetadata[.publicationYear]?.publicationYearProvenance
+            )
+        case .doi:
+            return identifierProvenance(
+                field: .doi,
+                rawValue: draft.doi,
+                normalizedValue: MetadataValidator.normalizedDOI(draft.doi),
+                originalValue: MetadataValidator.normalizedDOI(originalSnapshot.doi),
+                originalProvenance: originalSnapshot.doiProvenance,
+                reparsedValue: MetadataValidator.normalizedDOI(acceptedReparsedMetadata[.doi]?.doi),
+                reparsedProvenance: acceptedReparsedMetadata[.doi]?.doiProvenance
+            )
+        case .arxivID:
+            return identifierProvenance(
+                field: .arxivID,
+                rawValue: draft.arxivID,
+                normalizedValue: MetadataValidator.normalizedArxivID(draft.arxivID),
+                originalValue: MetadataValidator.normalizedArxivID(originalSnapshot.arxivID),
+                originalProvenance: originalSnapshot.arxivIDProvenance,
+                reparsedValue: MetadataValidator.normalizedArxivID(acceptedReparsedMetadata[.arxivID]?.arxivID),
+                reparsedProvenance: acceptedReparsedMetadata[.arxivID]?.arxivIDProvenance
+            )
+        }
     }
 
     func present(paperID: UUID, repository: LibraryRepository) throws {
@@ -200,7 +282,200 @@ final class PaperInfoWorkflow {
         readOnlyDetails = PaperInfoReadOnlyDetails(paper: paper)
         draft = PaperInfoDraft(snapshot: snapshot)
         errorMessage = nil
+        resetReparse()
         isPresented = true
+    }
+
+    func reparse(
+        repository: LibraryRepository,
+        managedStore: ManagedPaperStore? = nil
+    ) async {
+        await reparse(
+            repository: repository,
+            analyzer: PDFDocumentAnalyzer(),
+            managedStore: managedStore
+        )
+    }
+
+    func reparse<Analyzer: DocumentAnalyzing>(
+        repository: LibraryRepository,
+        analyzer: Analyzer,
+        managedStore: ManagedPaperStore? = nil
+    ) async {
+        guard let requestedPaperID = paperID, !hasActiveReparse else { return }
+        let requestID = UUID()
+        reparseState = .loading(requestID: requestID)
+        reparseMessage = nil
+        reparseErrorMessage = nil
+
+        do {
+            try Task.checkCancellation()
+            let sourceAccess = try repository.sourceAccess(
+                paperID: requestedPaperID,
+                managedStore: managedStore
+            )
+            let sourceURL = sourceAccess.url
+            let analysis = Task.detached(priority: .userInitiated) {
+                try Task.checkCancellation()
+                let parsed = try analyzer.analyze(sourceURL)
+                try Task.checkCancellation()
+                return parsed
+            }
+            activeReparseAnalysis = (requestID, analysis)
+            defer {
+                if activeReparseAnalysis?.requestID == requestID {
+                    activeReparseAnalysis = nil
+                }
+                withExtendedLifetime(sourceAccess) {}
+            }
+            let parsed = try await withTaskCancellationHandler {
+                try await analysis.value
+            } onCancel: {
+                analysis.cancel()
+            }
+            try Task.checkCancellation()
+
+            guard isCurrentReparse(requestID: requestID, paperID: requestedPaperID) else { return }
+            _ = try repository.sourceAccess(
+                paperID: requestedPaperID,
+                managedStore: managedStore
+            )
+            guard isCurrentReparse(requestID: requestID, paperID: requestedPaperID) else { return }
+            refreshReadOnlyDetails(repository: repository)
+            reviewReparsedMetadata(parsed)
+        } catch is CancellationError {
+            guard isCurrentReparse(requestID: requestID, paperID: requestedPaperID) else { return }
+            reparseState = .idle
+        } catch {
+            guard isCurrentReparse(requestID: requestID, paperID: requestedPaperID) else { return }
+            refreshReadOnlyDetails(repository: repository)
+            reparseState = .idle
+            reparseErrorMessage = reparseErrorDescription(error)
+        }
+    }
+
+    func reviewReparsedMetadata(_ parsed: ParsedPaperMetadata) {
+        let currentProvenance = Dictionary(uniqueKeysWithValues: PaperInfoMetadataField.allCases.compactMap { field in
+            provenance(for: field).map { (field, $0) }
+        })
+        let currentAuthorProvenance = Dictionary(uniqueKeysWithValues: draft.authorCredits.map { author in
+            (author.id, authorProvenance(id: author.id))
+        })
+        let proposal = PaperInfoReparseProposal(
+            parsed: parsed,
+            current: draft,
+            acceptedMetadataAtStart: acceptedReparsedMetadata,
+            currentProvenance: currentProvenance,
+            currentAuthorProvenance: currentAuthorProvenance
+        )
+        if proposal.remainingFields.isEmpty {
+            reparseState = .idle
+            reparseMessage = "No different usable metadata was found."
+        } else {
+            reparseState = .reviewing(proposal)
+            reparseMessage = nil
+        }
+    }
+
+    func acceptReparsed(_ field: PaperInfoMetadataField) {
+        guard case var .reviewing(proposal) = reparseState,
+              proposal.fields.contains(field) else { return }
+
+        let metadata = proposal.metadata
+        applyReparsed(field, metadata: metadata)
+        acceptedReparsedMetadata[field] = metadata
+        proposal.decisions[field] = .useFound
+        reparseState = .reviewing(proposal)
+    }
+
+    func keepCurrent(_ field: PaperInfoMetadataField) {
+        guard case var .reviewing(proposal) = reparseState,
+              proposal.fields.contains(field) else { return }
+        restoreCurrent(field, from: proposal.current)
+        acceptedReparsedMetadata[field] = proposal.acceptedMetadataAtStart[field]
+        proposal.decisions[field] = .keepCurrent
+        reparseState = .reviewing(proposal)
+    }
+
+    func finishReparseReview() {
+        guard case let .reviewing(proposal) = reparseState,
+              proposal.remainingFields.isEmpty else { return }
+        reparseState = .idle
+        reparseMessage = proposal.decisions.values.contains(.useFound)
+            ? "Metadata choices are staged. Save to keep them."
+            : "Kept the current metadata."
+    }
+
+    func discardReparseResults() {
+        guard case let .reviewing(proposal) = reparseState else { return }
+        for field in proposal.fields {
+            restoreCurrent(field, from: proposal.current)
+            acceptedReparsedMetadata[field] = proposal.acceptedMetadataAtStart[field]
+        }
+        reparseState = .idle
+        reparseMessage = "Kept the current metadata."
+    }
+
+    func makeTargetSnapshot(now: Date = .now) throws -> PaperInfoSnapshot {
+        guard let paperID, let originalSnapshot else {
+            throw LibraryRepositoryError.paperNotFound
+        }
+        let update = try draft.makeUpdate(now: now)
+        let title = MetadataValidator.usableTitle(update.title) ?? update.title
+        let doi = MetadataValidator.normalizedDOI(update.doi)
+        let arxivID = MetadataValidator.normalizedArxivID(update.arxivID)
+
+        return PaperInfoSnapshot(
+            paperID: paperID,
+            title: update.title,
+            titleProvenance: scalarProvenance(
+                field: .title,
+                value: PaperInfoMetadataNormalization.title(title),
+                originalValue: PaperInfoMetadataNormalization.title(originalSnapshot.title),
+                originalProvenance: originalSnapshot.titleProvenance,
+                reparsedValue: acceptedReparsedMetadata[.title]
+                    .map { PaperInfoMetadataNormalization.title($0.title) },
+                reparsedProvenance: acceptedReparsedMetadata[.title]?.titleProvenance
+            ),
+            publicationYear: update.publicationYear,
+            publicationYearProvenance: optionalProvenance(
+                field: .publicationYear,
+                value: update.publicationYear,
+                originalValue: originalSnapshot.publicationYear,
+                originalProvenance: originalSnapshot.publicationYearProvenance,
+                reparsedValue: acceptedReparsedMetadata[.publicationYear]?.publicationYear,
+                reparsedProvenance: acceptedReparsedMetadata[.publicationYear]?.publicationYearProvenance
+            ),
+            doi: update.doi,
+            doiProvenance: identifierProvenance(
+                field: .doi,
+                rawValue: draft.doi,
+                normalizedValue: doi,
+                originalValue: MetadataValidator.normalizedDOI(originalSnapshot.doi),
+                originalProvenance: originalSnapshot.doiProvenance,
+                reparsedValue: MetadataValidator.normalizedDOI(acceptedReparsedMetadata[.doi]?.doi),
+                reparsedProvenance: acceptedReparsedMetadata[.doi]?.doiProvenance
+            ),
+            arxivID: update.arxivID,
+            arxivIDProvenance: identifierProvenance(
+                field: .arxivID,
+                rawValue: draft.arxivID,
+                normalizedValue: arxivID,
+                originalValue: MetadataValidator.normalizedArxivID(originalSnapshot.arxivID),
+                originalProvenance: originalSnapshot.arxivIDProvenance,
+                reparsedValue: MetadataValidator.normalizedArxivID(acceptedReparsedMetadata[.arxivID]?.arxivID),
+                reparsedProvenance: acceptedReparsedMetadata[.arxivID]?.arxivIDProvenance
+            ),
+            authorCredits: draft.authorCredits.enumerated().map { position, author in
+                AuthorCreditSnapshot(
+                    id: author.id,
+                    position: position,
+                    displayName: author.displayName,
+                    familyName: author.familyName,
+                    provenance: authorProvenance(id: author.id)
+                )
+            }
+        )
     }
 
     func finishSaving(_ change: PaperInfoChange) {
@@ -216,5 +491,139 @@ final class PaperInfoWorkflow {
         readOnlyDetails = nil
         draft = PaperInfoDraft()
         errorMessage = nil
+        resetReparse()
+    }
+
+    private func applyReparsed(
+        _ field: PaperInfoMetadataField,
+        metadata: PaperInfoReparseMetadata
+    ) {
+        switch field {
+        case .title:
+            draft.title = metadata.title
+        case .authorCredits:
+            draft.authorCredits = metadata.authorCredits.map { author in
+                PaperInfoAuthorCreditDraft(
+                    id: author.id,
+                    displayName: author.displayName,
+                    familyName: author.familyName
+                )
+            }
+        case .publicationYear:
+            draft.publicationYearText = metadata.publicationYear.map(String.init) ?? ""
+        case .doi:
+            draft.doi = metadata.doi ?? ""
+        case .arxivID:
+            draft.arxivID = metadata.arxivID ?? ""
+        }
+    }
+
+    private func restoreCurrent(_ field: PaperInfoMetadataField, from current: PaperInfoDraft) {
+        switch field {
+        case .title:
+            draft.title = current.title
+        case .authorCredits:
+            draft.authorCredits = current.authorCredits
+        case .publicationYear:
+            draft.publicationYearText = current.publicationYearText
+        case .doi:
+            draft.doi = current.doi
+        case .arxivID:
+            draft.arxivID = current.arxivID
+        }
+    }
+
+    private func scalarProvenance<Value: Equatable>(
+        field: PaperInfoMetadataField,
+        value: Value,
+        originalValue: Value,
+        originalProvenance: MetadataProvenance,
+        reparsedValue: Value?,
+        reparsedProvenance: MetadataProvenance?
+    ) -> MetadataProvenance {
+        if acceptedReparsedMetadata[field] != nil,
+           value == reparsedValue,
+           let reparsedProvenance {
+            return reparsedProvenance
+        }
+        if value == originalValue { return originalProvenance }
+        return .userEntry
+    }
+
+    private func optionalProvenance<Value: Equatable>(
+        field: PaperInfoMetadataField,
+        value: Value?,
+        originalValue: Value?,
+        originalProvenance: MetadataProvenance?,
+        reparsedValue: Value?,
+        reparsedProvenance: MetadataProvenance?
+    ) -> MetadataProvenance? {
+        guard let value else { return nil }
+        if acceptedReparsedMetadata[field] != nil,
+           value == reparsedValue,
+           let reparsedProvenance {
+            return reparsedProvenance
+        }
+        if value == originalValue { return originalProvenance }
+        return .userEntry
+    }
+
+    private func identifierProvenance(
+        field: PaperInfoMetadataField,
+        rawValue: String,
+        normalizedValue: String?,
+        originalValue: String?,
+        originalProvenance: MetadataProvenance?,
+        reparsedValue: String?,
+        reparsedProvenance: MetadataProvenance?
+    ) -> MetadataProvenance? {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        guard let normalizedValue else { return .userEntry }
+        return optionalProvenance(
+            field: field,
+            value: normalizedValue,
+            originalValue: originalValue,
+            originalProvenance: originalProvenance,
+            reparsedValue: reparsedValue,
+            reparsedProvenance: reparsedProvenance
+        )
+    }
+
+    private func isCurrentReparse(requestID: UUID, paperID: UUID) -> Bool {
+        guard isPresented, self.paperID == paperID,
+              case .loading(requestID) = reparseState else { return false }
+        return true
+    }
+
+    private func refreshReadOnlyDetails(repository: LibraryRepository) {
+        guard let paperID,
+              let paper = try? repository.paper(id: paperID) else { return }
+        readOnlyDetails = PaperInfoReadOnlyDetails(paper: paper)
+    }
+
+    private func resetReparse() {
+        activeReparseAnalysis?.task.cancel()
+        activeReparseAnalysis = nil
+        reparseState = .idle
+        reparseMessage = nil
+        reparseErrorMessage = nil
+        acceptedReparsedMetadata = [:]
+    }
+
+    private func reparseErrorDescription(_ error: Error) -> String {
+        guard let sourceError = error as? PaperSourceAccessError else {
+            return error.localizedDescription
+        }
+        return switch sourceError {
+        case .sourceUnavailable:
+            "The Source PDF is temporarily unavailable. Reconnect its location and try again."
+        case .sourceMissing:
+            "Locate the missing Source PDF before reparsing metadata."
+        case .sourceChanged:
+            "The Source PDF no longer matches this Paper. Locate the original before reparsing metadata."
+        case .libraryCopyMissing:
+            "Restore the missing Canopy-managed Source PDF before reparsing metadata."
+        }
     }
 }

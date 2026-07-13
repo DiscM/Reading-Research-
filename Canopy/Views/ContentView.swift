@@ -134,6 +134,11 @@ struct ContentView: View {
         ) {
             PaperInfoView(
                 workflow: paperInfoWorkflow,
+                onReparse: {
+                    Task { @MainActor in
+                        await paperInfoWorkflow.reparse(repository: repository)
+                    }
+                },
                 onSave: savePaperInfo
             )
         }
@@ -159,10 +164,9 @@ struct ContentView: View {
     }
 
     private func savePaperInfo() {
-        guard let paperID = paperInfoWorkflow.paperID else { return }
         do {
-            let update = try paperInfoWorkflow.draft.makeUpdate()
-            let change = try repository.updatePaperInfo(paperID: paperID, update: update)
+            let target = try paperInfoWorkflow.makeTargetSnapshot()
+            let change = try repository.applyPaperInfoSnapshot(target)
             PaperInfoUndo.register(
                 change: change,
                 repository: repository,

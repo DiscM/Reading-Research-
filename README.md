@@ -12,11 +12,11 @@ The core reading loop now has five functional slices:
 - **Library browsing and management** presents recently opened Papers above the remaining library, supports Title and Date Added sorting, ranks title search matches ahead of metadata and note matches, clears recent history without removing Papers, and removes referenced or managed Papers with storage-specific confirmation and native Undo.
 - **Reader and resume** verifies Source PDF identity before opening, presents a continuous vertical PDFKit reader with page and zoom controls plus document-local find, and restores page, viewport, zoom, and inspector state.
 - **Highlights and notes** captures composite text-selection quadrilaterals, presents an accessible five-color contextual palette, renders database-backed overlays without modifying the Source PDF, and provides a page-ordered inspector with navigation and debounced inline notes. Creation, deletion, and note edits save explicitly and participate in native Undo and Redo.
-- **Paper Info** opens from the reader, a Paper row, or `⌘I`; stages title, publication year, DOI, arXiv, and ordered Author Credit edits until Save; validates and normalizes the transaction atomically; shows provenance and Source PDF details; and participates in native Undo and Redo.
+- **Paper Info** opens from the reader, a Paper row, or `⌘I`; stages title, publication year, DOI, arXiv, and ordered Author Credit edits until Save; validates and normalizes the transaction atomically; shows provenance and Source PDF details; can reparse a verified Source PDF through field-by-field replacement choices; and participates in native Undo and Redo.
 
 Annotations remain hidden until the selected Paper's Source PDF is verified in the current reading session. Source changes and annotation-load failures have explicit unavailable, error, and retry states.
 
-Reparse Metadata, the remaining Source PDF recovery surfaces, and release hardening are still in progress; see the delivery status in the v1 plan.
+The remaining Source PDF recovery surfaces and release hardening are still in progress; see the delivery status in the v1 plan.
 
 - Prototype branch: `codex/archive-research-paper-reader-prototype`
 - Prototype tag: `archive/research-paper-reader-prototype-2026-07-10`

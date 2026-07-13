@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 
 struct PaperInfoView: View {
     @Bindable var workflow: PaperInfoWorkflow
+    let onReparse: () -> Void
     let onSave: () -> Void
     @State private var selectedAuthorCreditID: UUID?
     @State private var expandedAuthorCreditIDs: Set<UUID> = []
@@ -21,14 +22,27 @@ struct PaperInfoView: View {
 
             Form {
                 Section("Bibliographic Information") {
-                    metadataField("Title", text: $workflow.draft.title, provenance: snapshot?.titleProvenance)
+                    metadataField("Title", text: $workflow.draft.title, provenance: workflow.provenance(for: .title))
                     metadataField(
                         "Publication Year",
                         text: $workflow.draft.publicationYearText,
-                        provenance: snapshot?.publicationYearProvenance
+                        provenance: workflow.provenance(for: .publicationYear)
                     )
-                    metadataField("DOI", text: $workflow.draft.doi, provenance: snapshot?.doiProvenance)
-                    metadataField("arXiv ID", text: $workflow.draft.arxivID, provenance: snapshot?.arxivIDProvenance)
+                    metadataField("DOI", text: $workflow.draft.doi, provenance: workflow.provenance(for: .doi))
+                    metadataField("arXiv ID", text: $workflow.draft.arxivID, provenance: workflow.provenance(for: .arxivID))
+                }
+                .disabled(workflow.hasActiveReparse)
+
+                if let proposal = workflow.reparseProposal {
+                    Section("Fresh Metadata") {
+                        PaperInfoReparseReviewView(
+                            proposal: proposal,
+                            onUseFound: workflow.acceptReparsed,
+                            onKeepCurrent: workflow.keepCurrent,
+                            onKeepAllCurrent: workflow.discardReparseResults,
+                            onFinish: workflow.finishReparseReview
+                        )
+                    }
                 }
 
                 Section("Author Credits") {
@@ -104,6 +118,7 @@ struct PaperInfoView: View {
                         .controlSize(.small)
                     }
                 }
+                .disabled(workflow.hasActiveReparse)
 
                 Section("Source PDF") {
                     LabeledContent("Status", value: workflow.readOnlyDetails?.sourceStatus ?? "Unavailable")
@@ -114,6 +129,25 @@ struct PaperInfoView: View {
                             .lineLimit(2)
                             .truncationMode(.middle)
                             .textSelection(.enabled)
+                    }
+                    HStack {
+                        Button(action: onReparse) {
+                            Label("Reparse Metadata…", systemImage: "arrow.clockwise")
+                        }
+                        .disabled(workflow.hasActiveReparse)
+
+                        if workflow.isReparsing {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Reading fresh metadata…")
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
+                    if let message = workflow.reparseMessage {
+                        Label(message, systemImage: "checkmark.circle")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -128,7 +162,7 @@ struct PaperInfoView: View {
                 .keyboardShortcut(.cancelAction)
                 Button("Save", action: onSave)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(!workflow.hasChanges)
+                    .disabled(!workflow.hasChanges || workflow.hasActiveReparse)
             }
             .padding(16)
         }
@@ -137,7 +171,10 @@ struct PaperInfoView: View {
         .onChange(of: workflow.paperID) {
             resetAuthorCreditViewState()
         }
-        .interactiveDismissDisabled(workflow.hasChanges)
+        .onChange(of: workflow.draft.authorCredits.map(\.id)) {
+            reconcileAuthorCreditViewState()
+        }
+        .interactiveDismissDisabled(workflow.hasChanges || workflow.hasActiveReparse)
         .alert(
             "Couldn’t Save Paper Info",
             isPresented: Binding(
@@ -149,9 +186,18 @@ struct PaperInfoView: View {
         } message: {
             Text(workflow.errorMessage ?? "Canopy could not save these changes.")
         }
+        .alert(
+            "Couldn’t Reparse Metadata",
+            isPresented: Binding(
+                get: { workflow.reparseErrorMessage != nil },
+                set: { if !$0 { workflow.reparseErrorMessage = nil } }
+            )
+        ) {
+            Button("Dismiss", role: .cancel) {}
+        } message: {
+            Text(workflow.reparseErrorMessage ?? "Canopy could not read fresh metadata from this Source PDF.")
+        }
     }
-
-    private var snapshot: PaperInfoSnapshot? { workflow.originalSnapshot }
 
     private func metadataField(
         _ label: String,
@@ -258,6 +304,17 @@ struct PaperInfoView: View {
         expandedAuthorCreditIDs = []
         focusedAuthorCreditID = nil
     }
+
+    private func reconcileAuthorCreditViewState() {
+        let authorIDs = Set(workflow.draft.authorCredits.map(\.id))
+        expandedAuthorCreditIDs.formIntersection(authorIDs)
+        if let selectedAuthorCreditID, !authorIDs.contains(selectedAuthorCreditID) {
+            self.selectedAuthorCreditID = nil
+        }
+        if let focusedAuthorCreditID, !authorIDs.contains(focusedAuthorCreditID) {
+            self.focusedAuthorCreditID = nil
+        }
+    }
 }
 
 private struct PaperInfoAuthorCreditRow: View {
@@ -352,7 +409,7 @@ private extension UTType {
     )
 }
 
-private extension MetadataProvenance {
+extension MetadataProvenance {
     var displayName: String {
         switch self {
         case .embeddedMetadata: "Embedded metadata"

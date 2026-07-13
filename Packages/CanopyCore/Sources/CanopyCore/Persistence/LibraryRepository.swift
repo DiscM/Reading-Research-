@@ -182,14 +182,25 @@ public final class LibraryRepository {
                 before: before.authorCredits
             )
         )
-        return try applyPaperInfoSnapshot(target, to: paper, before: before)
+        return try persistPaperInfoSnapshot(target, to: paper, before: before)
+    }
+
+    @discardableResult
+    public func applyPaperInfoSnapshot(_ snapshot: PaperInfoSnapshot) throws -> PaperInfoChange {
+        guard let paper = try paper(id: snapshot.paperID) else {
+            throw LibraryRepositoryError.paperNotFound
+        }
+        let target = try validatedPaperInfoSnapshot(snapshot)
+        let before = paperInfoSnapshot(for: paper)
+        return try persistPaperInfoSnapshot(target, to: paper, before: before)
     }
 
     @discardableResult
     public func restorePaperInfoSnapshot(_ snapshot: PaperInfoSnapshot) throws -> PaperInfoChange {
-        guard let paper = try paper(id: snapshot.paperID) else {
-            throw LibraryRepositoryError.paperNotFound
-        }
+        try applyPaperInfoSnapshot(snapshot)
+    }
+
+    private func validatedPaperInfoSnapshot(_ snapshot: PaperInfoSnapshot) throws -> PaperInfoSnapshot {
         guard (snapshot.publicationYear == nil) == (snapshot.publicationYearProvenance == nil),
               (snapshot.doi == nil) == (snapshot.doiProvenance == nil),
               (snapshot.arxivID == nil) == (snapshot.arxivIDProvenance == nil) else {
@@ -228,8 +239,7 @@ public final class LibraryRepository {
                 provenance: provenance
             )
         }
-        let before = paperInfoSnapshot(for: paper)
-        let target = PaperInfoSnapshot(
+        return PaperInfoSnapshot(
             paperID: snapshot.paperID,
             title: values.title,
             titleProvenance: snapshot.titleProvenance,
@@ -241,7 +251,6 @@ public final class LibraryRepository {
             arxivIDProvenance: snapshot.arxivIDProvenance,
             authorCredits: restoredAuthors
         )
-        return try applyPaperInfoSnapshot(target, to: paper, before: before)
     }
 
     public func recordPaperOpened(paperID: UUID, at date: Date = .now) throws {
@@ -758,7 +767,7 @@ public final class LibraryRepository {
         }
     }
 
-    private func applyPaperInfoSnapshot(
+    private func persistPaperInfoSnapshot(
         _ target: PaperInfoSnapshot,
         to paper: Paper,
         before: PaperInfoSnapshot

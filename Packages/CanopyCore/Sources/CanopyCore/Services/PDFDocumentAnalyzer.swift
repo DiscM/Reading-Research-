@@ -17,11 +17,19 @@ public struct PDFDocumentAnalyzer: DocumentAnalyzing {
     public init() {}
 
     public func analyze(_ url: URL) throws -> ParsedPaperMetadata {
+        try Task.checkCancellation()
         guard let document = PDFDocument(url: url) else { throw PDFAnalysisError.unreadable }
+        try Task.checkCancellation()
         guard !document.isLocked else { throw PDFAnalysisError.encrypted }
 
         let attributes = document.documentAttributes ?? [:]
-        let pageTexts = (0..<document.pageCount).map { document.page(at: $0)?.string ?? "" }
+        var pageTexts: [String] = []
+        pageTexts.reserveCapacity(document.pageCount)
+        for pageIndex in 0..<document.pageCount {
+            try Task.checkCancellation()
+            pageTexts.append(document.page(at: pageIndex)?.string ?? "")
+        }
+        try Task.checkCancellation()
         let firstPage = pageTexts.first ?? ""
         let embeddedTitle = attributes[PDFDocumentAttribute.titleAttribute] as? String
         let validEmbeddedTitle = MetadataValidator.usableTitle(embeddedTitle)
@@ -37,6 +45,7 @@ public struct PDFDocumentAnalyzer: DocumentAnalyzing {
         let arxiv = firstMatch(in: firstPage, pattern: #"(?:arXiv:\s*)?(?:\d{4}\.\d{4,5}|[a-z-]+/\d{7})(?:v\d+)?"#)
             .flatMap(MetadataValidator.normalizedArxivID)
 
+        try Task.checkCancellation()
         return ParsedPaperMetadata(
             title: title,
             titleProvenance: titleProvenance,

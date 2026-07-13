@@ -77,7 +77,7 @@ The retained origin of an accepted Paper's current title, authors, year, and ide
 _Avoid_: Confidence score, source path
 
 **Reparse Metadata**:
-The user action that extracts fresh metadata from a Paper's current Source PDF and presents field-by-field replacements for approval after manual edits or unsatisfactory inference.
+The user action that extracts fresh metadata from a Paper's current Source PDF and presents different, usable field values for approval after manual edits or unsatisfactory inference. A field not found during reparsing is not treated as an instruction to erase its current value.
 _Avoid_: Restore metadata, undo edits
 
 **Author Credit**:

@@ -371,6 +371,517 @@ struct CanopyAppTests {
     }
 
     @MainActor
+    @Test("Reparse Metadata stages only approved replacements and preserves their provenance")
+    func reparseMetadataStagesApprovedFields() throws {
+        let container = try CanopyModelContainer.make(inMemory: true)
+        let repository = LibraryRepository(container: container)
+        let paper = Paper(
+            fingerprint: Data(repeating: 22, count: 32),
+            title: "Original Title",
+            titleProvenance: .filenameFallback,
+            publicationYear: 2024,
+            publicationYearProvenance: .embeddedMetadata,
+            doi: "10.1000/original",
+            doiProvenance: .firstPage,
+            arxivID: "2401.12345",
+            arxivIDProvenance: .embeddedMetadata,
+            storageMode: .managedCopy,
+            sourceFilename: "reparse.pdf",
+            sourceFileSize: 100,
+            authorCredits: [
+                AuthorCredit(
+                    position: 0,
+                    displayName: "Ada Original",
+                    familyName: "Original",
+                    provenance: .firstPage
+                )
+            ]
+        )
+        try repository.insert(paper)
+        let before = try repository.paperInfoSnapshot(paperID: paper.id)
+        let workflow = PaperInfoWorkflow()
+        try workflow.present(paperID: paper.id, repository: repository)
+        workflow.draft.doi = "10.2000/manual"
+
+        workflow.reviewReparsedMetadata(ParsedPaperMetadata(
+            title: "Fresh Title",
+            titleProvenance: .embeddedMetadata,
+            authors: [
+                ParsedAuthorCredit(
+                    displayName: "Grace Fresh",
+                    familyName: "Fresh",
+                    provenance: .embeddedMetadata
+                )
+            ],
+            publicationYear: 2025,
+            publicationYearProvenance: .firstPage,
+            doi: "10.3000/fresh",
+            doiProvenance: .firstPage,
+            arxivID: "arXiv: 2401.12345",
+            arxivIDProvenance: .firstPage
+        ))
+
+        #expect(workflow.reparseProposal?.remainingFields == [
+            .title,
+            .authorCredits,
+            .publicationYear,
+            .doi
+        ])
+        workflow.acceptReparsed(.title)
+        workflow.acceptReparsed(.authorCredits)
+        workflow.keepCurrent(.publicationYear)
+        workflow.keepCurrent(.doi)
+        #expect(workflow.reparseProposal?.remainingFields.isEmpty == true)
+        workflow.finishReparseReview()
+
+        #expect(try repository.paperInfoSnapshot(paperID: paper.id) == before)
+        let target = try workflow.makeTargetSnapshot()
+        #expect(target.title == "Fresh Title")
+        #expect(target.titleProvenance == .embeddedMetadata)
+        #expect(target.publicationYear == 2024)
+        #expect(target.publicationYearProvenance == .embeddedMetadata)
+        #expect(target.doi == "10.2000/manual")
+        #expect(target.doiProvenance == .userEntry)
+        #expect(target.arxivID == "2401.12345")
+        #expect(target.arxivIDProvenance == .embeddedMetadata)
+        #expect(target.authorCredits.map(\.displayName) == ["Grace Fresh"])
+        #expect(target.authorCredits.map(\.provenance) == [.embeddedMetadata])
+        #expect(workflow.reparseProposal == nil)
+
+        let change = try repository.applyPaperInfoSnapshot(target)
+        let undoManager = UndoManager()
+        let undoTarget = PaperInfoUndoTarget()
+        var errors: [Error] = []
+        PaperInfoUndo.register(
+            change: change,
+            repository: repository,
+            target: undoTarget,
+            undoManager: undoManager,
+            onError: { errors.append($0) }
+        )
+        undoManager.undo()
+        #expect(try repository.paperInfoSnapshot(paperID: paper.id) == before)
+        undoManager.redo()
+        #expect(try repository.paperInfoSnapshot(paperID: paper.id) == change.after)
+        #expect(errors.isEmpty)
+    }
+
+    @MainActor
+    @Test("Accepted reparse values keep fresh provenance even when they equal stored values")
+    func acceptedReparseValuesPreferFreshProvenance() throws {
+        let container = try CanopyModelContainer.make(inMemory: true)
+        let repository = LibraryRepository(container: container)
+        let paper = Paper(
+            fingerprint: Data(repeating: 27, count: 32),
+            title: "Stored Title",
+            titleProvenance: .filenameFallback,
+            publicationYear: 2024,
+            publicationYearProvenance: .embeddedMetadata,
+            doi: "10.1000/stored",
+            doiProvenance: .embeddedMetadata,
+            arxivID: "2401.12345",
+            arxivIDProvenance: .embeddedMetadata,
+            storageMode: .managedCopy,
+            sourceFilename: "fresh-provenance.pdf",
+            sourceFileSize: 100
+        )
+        try repository.insert(paper)
+        let workflow = PaperInfoWorkflow()
+        try workflow.present(paperID: paper.id, repository: repository)
+        workflow.draft.title = "Manual Title"
+        workflow.draft.publicationYearText = "2025"
+        workflow.draft.doi = "10.2000/manual"
+        workflow.draft.arxivID = "2501.12345"
+
+        workflow.reviewReparsedMetadata(ParsedPaperMetadata(
+            title: "Stored Title",
+            titleProvenance: .embeddedMetadata,
+            publicationYear: 2024,
+            publicationYearProvenance: .firstPage,
+            doi: "https://doi.org/10.1000/stored",
+            doiProvenance: .firstPage,
+            arxivID: "arXiv: 2401.12345",
+            arxivIDProvenance: .firstPage
+        ))
+        for field in [
+            PaperInfoMetadataField.title,
+            .publicationYear,
+            .doi,
+            .arxivID
+        ] {
+            workflow.acceptReparsed(field)
+        }
+
+        let target = try workflow.makeTargetSnapshot()
+        #expect(target.titleProvenance == .embeddedMetadata)
+        #expect(target.publicationYearProvenance == .firstPage)
+        #expect(target.doiProvenance == .firstPage)
+        #expect(target.arxivIDProvenance == .firstPage)
+    }
+
+    @MainActor
+    @Test("Reparse Metadata decisions remain reversible until review finishes")
+    func reparseMetadataDecisionsRemainReversible() throws {
+        let container = try CanopyModelContainer.make(inMemory: true)
+        let repository = LibraryRepository(container: container)
+        let paper = Paper(
+            fingerprint: Data(repeating: 24, count: 32),
+            title: "Original Title",
+            titleProvenance: .filenameFallback,
+            publicationYear: 2024,
+            publicationYearProvenance: .embeddedMetadata,
+            storageMode: .managedCopy,
+            sourceFilename: "reversible.pdf",
+            sourceFileSize: 100
+        )
+        try repository.insert(paper)
+        let workflow = PaperInfoWorkflow()
+        try workflow.present(paperID: paper.id, repository: repository)
+        workflow.reviewReparsedMetadata(ParsedPaperMetadata(
+            title: "Fresh Title",
+            titleProvenance: .firstPage,
+            publicationYear: 2025,
+            publicationYearProvenance: .firstPage
+        ))
+
+        workflow.acceptReparsed(.title)
+        workflow.keepCurrent(.title)
+
+        var target = try workflow.makeTargetSnapshot()
+        #expect(target.title == "Original Title")
+        #expect(target.titleProvenance == .filenameFallback)
+
+        workflow.acceptReparsed(.title)
+        workflow.discardReparseResults()
+
+        target = try workflow.makeTargetSnapshot()
+        #expect(target.title == "Original Title")
+        #expect(target.titleProvenance == .filenameFallback)
+        #expect(workflow.reparseProposal == nil)
+    }
+
+    @MainActor
+    @Test("Paper Info reports malformed identifiers through their field validation")
+    func paperInfoReportsMalformedIdentifiers() throws {
+        let container = try CanopyModelContainer.make(inMemory: true)
+        let repository = LibraryRepository(container: container)
+        let paper = Paper(
+            fingerprint: Data(repeating: 25, count: 32),
+            title: "Identifier Validation",
+            storageMode: .managedCopy,
+            sourceFilename: "identifiers.pdf",
+            sourceFileSize: 100
+        )
+        try repository.insert(paper)
+        let workflow = PaperInfoWorkflow()
+        try workflow.present(paperID: paper.id, repository: repository)
+
+        workflow.draft.doi = "not a DOI"
+        var target = try workflow.makeTargetSnapshot()
+        #expect(target.doiProvenance == .userEntry)
+        #expect(throws: LibraryRepositoryError.invalidDOI) {
+            _ = try repository.applyPaperInfoSnapshot(target)
+        }
+
+        workflow.draft.doi = ""
+        workflow.draft.arxivID = "not an arXiv ID"
+        target = try workflow.makeTargetSnapshot()
+        #expect(target.arxivIDProvenance == .userEntry)
+        #expect(throws: LibraryRepositoryError.invalidArxivID) {
+            _ = try repository.applyPaperInfoSnapshot(target)
+        }
+    }
+
+    @MainActor
+    @Test("Reparse Metadata does not offer an unusable title")
+    func reparseMetadataRejectsUnusableTitle() throws {
+        let container = try CanopyModelContainer.make(inMemory: true)
+        let repository = LibraryRepository(container: container)
+        let paper = Paper(
+            fingerprint: Data(repeating: 26, count: 32),
+            title: "Usable Existing Title",
+            storageMode: .managedCopy,
+            sourceFilename: "title.pdf",
+            sourceFileSize: 100
+        )
+        try repository.insert(paper)
+        let workflow = PaperInfoWorkflow()
+        try workflow.present(paperID: paper.id, repository: repository)
+
+        workflow.reviewReparsedMetadata(ParsedPaperMetadata(
+            title: "untitled",
+            titleProvenance: .filenameFallback
+        ))
+
+        #expect(workflow.reparseProposal == nil)
+        #expect(workflow.reparseMessage == "No different usable metadata was found.")
+    }
+
+    @MainActor
+    @Test("Reparse Metadata rejects malformed parsed field values")
+    func reparseMetadataRejectsMalformedFields() throws {
+        let container = try CanopyModelContainer.make(inMemory: true)
+        let repository = LibraryRepository(container: container)
+        let paper = Paper(
+            fingerprint: Data(repeating: 28, count: 32),
+            title: "Validated Metadata",
+            publicationYear: 2024,
+            publicationYearProvenance: .userEntry,
+            doi: "10.1000/current",
+            doiProvenance: .userEntry,
+            arxivID: "2401.12345",
+            arxivIDProvenance: .userEntry,
+            storageMode: .managedCopy,
+            sourceFilename: "validation.pdf",
+            sourceFileSize: 100,
+            authorCredits: [
+                AuthorCredit(
+                    position: 0,
+                    displayName: "Valid Author",
+                    familyName: "Author",
+                    provenance: .userEntry
+                )
+            ]
+        )
+        try repository.insert(paper)
+        let workflow = PaperInfoWorkflow()
+        try workflow.present(paperID: paper.id, repository: repository)
+
+        workflow.reviewReparsedMetadata(ParsedPaperMetadata(
+            title: "Validated Metadata",
+            titleProvenance: .embeddedMetadata,
+            authors: [
+                ParsedAuthorCredit(
+                    displayName: "   ",
+                    familyName: "Author",
+                    provenance: .firstPage
+                )
+            ],
+            publicationYear: 999,
+            publicationYearProvenance: .firstPage,
+            doi: "not a DOI",
+            doiProvenance: .firstPage,
+            arxivID: "not an arXiv ID",
+            arxivIDProvenance: .firstPage
+        ))
+
+        #expect(workflow.reparseProposal == nil)
+        #expect(workflow.reparseMessage == "No different usable metadata was found.")
+    }
+
+    @MainActor
+    @Test("Reparse Metadata can replace malformed staged year text")
+    func reparseMetadataCanCorrectMalformedStagedYear() throws {
+        let container = try CanopyModelContainer.make(inMemory: true)
+        let repository = LibraryRepository(container: container)
+        let paper = Paper(
+            fingerprint: Data(repeating: 29, count: 32),
+            title: "Year Correction",
+            storageMode: .managedCopy,
+            sourceFilename: "year.pdf",
+            sourceFileSize: 100
+        )
+        try repository.insert(paper)
+        let workflow = PaperInfoWorkflow()
+        try workflow.present(paperID: paper.id, repository: repository)
+        workflow.draft.publicationYearText = "02025"
+
+        workflow.reviewReparsedMetadata(ParsedPaperMetadata(
+            title: "Year Correction",
+            titleProvenance: .embeddedMetadata,
+            publicationYear: 2025,
+            publicationYearProvenance: .firstPage
+        ))
+
+        #expect(workflow.reparseProposal?.remainingFields == [.publicationYear])
+        workflow.acceptReparsed(.publicationYear)
+        #expect(workflow.draft.publicationYearText == "2025")
+    }
+
+    @MainActor
+    @Test("Reparse Metadata rereads a verified managed Source PDF")
+    func reparseMetadataReadsVerifiedSource() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let relativePath = "verified-reparse.pdf"
+        let sourceURL = directory.appendingPathComponent(relativePath)
+        try Data("verified-source".utf8).write(to: sourceURL)
+        let attributes = try FileManager.default.attributesOfItem(atPath: sourceURL.path)
+        let modificationDate = try #require(attributes[.modificationDate] as? Date)
+        let container = try CanopyModelContainer.make(inMemory: true)
+        let repository = LibraryRepository(container: container)
+        let paper = Paper(
+            fingerprint: try DocumentFingerprint.sha256(of: sourceURL),
+            title: "Original Title",
+            storageMode: .managedCopy,
+            managedRelativePath: relativePath,
+            sourceFilename: relativePath,
+            sourceFileSize: 15,
+            sourceModificationDate: modificationDate
+        )
+        try repository.insert(paper)
+        let workflow = PaperInfoWorkflow()
+        try workflow.present(paperID: paper.id, repository: repository)
+        let parsed = ParsedPaperMetadata(
+            title: "Fresh Verified Title",
+            titleProvenance: .firstPage
+        )
+
+        await workflow.reparse(
+            repository: repository,
+            analyzer: StubDocumentAnalyzer(metadata: parsed),
+            managedStore: ManagedPaperStore(rootURL: directory)
+        )
+
+        #expect(workflow.reparseProposal?.remainingFields == [.title])
+        #expect(workflow.reparseProposal?.metadata.title == "Fresh Verified Title")
+        #expect(workflow.reparseErrorMessage == nil)
+        #expect(paper.sourceState == .available)
+    }
+
+    @MainActor
+    @Test("Reparse Metadata rejects a Source PDF that changes during analysis")
+    func reparseMetadataRejectsSourceChangedDuringAnalysis() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let originalData = Data("stable-source".utf8)
+        let relativePath = "changing-reparse.pdf"
+        let sourceURL = directory.appendingPathComponent(relativePath)
+        try originalData.write(to: sourceURL)
+        let attributes = try FileManager.default.attributesOfItem(atPath: sourceURL.path)
+        let modificationDate = try #require(attributes[.modificationDate] as? Date)
+        let container = try CanopyModelContainer.make(inMemory: true)
+        let repository = LibraryRepository(container: container)
+        let paper = Paper(
+            fingerprint: try DocumentFingerprint.sha256(of: sourceURL),
+            title: "Stable Metadata",
+            storageMode: .managedCopy,
+            managedRelativePath: relativePath,
+            sourceFilename: relativePath,
+            sourceFileSize: Int64(originalData.count),
+            sourceModificationDate: modificationDate
+        )
+        try repository.insert(paper)
+        let workflow = PaperInfoWorkflow()
+        try workflow.present(paperID: paper.id, repository: repository)
+        let draftBeforeReparse = workflow.draft
+
+        await workflow.reparse(
+            repository: repository,
+            analyzer: SourceMutatingDocumentAnalyzer(
+                replacementData: Data("different-source-bytes".utf8),
+                metadata: ParsedPaperMetadata(
+                    title: "Untrusted Fresh Title",
+                    titleProvenance: .firstPage
+                )
+            ),
+            managedStore: ManagedPaperStore(rootURL: directory)
+        )
+
+        #expect(workflow.draft == draftBeforeReparse)
+        #expect(workflow.reparseProposal == nil)
+        #expect(workflow.reparseErrorMessage?.contains("no longer matches") == true)
+        #expect(paper.sourceState == .sourceChanged)
+    }
+
+    @MainActor
+    @Test("Dismissing Paper Info cancels active metadata analysis")
+    func dismissingPaperInfoCancelsMetadataAnalysis() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let relativePath = "cancel-reparse.pdf"
+        let sourceURL = directory.appendingPathComponent(relativePath)
+        try Data("cancel-reparse".utf8).write(to: sourceURL)
+        let managedStore = ManagedPaperStore(rootURL: directory)
+        let container = try CanopyModelContainer.make(inMemory: true)
+        let repository = LibraryRepository(container: container)
+        let paper = Paper(
+            fingerprint: try DocumentFingerprint.sha256(of: sourceURL),
+            title: "Cancel Reparse",
+            storageMode: .managedCopy,
+            managedRelativePath: relativePath,
+            sourceFilename: relativePath,
+            sourceFileSize: 14
+        )
+        try repository.insert(paper)
+        let before = try repository.paperInfoSnapshot(paperID: paper.id)
+        let probe = CancellationProbe()
+        let analyzer = CancellationObservingDocumentAnalyzer(probe: probe)
+        let workflow = PaperInfoWorkflow()
+        try workflow.present(paperID: paper.id, repository: repository)
+
+        let reparse = Task { @MainActor in
+            await workflow.reparse(
+                repository: repository,
+                analyzer: analyzer,
+                managedStore: managedStore
+            )
+        }
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !probe.hasStarted, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        #expect(probe.hasStarted)
+        #expect(workflow.isReparsing)
+
+        workflow.dismiss()
+        await reparse.value
+
+        #expect(probe.observedCancellation)
+        #expect(!workflow.isPresented)
+        #expect(workflow.paperID == nil)
+        #expect(!workflow.isReparsing)
+        #expect(workflow.reparseProposal == nil)
+        #expect(workflow.reparseErrorMessage == nil)
+        #expect(workflow.reparseMessage == nil)
+        #expect(workflow.draft == PaperInfoDraft())
+        #expect(try repository.paperInfoSnapshot(paperID: paper.id) == before)
+    }
+
+    @MainActor
+    @Test("Reparse Metadata blocks a missing managed Source PDF without changing the draft")
+    func reparseMetadataBlocksMissingManagedSource() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let container = try CanopyModelContainer.make(inMemory: true)
+        let repository = LibraryRepository(container: container)
+        let paper = Paper(
+            fingerprint: Data(repeating: 23, count: 32),
+            title: "Keep This Draft",
+            storageMode: .managedCopy,
+            managedRelativePath: "missing.pdf",
+            sourceFilename: "missing.pdf",
+            sourceFileSize: 100
+        )
+        try repository.insert(paper)
+        let workflow = PaperInfoWorkflow()
+        try workflow.present(paperID: paper.id, repository: repository)
+        let draftBeforeReparse = workflow.draft
+
+        await workflow.reparse(
+            repository: repository,
+            analyzer: StubDocumentAnalyzer(metadata: ParsedPaperMetadata(
+                title: "Should Not Be Used",
+                titleProvenance: .embeddedMetadata
+            )),
+            managedStore: ManagedPaperStore(rootURL: directory)
+        )
+
+        #expect(workflow.draft == draftBeforeReparse)
+        #expect(workflow.reparseProposal == nil)
+        #expect(workflow.reparseErrorMessage?.contains("Restore the missing") == true)
+        #expect(paper.sourceState == .libraryCopyMissing)
+    }
+
+    @MainActor
     @Test("removing a managed Paper participates in native Undo and Redo")
     func paperRemovalUndoRedo() throws {
         let directory = FileManager.default.temporaryDirectory
@@ -507,5 +1018,64 @@ struct CanopyAppTests {
             ]
         }
         return paper
+    }
+}
+
+private struct StubDocumentAnalyzer: DocumentAnalyzing {
+    let metadata: ParsedPaperMetadata
+
+    func analyze(_ url: URL) throws -> ParsedPaperMetadata {
+        metadata
+    }
+}
+
+private struct SourceMutatingDocumentAnalyzer: DocumentAnalyzing {
+    let replacementData: Data
+    let metadata: ParsedPaperMetadata
+
+    func analyze(_ url: URL) throws -> ParsedPaperMetadata {
+        try replacementData.write(to: url)
+        return metadata
+    }
+}
+
+private struct CancellationObservingDocumentAnalyzer: DocumentAnalyzing {
+    let probe: CancellationProbe
+
+    func analyze(_ url: URL) throws -> ParsedPaperMetadata {
+        probe.markStarted()
+        for _ in 0..<1_000 {
+            if Task.isCancelled {
+                probe.markCancellationObserved()
+                break
+            }
+            Thread.sleep(forTimeInterval: 0.001)
+        }
+        return ParsedPaperMetadata(
+            title: "Must Never Appear",
+            titleProvenance: .firstPage
+        )
+    }
+}
+
+private final class CancellationProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var started = false
+    private var cancellationObserved = false
+
+    var hasStarted: Bool {
+        lock.withLock { started }
+    }
+
+    var observedCancellation: Bool {
+        lock.withLock { cancellationObserved }
+    }
+
+    func markStarted() {
+        lock.withLock { started = true }
+    }
+
+    func markCancellationObserved() {
+        lock.withLock { cancellationObserved = true }
     }
 }
