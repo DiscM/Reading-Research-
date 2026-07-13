@@ -120,6 +120,12 @@ public final class LibraryRepository {
         }
     }
 
+    public func paper(id: UUID) throws -> Paper? {
+        var descriptor = FetchDescriptor<Paper>(predicate: #Predicate { $0.id == id })
+        descriptor.fetchLimit = 1
+        return try context.fetch(descriptor).first
+    }
+
     public func repairReference(
         paperID: UUID,
         fingerprint: Data,

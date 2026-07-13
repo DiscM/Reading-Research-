@@ -16,6 +16,10 @@ struct ContentView: View {
     @State private var workflow = AddPapersWorkflow()
 
     private var repository: LibraryRepository { LibraryRepository(context: modelContext) }
+    private var selectedPaper: Paper? {
+        guard let selectedPaperID else { return nil }
+        return try? repository.paper(id: selectedPaperID)
+    }
 
     var body: some View {
         NavigationSplitView {
@@ -26,7 +30,7 @@ struct ContentView: View {
             )
             .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 360)
         } detail: {
-            ReaderPlaceholderView(hasSelection: selectedPaperID != nil)
+            PDFReaderView(paper: selectedPaper)
                 .inspector(isPresented: $inspectorPresented) {
                     AnnotationInspectorView(hasSelection: selectedPaperID != nil)
                         .inspectorColumnWidth(min: 260, ideal: 320, max: 420)
