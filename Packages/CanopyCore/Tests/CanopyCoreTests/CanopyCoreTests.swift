@@ -255,6 +255,131 @@ struct CanopyCoreTests {
         #expect(paper.rememberedLocation == "/Volumes/Research/paper.pdf")
         #expect(paper.authorCredits.sorted { $0.position < $1.position }.map(\.displayName) == ["Jane A. Smith", "OpenAI Research"])
     }
+
+    @MainActor
+    @Test("reader state survives closing and reopening the library")
+    func readerStateRoundTrip() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let storeURL = directory.appendingPathComponent("Canopy.store")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let paperID = UUID()
+        let openedAt = Date(timeIntervalSince1970: 1_789_000_000)
+
+        do {
+            let configuration = ModelConfiguration(url: storeURL)
+            let container = try ModelContainer(
+                for: Schema(versionedSchema: CanopySchemaV1.self),
+                migrationPlan: CanopyMigrationPlan.self,
+                configurations: configuration
+            )
+            let repository = LibraryRepository(container: container)
+            let paper = Paper(
+                id: paperID,
+                fingerprint: Data(repeating: 8, count: 32),
+                title: "Resume Me",
+                storageMode: .referenced,
+                sourceFilename: "resume.pdf",
+                sourceFileSize: 512
+            )
+            try repository.insert(paper)
+
+            try repository.recordPaperOpened(paperID: paperID, at: openedAt)
+            try repository.saveReaderState(
+                paperID: paperID,
+                state: PaperReaderState(
+                    pageIndex: 12,
+                    viewport: PaperViewport(x: 14.5, y: 220.25, width: 640, height: 720),
+                    zoomScale: 1.35,
+                    isInspectorPresented: false
+                )
+            )
+        }
+
+        let configuration = ModelConfiguration(url: storeURL)
+        let reopened = try ModelContainer(
+            for: Schema(versionedSchema: CanopySchemaV1.self),
+            migrationPlan: CanopyMigrationPlan.self,
+            configurations: configuration
+        )
+        let repository = LibraryRepository(container: reopened)
+        let paper = try #require(try repository.paper(id: paperID))
+
+        #expect(paper.lastOpenedAt == openedAt)
+        #expect(try repository.readerState(paperID: paperID) == PaperReaderState(
+            pageIndex: 12,
+            viewport: PaperViewport(x: 14.5, y: 220.25, width: 640, height: 720),
+            zoomScale: 1.35,
+            isInspectorPresented: false
+        ))
+    }
+
+    @Test("source access rejects changed PDF bytes before opening")
+    func sourceAccessRejectsChangedContent() throws {
+        let fixture = try TemporaryFile(contents: Data("original-pdf".utf8), filename: "paper.pdf")
+        defer { fixture.remove() }
+        let originalAttributes = try FileManager.default.attributesOfItem(atPath: fixture.url.path)
+        let originalModificationDate = try #require(originalAttributes[.modificationDate] as? Date)
+        let fingerprint = try DocumentFingerprint.sha256(of: fixture.url)
+        let paper = Paper(
+            fingerprint: fingerprint,
+            title: "Identity Matters",
+            storageMode: .managedCopy,
+            managedRelativePath: fixture.url.lastPathComponent,
+            sourceFilename: fixture.url.lastPathComponent,
+            sourceFileSize: Int64(Data("original-pdf".utf8).count),
+            sourceModificationDate: originalModificationDate
+        )
+        try Data("modified-pdf".utf8).write(to: fixture.url)
+        try FileManager.default.setAttributes(
+            [.modificationDate: originalModificationDate.addingTimeInterval(10)],
+            ofItemAtPath: fixture.url.path
+        )
+
+        #expect(throws: PaperSourceAccessError.sourceChanged) {
+            _ = try PaperSourceAccess(paper: paper, managedStore: ManagedPaperStore(rootURL: fixture.directory))
+        }
+    }
+
+    @MainActor
+    @Test("repository persists verified source attributes and changed identity state")
+    func repositoryPersistsSourceVerification() throws {
+        let fixture = try TemporaryFile(contents: Data("stable-pdf".utf8), filename: "paper.pdf")
+        defer { fixture.remove() }
+        let fingerprint = try DocumentFingerprint.sha256(of: fixture.url)
+        let container = try CanopyModelContainer.make(inMemory: true)
+        let repository = LibraryRepository(container: container)
+        let paper = Paper(
+            fingerprint: fingerprint,
+            title: "Verified Paper",
+            storageMode: .managedCopy,
+            managedRelativePath: fixture.url.lastPathComponent,
+            sourceFilename: fixture.url.lastPathComponent,
+            sourceFileSize: 0,
+            sourceModificationDate: .distantPast
+        )
+        try repository.insert(paper)
+
+        let access = try repository.sourceAccess(
+            paperID: paper.id,
+            managedStore: ManagedPaperStore(rootURL: fixture.directory)
+        )
+
+        #expect(access.attributesChanged)
+        #expect(paper.sourceFileSize == Int64(Data("stable-pdf".utf8).count))
+        #expect(paper.sourceModificationDate == access.verifiedModificationDate)
+        #expect(paper.sourceState == .available)
+
+        try Data("altered-pdf".utf8).write(to: fixture.url)
+        #expect(throws: PaperSourceAccessError.sourceChanged) {
+            _ = try repository.sourceAccess(
+                paperID: paper.id,
+                managedStore: ManagedPaperStore(rootURL: fixture.directory)
+            )
+        }
+        #expect(paper.sourceState == .sourceChanged)
+    }
 }
 
 private struct StubDocumentAnalyzer: DocumentAnalyzing {

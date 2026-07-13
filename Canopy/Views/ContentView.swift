@@ -30,19 +30,14 @@ struct ContentView: View {
             )
             .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 360)
         } detail: {
-            PDFReaderView(paper: selectedPaper)
+            PDFReaderView(
+                paper: selectedPaper,
+                repository: repository,
+                inspectorPresented: $inspectorPresented
+            )
                 .inspector(isPresented: $inspectorPresented) {
                     AnnotationInspectorView(hasSelection: selectedPaperID != nil)
                         .inspectorColumnWidth(min: 260, ideal: 320, max: 420)
-                }
-                .toolbar {
-                    ToolbarItem {
-                        Button {
-                            inspectorPresented.toggle()
-                        } label: {
-                            Label("Annotations", systemImage: "sidebar.right")
-                        }
-                    }
                 }
         }
         .fileImporter(

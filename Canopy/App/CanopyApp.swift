@@ -35,5 +35,11 @@ private struct CanopyCommands: Commands {
             }
                 .keyboardShortcut("o")
         }
+        CommandGroup(after: .textEditing) {
+            Button("Find in Paper…") {
+                NotificationCenter.default.post(name: .findInPaperRequested, object: nil)
+            }
+            .keyboardShortcut("f")
+        }
     }
 }

@@ -126,6 +126,74 @@ public final class LibraryRepository {
         return try context.fetch(descriptor).first
     }
 
+    public func recordPaperOpened(paperID: UUID, at date: Date = .now) throws {
+        guard let paper = try paper(id: paperID) else {
+            throw LibraryRepositoryError.paperNotFound
+        }
+        paper.lastOpenedAt = date
+        try save()
+    }
+
+    public func saveReaderState(paperID: UUID, state: PaperReaderState) throws {
+        guard let paper = try paper(id: paperID) else {
+            throw LibraryRepositoryError.paperNotFound
+        }
+        paper.lastPageIndex = state.pageIndex
+        paper.lastViewport = try state.viewport.map { try JSONEncoder().encode($0) }
+        paper.lastZoomScale = state.zoomScale
+        paper.isInspectorPresented = state.isInspectorPresented
+        try save()
+    }
+
+    public func readerState(paperID: UUID) throws -> PaperReaderState? {
+        guard let paper = try paper(id: paperID) else {
+            throw LibraryRepositoryError.paperNotFound
+        }
+        guard let pageIndex = paper.lastPageIndex,
+              let zoomScale = paper.lastZoomScale else {
+            return nil
+        }
+        let viewport = try paper.lastViewport.map { try JSONDecoder().decode(PaperViewport.self, from: $0) }
+        return PaperReaderState(
+            pageIndex: pageIndex,
+            viewport: viewport,
+            zoomScale: zoomScale,
+            isInspectorPresented: paper.isInspectorPresented
+        )
+    }
+
+    public func sourceAccess(
+        paperID: UUID,
+        managedStore: ManagedPaperStore? = nil
+    ) throws -> PaperSourceAccess {
+        guard let paper = try paper(id: paperID) else {
+            throw LibraryRepositoryError.paperNotFound
+        }
+        do {
+            let access = try PaperSourceAccess(paper: paper, managedStore: managedStore)
+            if access.attributesChanged {
+                paper.sourceFileSize = access.verifiedFileSize
+                paper.sourceModificationDate = access.verifiedModificationDate
+                paper.sourceState = .available
+                try save()
+            }
+            return access
+        } catch let error as PaperSourceAccessError {
+            switch error {
+            case .sourceUnavailable:
+                paper.sourceState = .sourceUnavailable
+            case .sourceMissing:
+                paper.sourceState = .brokenReference
+            case .sourceChanged:
+                paper.sourceState = .sourceChanged
+            case .libraryCopyMissing:
+                paper.sourceState = .libraryCopyMissing
+            }
+            try save()
+            throw error
+        }
+    }
+
     public func repairReference(
         paperID: UUID,
         fingerprint: Data,

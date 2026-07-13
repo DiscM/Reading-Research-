@@ -2,66 +2,288 @@ import CanopyCore
 import PDFKit
 import SwiftUI
 
+extension Notification.Name {
+    static let findInPaperRequested = Notification.Name("Canopy.findInPaperRequested")
+}
+
 struct PDFReaderView: View {
     let paper: Paper?
+    let repository: LibraryRepository
+    @Binding var inspectorPresented: Bool
+
     @State private var documentSession: PDFDocumentSession?
+    @State private var restoredState: PaperReaderState?
     @State private var loadError: PDFReaderLoadError?
+    @State private var snapshot = PDFReaderSnapshot(pageIndex: 0, viewport: nil, zoomScale: 1)
+    @State private var pageEntry = "1"
+    @State private var command: PDFReaderCommand?
+    @State private var findQuery = ""
+    @State private var matches: [PDFSelection] = []
+    @State private var matchesVersion = UUID()
+    @State private var selectedMatchIndex: Int?
+    @State private var pendingSave: PendingReaderSave?
+    @FocusState private var findFieldFocused: Bool
+
+    private var pageCount: Int { documentSession?.document.pageCount ?? 0 }
 
     var body: some View {
-        Group {
-            if paper == nil {
-                ContentUnavailableView(
-                    "Choose a Paper",
-                    systemImage: "book.pages",
-                    description: Text("Select a recent or library paper to begin reading.")
-                )
-            } else if let documentSession {
-                PDFKitView(document: documentSession.document)
+        VStack(spacing: 0) {
+            if documentSession != nil {
+                readerControls
+                Divider()
+            }
+
+            Group {
+                if paper == nil {
+                    ContentUnavailableView(
+                        "Choose a Paper",
+                        systemImage: "book.pages",
+                        description: Text("Select a recent or library paper to begin reading.")
+                    )
+                } else if let documentSession {
+                    PDFKitReaderView(
+                        document: documentSession.document,
+                        restoredState: restoredState,
+                        command: command,
+                        matches: matches,
+                        matchesVersion: matchesVersion,
+                        selectedMatchIndex: selectedMatchIndex,
+                        onSnapshotChange: updateSnapshot
+                    )
                     .id(documentSession.paperID)
-            } else if let loadError {
-                ContentUnavailableView(
-                    loadError.title,
-                    systemImage: loadError.systemImage,
-                    description: Text(loadError.message)
-                )
-            } else {
-                ProgressView("Opening Paper…")
+                } else if let loadError {
+                    ContentUnavailableView(
+                        loadError.title,
+                        systemImage: loadError.systemImage,
+                        description: Text(loadError.message)
+                    )
+                } else {
+                    ProgressView("Opening Paper…")
+                }
             }
         }
         .task(id: paper?.id) {
-            documentSession = nil
-            loadError = nil
-            guard let paper else { return }
-
-            do {
-                documentSession = try PDFDocumentSession(paper: paper)
-            } catch let error as PDFReaderLoadError {
-                loadError = error
-            } catch {
-                loadError = .cannotOpen
+            loadPaper()
+        }
+        .task(id: pendingSave) {
+            guard let pendingSave else { return }
+            try? await Task.sleep(for: .milliseconds(650))
+            guard !Task.isCancelled, pendingSave == self.pendingSave else { return }
+            try? repository.saveReaderState(paperID: pendingSave.paperID, state: pendingSave.state)
+        }
+        .task(id: findTaskID) {
+            try? await Task.sleep(for: .milliseconds(200))
+            guard !Task.isCancelled else { return }
+            updateFindMatches()
+        }
+        .onChange(of: inspectorPresented) { _, isPresented in
+            scheduleSave(isInspectorPresented: isPresented)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .findInPaperRequested)) { _ in
+            if documentSession != nil {
+                findFieldFocused = true
             }
         }
+        .onDisappear {
+            flushPendingSave()
+        }
+    }
+
+    private var findTaskID: String {
+        "\(documentSession?.paperID.uuidString ?? "none"):\(findQuery)"
+    }
+
+    private var readerControls: some View {
+        HStack(spacing: 8) {
+            TextField("Page", text: $pageEntry)
+                .frame(width: 42)
+                .multilineTextAlignment(.trailing)
+                .disabled(documentSession == nil)
+                .onSubmit(goToEnteredPage)
+                .accessibilityLabel("Page number")
+
+            Text("of \(pageCount)")
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+
+            Button {
+                command = PDFReaderCommand(action: .zoomOut)
+            } label: {
+                Label("Zoom Out", systemImage: "minus.magnifyingglass")
+            }
+            .disabled(documentSession == nil)
+            .help("Zoom Out")
+
+            Button {
+                command = PDFReaderCommand(action: .zoomIn)
+            } label: {
+                Label("Zoom In", systemImage: "plus.magnifyingglass")
+            }
+            .disabled(documentSession == nil)
+            .help("Zoom In")
+
+            Menu {
+                Button("Fit Width") {
+                    command = PDFReaderCommand(action: .fitWidth)
+                }
+                Button("Actual Size") {
+                    command = PDFReaderCommand(action: .actualSize)
+                }
+            } label: {
+                Label("Zoom Options", systemImage: "rectangle.expand.vertical")
+            }
+            .disabled(documentSession == nil)
+
+            TextField("Find", text: $findQuery)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 180)
+                .focused($findFieldFocused)
+                .disabled(documentSession == nil)
+                .accessibilityLabel("Find in Paper")
+
+            Button(action: previousMatch) {
+                Label("Previous Match", systemImage: "chevron.up")
+            }
+            .disabled(matches.isEmpty)
+            .help("Previous Match")
+
+            Button(action: nextMatch) {
+                Label("Next Match", systemImage: "chevron.down")
+            }
+            .disabled(matches.isEmpty)
+            .help("Next Match")
+
+            Text(findResultText)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .frame(minWidth: 58, alignment: .leading)
+
+            Button {
+                inspectorPresented.toggle()
+            } label: {
+                Label("Annotations", systemImage: "sidebar.right")
+            }
+            .help("Show or Hide Annotations")
+        }
+        .controlSize(.small)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(.regularMaterial)
+    }
+
+    private var findResultText: String {
+        guard !findQuery.isEmpty else { return "" }
+        guard let selectedMatchIndex, !matches.isEmpty else { return "0 results" }
+        return "\(selectedMatchIndex + 1) of \(matches.count)"
+    }
+
+    @MainActor
+    private func loadPaper() {
+        flushPendingSave()
+        documentSession = nil
+        restoredState = nil
+        loadError = nil
+        findQuery = ""
+        matches = []
+        matchesVersion = UUID()
+        selectedMatchIndex = nil
+        pageEntry = "1"
+        pendingSave = nil
+        guard let paper else { return }
+
+        inspectorPresented = paper.isInspectorPresented
+        do {
+            let sourceAccess = try repository.sourceAccess(paperID: paper.id)
+            let session = try PDFDocumentSession(paperID: paper.id, sourceAccess: sourceAccess)
+            let savedState = try repository.readerState(paperID: paper.id)
+            restoredState = savedState
+            if let savedState {
+                snapshot = PDFReaderSnapshot(
+                    pageIndex: savedState.pageIndex,
+                    viewport: savedState.viewport,
+                    zoomScale: savedState.zoomScale
+                )
+                pageEntry = String(savedState.pageIndex + 1)
+            }
+            documentSession = session
+            try repository.recordPaperOpened(paperID: paper.id)
+        } catch let error as PaperSourceAccessError {
+            loadError = PDFReaderLoadError(error)
+        } catch let error as PDFReaderLoadError {
+            loadError = error
+        } catch {
+            loadError = .cannotOpen
+        }
+    }
+
+    private func updateSnapshot(_ newSnapshot: PDFReaderSnapshot) {
+        snapshot = newSnapshot
+        pageEntry = String(newSnapshot.pageIndex + 1)
+        scheduleSave(isInspectorPresented: inspectorPresented)
+    }
+
+    private func scheduleSave(isInspectorPresented: Bool) {
+        guard let documentSession else { return }
+        pendingSave = PendingReaderSave(
+            paperID: documentSession.paperID,
+            state: PaperReaderState(
+                pageIndex: snapshot.pageIndex,
+                viewport: snapshot.viewport,
+                zoomScale: snapshot.zoomScale,
+                isInspectorPresented: isInspectorPresented
+            )
+        )
+    }
+
+    private func flushPendingSave() {
+        guard let pendingSave else { return }
+        try? repository.saveReaderState(paperID: pendingSave.paperID, state: pendingSave.state)
+        self.pendingSave = nil
+    }
+
+    private func goToEnteredPage() {
+        guard pageCount > 0 else { return }
+        let enteredPage = Int(pageEntry) ?? (snapshot.pageIndex + 1)
+        let pageIndex = min(max(enteredPage - 1, 0), pageCount - 1)
+        pageEntry = String(pageIndex + 1)
+        command = PDFReaderCommand(action: .goToPage(pageIndex))
+    }
+
+    private func updateFindMatches() {
+        guard let document = documentSession?.document else {
+            matches = []
+            matchesVersion = UUID()
+            selectedMatchIndex = nil
+            return
+        }
+        let query = findQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            matches = []
+            matchesVersion = UUID()
+            selectedMatchIndex = nil
+            return
+        }
+        matches = document.findString(query, withOptions: .caseInsensitive)
+        matchesVersion = UUID()
+        selectedMatchIndex = matches.isEmpty ? nil : 0
+    }
+
+    private func previousMatch() {
+        guard !matches.isEmpty else { return }
+        let current = selectedMatchIndex ?? 0
+        selectedMatchIndex = (current - 1 + matches.count) % matches.count
+    }
+
+    private func nextMatch() {
+        guard !matches.isEmpty else { return }
+        let current = selectedMatchIndex ?? -1
+        selectedMatchIndex = (current + 1) % matches.count
     }
 }
 
-private struct PDFKitView: NSViewRepresentable {
-    let document: PDFDocument
-
-    func makeNSView(context: Context) -> PDFView {
-        let pdfView = PDFView()
-        pdfView.displayMode = .singlePageContinuous
-        pdfView.displayDirection = .vertical
-        pdfView.displaysPageBreaks = true
-        pdfView.autoScales = true
-        pdfView.document = document
-        return pdfView
-    }
-
-    func updateNSView(_ pdfView: PDFView, context: Context) {
-        guard pdfView.document !== document else { return }
-        pdfView.document = document
-        pdfView.autoScales = true
-    }
+private struct PendingReaderSave: Equatable {
+    let paperID: UUID
+    let state: PaperReaderState
 }
 
 @MainActor
@@ -70,13 +292,9 @@ private final class PDFDocumentSession {
     let document: PDFDocument
     private let sourceAccess: PaperSourceAccess
 
-    init(paper: Paper) throws {
-        paperID = paper.id
-        do {
-            sourceAccess = try PaperSourceAccess(paper: paper)
-        } catch let error as PaperSourceAccessError {
-            throw PDFReaderLoadError(error)
-        }
+    init(paperID: UUID, sourceAccess: PaperSourceAccess) throws {
+        self.paperID = paperID
+        self.sourceAccess = sourceAccess
         guard let document = PDFDocument(url: sourceAccess.url) else {
             throw PDFReaderLoadError.cannotOpen
         }
