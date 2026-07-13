@@ -10,6 +10,7 @@ public struct PaperInfoSnapshot: Equatable, Sendable {
     public let doiProvenance: MetadataProvenance?
     public let arxivID: String?
     public let arxivIDProvenance: MetadataProvenance?
+    public let authorCredits: [AuthorCreditSnapshot]
 
     public init(
         paperID: UUID,
@@ -20,7 +21,8 @@ public struct PaperInfoSnapshot: Equatable, Sendable {
         doi: String?,
         doiProvenance: MetadataProvenance?,
         arxivID: String?,
-        arxivIDProvenance: MetadataProvenance?
+        arxivIDProvenance: MetadataProvenance?,
+        authorCredits: [AuthorCreditSnapshot]
     ) {
         self.paperID = paperID
         self.title = title
@@ -31,6 +33,19 @@ public struct PaperInfoSnapshot: Equatable, Sendable {
         self.doiProvenance = doiProvenance
         self.arxivID = arxivID
         self.arxivIDProvenance = arxivIDProvenance
+        self.authorCredits = authorCredits
+    }
+}
+
+public struct AuthorCreditUpdate: Equatable, Identifiable, Sendable {
+    public let id: UUID
+    public let displayName: String
+    public let familyName: String
+
+    public init(id: UUID, displayName: String, familyName: String) {
+        self.id = id
+        self.displayName = displayName
+        self.familyName = familyName
     }
 }
 
@@ -39,17 +54,20 @@ public struct PaperInfoUpdate: Equatable, Sendable {
     public let publicationYear: Int?
     public let doi: String?
     public let arxivID: String?
+    public let authorCredits: [AuthorCreditUpdate]
 
     public init(
         title: String,
         publicationYear: Int?,
         doi: String?,
-        arxivID: String?
+        arxivID: String?,
+        authorCredits: [AuthorCreditUpdate]
     ) {
         self.title = title
         self.publicationYear = publicationYear
         self.doi = doi
         self.arxivID = arxivID
+        self.authorCredits = authorCredits
     }
 }
 

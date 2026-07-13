@@ -86,15 +86,12 @@ public struct PDFDocumentAnalyzer: DocumentAnalyzing {
             .filter { !$0.isEmpty && $0.count <= 160 && $0.rangeOfCharacter(from: .letters) != nil }
             .enumerated()
             .map { _, name in
-                ParsedAuthorCredit(displayName: name, familyName: inferredFamilyName(name), provenance: provenance)
+                ParsedAuthorCredit(
+                    displayName: name,
+                    familyName: MetadataValidator.inferredFamilyName(name),
+                    provenance: provenance
+                )
             }
-    }
-
-    private func inferredFamilyName(_ displayName: String) -> String {
-        if displayName.contains(",") {
-            return displayName.split(separator: ",").first.map(String.init) ?? displayName
-        }
-        return displayName.split(whereSeparator: \Character.isWhitespace).last.map(String.init) ?? displayName
     }
 
     private func extractYear(from text: String) -> Int? {
@@ -109,4 +106,3 @@ public struct PDFDocumentAnalyzer: DocumentAnalyzing {
         return String(text[swiftRange])
     }
 }
-

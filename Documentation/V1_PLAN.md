@@ -170,7 +170,7 @@ Status labels describe the current branch, not release readiness. The release ga
 
 ### 2. Library
 
-**Status: Partially implemented.** Validated local metadata extraction and deterministic title inference are available. The library presents Recent and remaining sections, supports Title and Date Added sorting, ranks title matches before author/year and note matches, clears recent history without deleting Papers, and applies distinct referenced/managed removal semantics with native Undo. Paper Info stages atomic title, year, DOI, and arXiv edits from all three entry points while showing provenance, Author Credits, and source details. Author Credit editing and reordering plus Reparse Metadata remain.
+**Status: Partially implemented.** Validated local metadata extraction and deterministic title inference are available. The library presents Recent and remaining sections, supports Title and Date Added sorting, ranks title matches before author/year and note matches, clears recent history without deleting Papers, and applies distinct referenced/managed removal semantics with native Undo. Paper Info stages atomic title, year, DOI, arXiv, and ordered Author Credit edits from all three entry points while showing provenance and source details. Author Credits support add, remove, display-name editing, expanded family-name correction, drag reordering, and native Undo. Reparse Metadata remains.
 
 - Implement validated metadata extraction and editable fields.
 - Add deterministic first-page title inference.

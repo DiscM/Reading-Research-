@@ -374,7 +374,14 @@ struct CanopyCoreTests {
                     title: "  Revised Canopy Study\n",
                     publicationYear: 2026,
                     doi: " HTTPS://DOI.ORG/10.5555/Canopy.Test ",
-                    arxivID: " arXiv: 2607.01234V2 "
+                    arxivID: " arXiv: 2607.01234V2 ",
+                    authorCredits: [
+                        AuthorCreditUpdate(
+                            id: authorID,
+                            displayName: "Ada Researcher",
+                            familyName: "Researcher"
+                        )
+                    ]
                 )
             )
             committedChange = change
@@ -411,6 +418,153 @@ struct CanopyCoreTests {
     }
 
     @MainActor
+    @Test("Paper Info atomically adds, edits, removes, and reorders Author Credits")
+    func paperInfoAuthorCreditEdits() throws {
+        let container = try CanopyModelContainer.make(inMemory: true)
+        let repository = LibraryRepository(container: container)
+        let firstAuthorID = UUID()
+        let secondAuthorID = UUID()
+        let removedAuthorID = UUID()
+        let addedAuthorID = UUID()
+        let paper = Paper(
+            fingerprint: Data(repeating: 18, count: 32),
+            title: "Ordered Authors",
+            titleProvenance: .firstPage,
+            storageMode: .referenced,
+            sourceFilename: "ordered-authors.pdf",
+            sourceFileSize: 512,
+            authorCredits: [
+                AuthorCredit(
+                    id: firstAuthorID,
+                    position: 0,
+                    displayName: "Ada Byron",
+                    familyName: "Byron",
+                    provenance: .firstPage
+                ),
+                AuthorCredit(
+                    id: secondAuthorID,
+                    position: 1,
+                    displayName: "Grace Hopper",
+                    familyName: "Hopper",
+                    provenance: .embeddedMetadata
+                ),
+                AuthorCredit(
+                    id: removedAuthorID,
+                    position: 2,
+                    displayName: "Remove Me",
+                    familyName: "Me",
+                    provenance: .embeddedMetadata
+                )
+            ]
+        )
+        try repository.insert(paper)
+
+        let change = try repository.updatePaperInfo(
+            paperID: paper.id,
+            update: PaperInfoUpdate(
+                title: "Ordered Authors",
+                publicationYear: nil,
+                doi: nil,
+                arxivID: nil,
+                authorCredits: [
+                    AuthorCreditUpdate(
+                        id: secondAuthorID,
+                        displayName: "Grace Hopper",
+                        familyName: "Hopper"
+                    ),
+                    AuthorCreditUpdate(
+                        id: firstAuthorID,
+                        displayName: "Ada Lovelace",
+                        familyName: "Lovelace"
+                    ),
+                    AuthorCreditUpdate(
+                        id: addedAuthorID,
+                        displayName: "Katherine Johnson",
+                        familyName: "Johnson"
+                    )
+                ]
+            )
+        )
+
+        #expect(change.after.authorCredits.map(\.id) == [secondAuthorID, firstAuthorID, addedAuthorID])
+        #expect(change.after.authorCredits.map(\.position) == [0, 1, 2])
+        #expect(change.after.authorCredits.map(\.displayName) == ["Grace Hopper", "Ada Lovelace", "Katherine Johnson"])
+        #expect(change.after.authorCredits.map(\.familyName) == ["Hopper", "Lovelace", "Johnson"])
+        #expect(change.after.authorCredits.map(\.provenance) == [.embeddedMetadata, .userEntry, .userEntry])
+        #expect(!change.after.authorCredits.map(\.id).contains(removedAuthorID))
+        #expect(change.after.titleProvenance == .firstPage)
+    }
+
+    @MainActor
+    @Test("invalid Author Credits reject the entire Paper Info transaction")
+    func invalidPaperInfoAuthorCreditsRejectWholeUpdate() throws {
+        let container = try CanopyModelContainer.make(inMemory: true)
+        let repository = LibraryRepository(container: container)
+        let authorID = UUID()
+        let foreignAuthorID = UUID()
+        let paper = Paper(
+            fingerprint: Data(repeating: 19, count: 32),
+            title: "Valid Authors",
+            titleProvenance: .firstPage,
+            storageMode: .referenced,
+            sourceFilename: "valid-authors.pdf",
+            sourceFileSize: 256,
+            authorCredits: [
+                AuthorCredit(
+                    id: authorID,
+                    position: 0,
+                    displayName: "Ada Lovelace",
+                    familyName: "Lovelace",
+                    provenance: .firstPage
+                )
+            ]
+        )
+        let foreignPaper = Paper(
+            fingerprint: Data(repeating: 20, count: 32),
+            title: "Another Paper",
+            storageMode: .referenced,
+            sourceFilename: "another.pdf",
+            sourceFileSize: 256,
+            authorCredits: [
+                AuthorCredit(
+                    id: foreignAuthorID,
+                    position: 0,
+                    displayName: "Grace Hopper",
+                    familyName: "Hopper",
+                    provenance: .embeddedMetadata
+                )
+            ]
+        )
+        try repository.insert(paper)
+        try repository.insert(foreignPaper)
+        let before = try repository.paperInfoSnapshot(paperID: paper.id)
+        let invalidAuthorLists = [
+            [AuthorCreditUpdate(id: authorID, displayName: " ", familyName: "Lovelace")],
+            [
+                AuthorCreditUpdate(id: authorID, displayName: "Ada Lovelace", familyName: "Lovelace"),
+                AuthorCreditUpdate(id: authorID, displayName: "Ada Again", familyName: "Again")
+            ],
+            [AuthorCreditUpdate(id: foreignAuthorID, displayName: "Grace Hopper", familyName: "Hopper")]
+        ]
+
+        for authorCredits in invalidAuthorLists {
+            #expect(throws: LibraryRepositoryError.invalidAuthorCredit) {
+                _ = try repository.updatePaperInfo(
+                    paperID: paper.id,
+                    update: PaperInfoUpdate(
+                        title: "This Must Not Persist",
+                        publicationYear: 2026,
+                        doi: nil,
+                        arxivID: nil,
+                        authorCredits: authorCredits
+                    )
+                )
+            }
+            #expect(try repository.paperInfoSnapshot(paperID: paper.id) == before)
+        }
+    }
+
+    @MainActor
     @Test("an invalid Paper Info field rejects the whole staged update")
     func invalidPaperInfoRejectsWholeUpdate() throws {
         let container = try CanopyModelContainer.make(inMemory: true)
@@ -437,7 +591,8 @@ struct CanopyCoreTests {
                     title: " ",
                     publicationYear: 2026,
                     doi: "10.5555/revised",
-                    arxivID: "2607.12345"
+                    arxivID: "2607.12345",
+                    authorCredits: []
                 ),
                 .invalidTitle
             ),
@@ -446,7 +601,8 @@ struct CanopyCoreTests {
                     title: "Revised Metadata",
                     publicationYear: 999,
                     doi: "10.5555/revised",
-                    arxivID: "2607.12345"
+                    arxivID: "2607.12345",
+                    authorCredits: []
                 ),
                 .invalidPublicationYear
             ),
@@ -455,7 +611,8 @@ struct CanopyCoreTests {
                     title: "Revised Metadata",
                     publicationYear: 2026,
                     doi: "not a DOI",
-                    arxivID: "2607.12345"
+                    arxivID: "2607.12345",
+                    authorCredits: []
                 ),
                 .invalidDOI
             ),
@@ -464,7 +621,8 @@ struct CanopyCoreTests {
                     title: "Revised Metadata",
                     publicationYear: 2026,
                     doi: "10.5555/revised",
-                    arxivID: "not an arXiv ID"
+                    arxivID: "not an arXiv ID",
+                    authorCredits: []
                 ),
                 .invalidArxivID
             )
@@ -506,7 +664,8 @@ struct CanopyCoreTests {
                 title: "Changed Title Only",
                 publicationYear: 2025,
                 doi: "HTTPS://DOI.ORG/10.1000/SAME",
-                arxivID: "arXiv: 2401.12345V2"
+                arxivID: "arXiv: 2401.12345V2",
+                authorCredits: []
             )
         )
 
@@ -546,7 +705,8 @@ struct CanopyCoreTests {
                 title: "Optional Identifiers",
                 publicationYear: nil,
                 doi: " \n ",
-                arxivID: nil
+                arxivID: nil,
+                authorCredits: []
             )
         )
 
@@ -593,7 +753,14 @@ struct CanopyCoreTests {
                 title: "After Edit",
                 publicationYear: 2026,
                 doi: "10.1000/after",
-                arxivID: "2607.12345"
+                arxivID: "2607.12345",
+                authorCredits: original.authorCredits.map {
+                    AuthorCreditUpdate(
+                        id: $0.id,
+                        displayName: $0.displayName,
+                        familyName: $0.familyName
+                    )
+                }
             )
         )
 
@@ -631,7 +798,8 @@ struct CanopyCoreTests {
             doi: "10.1000/missing-provenance",
             doiProvenance: nil,
             arxivID: nil,
-            arxivIDProvenance: nil
+            arxivIDProvenance: nil,
+            authorCredits: before.authorCredits
         )
 
         #expect(throws: LibraryRepositoryError.invalidMetadataProvenance) {

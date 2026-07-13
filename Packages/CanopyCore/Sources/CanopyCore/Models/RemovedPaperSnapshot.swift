@@ -1,18 +1,34 @@
 import Foundation
 
-public struct AuthorCreditSnapshot: Equatable, Sendable {
+public struct AuthorCreditSnapshot: Equatable, Identifiable, Sendable {
     public let id: UUID
     public let position: Int
     public let displayName: String
     public let familyName: String
     public let provenance: MetadataProvenance
 
+    public init(
+        id: UUID,
+        position: Int,
+        displayName: String,
+        familyName: String,
+        provenance: MetadataProvenance
+    ) {
+        self.id = id
+        self.position = position
+        self.displayName = displayName
+        self.familyName = familyName
+        self.provenance = provenance
+    }
+
     init(authorCredit: AuthorCredit) {
-        id = authorCredit.id
-        position = authorCredit.position
-        displayName = authorCredit.displayName
-        familyName = authorCredit.familyName
-        provenance = authorCredit.provenance
+        self.init(
+            id: authorCredit.id,
+            position: authorCredit.position,
+            displayName: authorCredit.displayName,
+            familyName: authorCredit.familyName,
+            provenance: authorCredit.provenance
+        )
     }
 }
 

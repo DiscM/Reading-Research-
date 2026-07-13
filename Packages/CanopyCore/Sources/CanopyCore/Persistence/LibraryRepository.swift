@@ -15,6 +15,7 @@ public enum LibraryRepositoryError: LocalizedError, Equatable {
     case invalidPublicationYear
     case invalidDOI
     case invalidArxivID
+    case invalidAuthorCredit
     case invalidMetadataProvenance
     case contentIdentityMismatch
     case incompatibleStorageMode
@@ -29,6 +30,7 @@ public enum LibraryRepositoryError: LocalizedError, Equatable {
         case .invalidPublicationYear: "Enter a publication year from 1000 through next year, or leave it blank."
         case .invalidDOI: "Enter a valid DOI, or leave it blank."
         case .invalidArxivID: "Enter a valid arXiv ID, or leave it blank."
+        case .invalidAuthorCredit: "Enter a display and family name for each Author Credit, or remove empty rows."
         case .invalidMetadataProvenance: "The Paper Info snapshot has inconsistent metadata provenance."
         case .contentIdentityMismatch: "The selected PDF does not match the Paper's original content."
         case .incompatibleStorageMode: "This source operation is not valid for the Paper's storage mode."
@@ -174,7 +176,11 @@ public final class LibraryRepository {
             arxivID: values.arxivID,
             arxivIDProvenance: values.arxivID == before.arxivID
                 ? before.arxivIDProvenance
-                : values.arxivID.map { _ in .userEntry }
+                : values.arxivID.map { _ in .userEntry },
+            authorCredits: paperInfoAuthorSnapshots(
+                from: values.authorCredits,
+                before: before.authorCredits
+            )
         )
         return try applyPaperInfoSnapshot(target, to: paper, before: before)
     }
@@ -189,12 +195,39 @@ public final class LibraryRepository {
               (snapshot.arxivID == nil) == (snapshot.arxivIDProvenance == nil) else {
             throw LibraryRepositoryError.invalidMetadataProvenance
         }
+        let orderedAuthors = snapshot.authorCredits.sorted(by: authorCreditSnapshotOrder)
+        guard orderedAuthors.map(\.position) == Array(orderedAuthors.indices),
+              Set(orderedAuthors.map(\.id)).count == orderedAuthors.count else {
+            throw LibraryRepositoryError.invalidAuthorCredit
+        }
         let values = try validatedPaperInfoValues(PaperInfoUpdate(
             title: snapshot.title,
             publicationYear: snapshot.publicationYear,
             doi: snapshot.doi,
-            arxivID: snapshot.arxivID
+            arxivID: snapshot.arxivID,
+            authorCredits: orderedAuthors.map {
+                AuthorCreditUpdate(
+                    id: $0.id,
+                    displayName: $0.displayName,
+                    familyName: $0.familyName
+                )
+            }
         ))
+        let provenanceByID = Dictionary(
+            uniqueKeysWithValues: orderedAuthors.map { ($0.id, $0.provenance) }
+        )
+        let restoredAuthors = try values.authorCredits.enumerated().map { position, author in
+            guard let provenance = provenanceByID[author.id] else {
+                throw LibraryRepositoryError.invalidMetadataProvenance
+            }
+            return AuthorCreditSnapshot(
+                id: author.id,
+                position: position,
+                displayName: author.displayName,
+                familyName: author.familyName,
+                provenance: provenance
+            )
+        }
         let before = paperInfoSnapshot(for: paper)
         let target = PaperInfoSnapshot(
             paperID: snapshot.paperID,
@@ -205,7 +238,8 @@ public final class LibraryRepository {
             doi: values.doi,
             doiProvenance: snapshot.doiProvenance,
             arxivID: values.arxivID,
-            arxivIDProvenance: snapshot.arxivIDProvenance
+            arxivIDProvenance: snapshot.arxivIDProvenance,
+            authorCredits: restoredAuthors
         )
         return try applyPaperInfoSnapshot(target, to: paper, before: before)
     }
@@ -638,7 +672,10 @@ public final class LibraryRepository {
             doi: paper.doi,
             doiProvenance: paper.doiProvenance,
             arxivID: paper.arxivID,
-            arxivIDProvenance: paper.arxivIDProvenance
+            arxivIDProvenance: paper.arxivIDProvenance,
+            authorCredits: paper.authorCredits
+                .map(AuthorCreditSnapshot.init)
+                .sorted(by: authorCreditSnapshotOrder)
         )
     }
 
@@ -672,12 +709,53 @@ public final class LibraryRepository {
             arxivID = nil
         }
 
+        var authorIDs = Set<UUID>()
+        let authorCredits = try update.authorCredits.map { author in
+            let displayName = author.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let familyName = author.familyName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard authorIDs.insert(author.id).inserted,
+                  !displayName.isEmpty,
+                  !familyName.isEmpty else {
+                throw LibraryRepositoryError.invalidAuthorCredit
+            }
+            return AuthorCreditUpdate(
+                id: author.id,
+                displayName: displayName,
+                familyName: familyName
+            )
+        }
+
         return PaperInfoValues(
             title: title,
             publicationYear: update.publicationYear,
             doi: doi,
-            arxivID: arxivID
+            arxivID: arxivID,
+            authorCredits: authorCredits
         )
+    }
+
+    private func paperInfoAuthorSnapshots(
+        from updates: [AuthorCreditUpdate],
+        before: [AuthorCreditSnapshot]
+    ) -> [AuthorCreditSnapshot] {
+        let existingByID = Dictionary(uniqueKeysWithValues: before.map { ($0.id, $0) })
+        return updates.enumerated().map { position, update in
+            let existing = existingByID[update.id]
+            let provenance: MetadataProvenance = if let existing,
+                existing.displayName == update.displayName,
+                existing.familyName == update.familyName {
+                existing.provenance
+            } else {
+                .userEntry
+            }
+            return AuthorCreditSnapshot(
+                id: update.id,
+                position: position,
+                displayName: update.displayName,
+                familyName: update.familyName,
+                provenance: provenance
+            )
+        }
     }
 
     private func applyPaperInfoSnapshot(
@@ -689,16 +767,54 @@ public final class LibraryRepository {
             return PaperInfoChange(before: before, after: before)
         }
 
-        paper.title = target.title
-        paper.titleProvenance = target.titleProvenance
-        paper.publicationYear = target.publicationYear
-        paper.publicationYearProvenance = target.publicationYearProvenance
-        paper.doi = target.doi
-        paper.doiProvenance = target.doiProvenance
-        paper.arxivID = target.arxivID
-        paper.arxivIDProvenance = target.arxivIDProvenance
+        guard target.authorCredits.map(\.position) == Array(target.authorCredits.indices),
+              Set(target.authorCredits.map(\.id)).count == target.authorCredits.count else {
+            throw LibraryRepositoryError.invalidAuthorCredit
+        }
+        let targetAuthorIDs = Set(target.authorCredits.map(\.id))
+        let conflictingAuthorExists = try context.fetch(FetchDescriptor<AuthorCredit>()).contains { author in
+            targetAuthorIDs.contains(author.id) && author.paper?.id != paper.id
+        }
+        guard !conflictingAuthorExists else {
+            throw LibraryRepositoryError.invalidAuthorCredit
+        }
 
         do {
+            let currentAuthors = paper.authorCredits
+            let currentAuthorsByID = Dictionary(uniqueKeysWithValues: currentAuthors.map { ($0.id, $0) })
+            let targetAuthors = target.authorCredits.map { snapshot in
+                let author = currentAuthorsByID[snapshot.id] ?? AuthorCredit(
+                    id: snapshot.id,
+                    position: snapshot.position,
+                    displayName: snapshot.displayName,
+                    familyName: snapshot.familyName,
+                    provenance: snapshot.provenance,
+                    paper: paper
+                )
+                author.position = snapshot.position
+                author.displayName = snapshot.displayName
+                author.familyName = snapshot.familyName
+                author.provenance = snapshot.provenance
+                author.paper = paper
+                if currentAuthorsByID[snapshot.id] == nil {
+                    context.insert(author)
+                }
+                return author
+            }
+
+            paper.title = target.title
+            paper.titleProvenance = target.titleProvenance
+            paper.publicationYear = target.publicationYear
+            paper.publicationYearProvenance = target.publicationYearProvenance
+            paper.doi = target.doi
+            paper.doiProvenance = target.doiProvenance
+            paper.arxivID = target.arxivID
+            paper.arxivIDProvenance = target.arxivIDProvenance
+            paper.authorCredits = targetAuthors
+            for author in currentAuthors where !targetAuthorIDs.contains(author.id) {
+                context.delete(author)
+            }
+
             try context.save()
             return PaperInfoChange(before: before, after: paperInfoSnapshot(for: paper))
         } catch {
@@ -714,6 +830,12 @@ private struct PaperInfoValues {
     let publicationYear: Int?
     let doi: String?
     let arxivID: String?
+    let authorCredits: [AuthorCreditUpdate]
+}
+
+private func authorCreditSnapshotOrder(_ lhs: AuthorCreditSnapshot, _ rhs: AuthorCreditSnapshot) -> Bool {
+    if lhs.position != rhs.position { return lhs.position < rhs.position }
+    return lhs.id.uuidString < rhs.id.uuidString
 }
 
 public struct AnnotationSnapshot: Equatable, Sendable {

@@ -18,17 +18,20 @@ struct PaperInfoDraft: Equatable {
     var publicationYearText: String
     var doi: String
     var arxivID: String
+    var authorCredits: [PaperInfoAuthorCreditDraft]
 
     init(
         title: String = "",
         publicationYearText: String = "",
         doi: String = "",
-        arxivID: String = ""
+        arxivID: String = "",
+        authorCredits: [PaperInfoAuthorCreditDraft] = []
     ) {
         self.title = title
         self.publicationYearText = publicationYearText
         self.doi = doi
         self.arxivID = arxivID
+        self.authorCredits = authorCredits
     }
 
     init(snapshot: PaperInfoSnapshot) {
@@ -36,7 +39,8 @@ struct PaperInfoDraft: Equatable {
             title: snapshot.title,
             publicationYearText: snapshot.publicationYear.map(String.init) ?? "",
             doi: snapshot.doi ?? "",
-            arxivID: snapshot.arxivID ?? ""
+            arxivID: snapshot.arxivID ?? "",
+            authorCredits: snapshot.authorCredits.map(PaperInfoAuthorCreditDraft.init)
         )
     }
 
@@ -58,8 +62,55 @@ struct PaperInfoDraft: Equatable {
             title: title,
             publicationYear: publicationYear,
             doi: optionalNonempty(doi),
-            arxivID: optionalNonempty(arxivID)
+            arxivID: optionalNonempty(arxivID),
+            authorCredits: authorCredits.map {
+                AuthorCreditUpdate(
+                    id: $0.id,
+                    displayName: $0.displayName,
+                    familyName: $0.familyName
+                )
+            }
         )
+    }
+
+    mutating func updateAuthorDisplayName(id: UUID, displayName: String) {
+        guard let index = authorCredits.firstIndex(where: { $0.id == id }) else { return }
+        let previousDisplayName = authorCredits[index].displayName
+        let previousDerivedFamilyName = MetadataValidator.inferredFamilyName(previousDisplayName)
+        let followsDerivedFamilyName = authorCredits[index].familyName
+            .trimmingCharacters(in: .whitespacesAndNewlines) == previousDerivedFamilyName
+        authorCredits[index].displayName = displayName
+        if followsDerivedFamilyName {
+            authorCredits[index].familyName = MetadataValidator.inferredFamilyName(displayName)
+        }
+    }
+
+    mutating func updateAuthorFamilyName(id: UUID, familyName: String) {
+        guard let index = authorCredits.firstIndex(where: { $0.id == id }) else { return }
+        authorCredits[index].familyName = familyName
+    }
+
+    mutating func addAuthorCredit(id: UUID = UUID()) {
+        authorCredits.append(PaperInfoAuthorCreditDraft(id: id, displayName: "", familyName: ""))
+    }
+
+    mutating func removeAuthorCredit(id: UUID) {
+        authorCredits.removeAll { $0.id == id }
+    }
+
+    mutating func moveAuthorCredit(id: UUID, toInsertionIndex insertionIndex: Int) {
+        guard let sourceIndex = authorCredits.firstIndex(where: { $0.id == id }) else { return }
+        let author = authorCredits.remove(at: sourceIndex)
+        let adjustedIndex = sourceIndex < insertionIndex ? insertionIndex - 1 : insertionIndex
+        authorCredits.insert(author, at: min(max(adjustedIndex, 0), authorCredits.count))
+    }
+
+    mutating func moveAuthorCredit(id: UUID, by offset: Int) {
+        guard let sourceIndex = authorCredits.firstIndex(where: { $0.id == id }) else { return }
+        let destinationIndex = min(max(sourceIndex + offset, 0), authorCredits.count - 1)
+        guard destinationIndex != sourceIndex else { return }
+        let authorCredit = authorCredits.remove(at: sourceIndex)
+        authorCredits.insert(authorCredit, at: destinationIndex)
     }
 
     private func optionalNonempty(_ value: String) -> String? {
@@ -68,31 +119,33 @@ struct PaperInfoDraft: Equatable {
     }
 }
 
-struct PaperInfoReadOnlyDetails: Equatable {
-    struct Author: Equatable, Identifiable {
-        let id: UUID
-        let position: Int
-        let displayName: String
-        let provenance: MetadataProvenance
+struct PaperInfoAuthorCreditDraft: Equatable, Identifiable {
+    let id: UUID
+    var displayName: String
+    var familyName: String
+
+    init(id: UUID, displayName: String, familyName: String) {
+        self.id = id
+        self.displayName = displayName
+        self.familyName = familyName
     }
 
-    let authors: [Author]
+    init(snapshot: AuthorCreditSnapshot) {
+        self.init(
+            id: snapshot.id,
+            displayName: snapshot.displayName,
+            familyName: snapshot.familyName
+        )
+    }
+}
+
+struct PaperInfoReadOnlyDetails: Equatable {
     let sourceStatus: String
     let storage: String
     let sourceFilename: String
     let sourceLocation: String
 
     init(paper: Paper) {
-        authors = paper.authorCredits
-            .sorted { $0.position < $1.position }
-            .map {
-                Author(
-                    id: $0.id,
-                    position: $0.position,
-                    displayName: $0.displayName,
-                    provenance: $0.provenance
-                )
-            }
         sourceStatus = switch paper.sourceState {
         case .available: "Available"
         case .sourceUnavailable: "Source Unavailable"
@@ -125,6 +178,16 @@ final class PaperInfoWorkflow {
     var hasChanges: Bool {
         guard let originalSnapshot else { return false }
         return draft != PaperInfoDraft(snapshot: originalSnapshot)
+    }
+
+    func authorProvenance(id: UUID) -> MetadataProvenance {
+        guard let author = draft.authorCredits.first(where: { $0.id == id }),
+              let original = originalSnapshot?.authorCredits.first(where: { $0.id == id }),
+              author.displayName.trimmingCharacters(in: .whitespacesAndNewlines) == original.displayName,
+              author.familyName.trimmingCharacters(in: .whitespacesAndNewlines) == original.familyName else {
+            return .userEntry
+        }
+        return original.provenance
     }
 
     func present(paperID: UUID, repository: LibraryRepository) throws {

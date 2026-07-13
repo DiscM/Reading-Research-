@@ -48,4 +48,14 @@ public enum MetadataValidator {
         let nextYear = Calendar(identifier: .gregorian).component(.year, from: now) + 1
         return (1000...nextYear).contains(year)
     }
+
+    public static func inferredFamilyName(_ displayName: String) -> String {
+        let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.contains(",") {
+            return name.split(separator: ",", maxSplits: 1)
+                .first
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) } ?? name
+        }
+        return name.split(whereSeparator: \Character.isWhitespace).last.map(String.init) ?? name
+    }
 }

@@ -181,18 +181,143 @@ struct CanopyAppTests {
         #expect(update.arxivID == nil)
     }
 
+    @Test("Paper Info stages ordered Author Credit edits and preserves family-name corrections")
+    func paperInfoDraftStagesAuthorCredits() throws {
+        let firstAuthorID = UUID()
+        let removedAuthorID = UUID()
+        let addedAuthorID = UUID()
+        let snapshot = PaperInfoSnapshot(
+            paperID: UUID(),
+            title: "A Paper",
+            titleProvenance: .firstPage,
+            publicationYear: nil,
+            publicationYearProvenance: nil,
+            doi: nil,
+            doiProvenance: nil,
+            arxivID: nil,
+            arxivIDProvenance: nil,
+            authorCredits: [
+                AuthorCreditSnapshot(
+                    id: firstAuthorID,
+                    position: 0,
+                    displayName: "Ada Byron",
+                    familyName: "Byron",
+                    provenance: .firstPage
+                ),
+                AuthorCreditSnapshot(
+                    id: removedAuthorID,
+                    position: 1,
+                    displayName: "Remove Me",
+                    familyName: "Me",
+                    provenance: .embeddedMetadata
+                )
+            ]
+        )
+        var draft = PaperInfoDraft(snapshot: snapshot)
+
+        draft.updateAuthorDisplayName(id: firstAuthorID, displayName: "Ada Lovelace")
+        #expect(draft.authorCredits[0].familyName == "Lovelace")
+        draft.updateAuthorFamilyName(id: firstAuthorID, familyName: "Byron King")
+        draft.updateAuthorDisplayName(id: firstAuthorID, displayName: "Augusta Ada King")
+        draft.removeAuthorCredit(id: removedAuthorID)
+        draft.addAuthorCredit(id: addedAuthorID)
+        draft.updateAuthorDisplayName(id: addedAuthorID, displayName: "Grace Hopper")
+        draft.moveAuthorCredit(id: addedAuthorID, toInsertionIndex: 0)
+
+        let update = try draft.makeUpdate()
+        let authors = update.authorCredits
+        #expect(authors.map(\.id) == [addedAuthorID, firstAuthorID])
+        #expect(authors.map(\.displayName) == ["Grace Hopper", "Augusta Ada King"])
+        #expect(authors.map(\.familyName) == ["Hopper", "Byron King"])
+    }
+
+    @Test("Paper Info moves Author Credits by arbitrary offsets without disturbing intervening rows")
+    func paperInfoDraftMovesAuthorCreditsByOffset() {
+        let firstAuthorID = UUID()
+        let secondAuthorID = UUID()
+        let thirdAuthorID = UUID()
+        var draft = PaperInfoDraft(authorCredits: [
+            PaperInfoAuthorCreditDraft(id: firstAuthorID, displayName: "First Author", familyName: "Author"),
+            PaperInfoAuthorCreditDraft(id: secondAuthorID, displayName: "Second Author", familyName: "Author"),
+            PaperInfoAuthorCreditDraft(id: thirdAuthorID, displayName: "Third Author", familyName: "Author")
+        ])
+
+        draft.moveAuthorCredit(id: firstAuthorID, by: 2)
+
+        #expect(draft.authorCredits.map(\.id) == [secondAuthorID, thirdAuthorID, firstAuthorID])
+    }
+
+    @MainActor
+    @Test("Paper Info Cancel discards every staged Author Credit operation")
+    func paperInfoCancelDiscardsAuthorCreditChanges() throws {
+        let container = try CanopyModelContainer.make(inMemory: true)
+        let repository = LibraryRepository(container: container)
+        let authorID = UUID()
+        let paper = Paper(
+            fingerprint: Data(repeating: 21, count: 32),
+            title: "Staged Authors",
+            titleProvenance: .firstPage,
+            storageMode: .referenced,
+            sourceFilename: "staged-authors.pdf",
+            sourceFileSize: 100,
+            authorCredits: [
+                AuthorCredit(
+                    id: authorID,
+                    position: 0,
+                    displayName: "Ada Byron",
+                    familyName: "Byron",
+                    provenance: .firstPage
+                )
+            ]
+        )
+        try repository.insert(paper)
+        let before = try repository.paperInfoSnapshot(paperID: paper.id)
+        let workflow = PaperInfoWorkflow()
+        try workflow.present(paperID: paper.id, repository: repository)
+
+        workflow.draft.updateAuthorDisplayName(id: authorID, displayName: "Ada Lovelace")
+        let addedAuthorID = UUID()
+        workflow.draft.addAuthorCredit(id: addedAuthorID)
+        workflow.draft.updateAuthorDisplayName(id: addedAuthorID, displayName: "Grace Hopper")
+        workflow.draft.moveAuthorCredit(id: authorID, toInsertionIndex: 2)
+        workflow.draft.removeAuthorCredit(id: addedAuthorID)
+        #expect(workflow.hasChanges)
+        workflow.dismiss()
+
+        #expect(try repository.paperInfoSnapshot(paperID: paper.id) == before)
+    }
+
     @MainActor
     @Test("Paper Info Save participates in native Undo and Redo with provenance")
     func paperInfoUndoRedo() throws {
         let container = try CanopyModelContainer.make(inMemory: true)
         let repository = LibraryRepository(container: container)
+        let retainedAuthorID = UUID()
+        let removedAuthorID = UUID()
+        let addedAuthorID = UUID()
         let paper = Paper(
             fingerprint: Data(repeating: 15, count: 32),
             title: "Inferred Title",
             titleProvenance: .firstPage,
             storageMode: .referenced,
             sourceFilename: "info.pdf",
-            sourceFileSize: 100
+            sourceFileSize: 100,
+            authorCredits: [
+                AuthorCredit(
+                    id: retainedAuthorID,
+                    position: 0,
+                    displayName: "Ada Byron",
+                    familyName: "Byron",
+                    provenance: .firstPage
+                ),
+                AuthorCredit(
+                    id: removedAuthorID,
+                    position: 1,
+                    displayName: "Remove Me",
+                    familyName: "Me",
+                    provenance: .embeddedMetadata
+                )
+            ]
         )
         try repository.insert(paper)
         let change = try repository.updatePaperInfo(
@@ -201,7 +326,19 @@ struct CanopyAppTests {
                 title: "Edited Title",
                 publicationYear: 2026,
                 doi: nil,
-                arxivID: nil
+                arxivID: nil,
+                authorCredits: [
+                    AuthorCreditUpdate(
+                        id: addedAuthorID,
+                        displayName: "Grace Hopper",
+                        familyName: "Hopper"
+                    ),
+                    AuthorCreditUpdate(
+                        id: retainedAuthorID,
+                        displayName: "Ada Lovelace",
+                        familyName: "Lovelace"
+                    )
+                ]
             )
         )
         let undoManager = UndoManager()
@@ -216,12 +353,20 @@ struct CanopyAppTests {
         )
 
         undoManager.undo()
-        #expect(paper.title == "Inferred Title")
-        #expect(paper.titleProvenance == .firstPage)
+        let undone = try repository.paperInfoSnapshot(paperID: paper.id)
+        #expect(undone.title == "Inferred Title")
+        #expect(undone.titleProvenance == .firstPage)
+        #expect(undone.authorCredits.map(\.id) == [retainedAuthorID, removedAuthorID])
+        #expect(undone.authorCredits.map(\.displayName) == ["Ada Byron", "Remove Me"])
+        #expect(undone.authorCredits.map(\.provenance) == [.firstPage, .embeddedMetadata])
 
         undoManager.redo()
-        #expect(paper.title == "Edited Title")
-        #expect(paper.titleProvenance == .userEntry)
+        let redone = try repository.paperInfoSnapshot(paperID: paper.id)
+        #expect(redone.title == "Edited Title")
+        #expect(redone.titleProvenance == .userEntry)
+        #expect(redone.authorCredits.map(\.id) == [addedAuthorID, retainedAuthorID])
+        #expect(redone.authorCredits.map(\.displayName) == ["Grace Hopper", "Ada Lovelace"])
+        #expect(redone.authorCredits.map(\.provenance) == [.userEntry, .userEntry])
         #expect(errors.isEmpty)
     }
 
