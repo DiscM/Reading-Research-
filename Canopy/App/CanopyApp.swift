@@ -9,6 +9,7 @@ struct CanopyApp: App {
     init() {
         do {
             container = try CanopyModelContainer.make()
+            try? LibraryRepository(container: container).reconcileManagedPaperRecovery()
         } catch {
             fatalError("Unable to open Canopy's library: \(error)")
         }
@@ -28,12 +29,22 @@ struct CanopyApp: App {
 }
 
 private struct CanopyCommands: Commands {
+    @FocusedValue(\.paperInfoCommandAction) private var paperInfoCommandAction
+
     var body: some Commands {
         CommandGroup(after: .newItem) {
             Button("Add Papers…") {
                 NotificationCenter.default.post(name: .addPapersRequested, object: nil)
             }
                 .keyboardShortcut("o")
+
+            Divider()
+
+            Button("Get Info") {
+                paperInfoCommandAction?.perform()
+            }
+            .keyboardShortcut("i")
+            .disabled(paperInfoCommandAction == nil)
         }
         CommandGroup(after: .textEditing) {
             Button("Find in Paper…") {

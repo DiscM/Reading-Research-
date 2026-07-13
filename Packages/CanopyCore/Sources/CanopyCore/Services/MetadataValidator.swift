@@ -4,11 +4,15 @@ public enum MetadataValidator {
     public static func usableTitle(_ rawValue: String?) -> String? {
         guard let rawValue else { return nil }
         let title = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard title.count >= 3 else { return nil }
+        guard !title.isEmpty else { return nil }
 
         let lowered = title.lowercased()
-        let rejected = ["untitled", "unknown", "document"]
+        let rejected = [
+            "untitled", "unknown", "document", "fulltext", "full text",
+            "paper", "article", "manuscript", "main"
+        ]
         guard !rejected.contains(lowered) else { return nil }
+        guard !lowered.hasSuffix(".pdf") else { return nil }
         guard !lowered.hasPrefix("http://"), !lowered.hasPrefix("https://") else { return nil }
         guard title.range(of: #"^(arxiv:\s*)?\d{4}\.\d{4,5}(v\d+)?$"#, options: [.regularExpression, .caseInsensitive]) == nil else { return nil }
         guard title.range(of: #"^10\.\d{4,9}/\S+$"#, options: .regularExpression) == nil else { return nil }
@@ -45,4 +49,3 @@ public enum MetadataValidator {
         return (1000...nextYear).contains(year)
     }
 }
-

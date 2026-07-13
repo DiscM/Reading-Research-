@@ -9,6 +9,9 @@ struct CanopyCoreTests {
     func rejectsIdentifierTitles() {
         #expect(MetadataValidator.usableTitle("arXiv: 2401.12345") == nil)
         #expect(MetadataValidator.usableTitle("10.1000/example") == nil)
+        #expect(MetadataValidator.usableTitle("paper.pdf") == nil)
+        #expect(MetadataValidator.usableTitle("fulltext") == nil)
+        #expect(MetadataValidator.usableTitle("AI") == "AI")
         #expect(MetadataValidator.usableTitle("A Useful Research Title") == "A Useful Research Title")
     }
 
@@ -316,6 +319,328 @@ struct CanopyCoreTests {
     }
 
     @MainActor
+    @Test("Paper Info normalizes and persists one staged scalar update")
+    func paperInfoUpdateNormalizesAndPersists() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let storeURL = directory.appendingPathComponent("Canopy.store")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let paperID = UUID()
+        let authorID = UUID()
+        let fingerprint = Data(repeating: 6, count: 32)
+        var committedChange: PaperInfoChange?
+
+        do {
+            let configuration = ModelConfiguration(url: storeURL)
+            let container = try ModelContainer(
+                for: Schema(versionedSchema: CanopySchemaV1.self),
+                migrationPlan: CanopyMigrationPlan.self,
+                configurations: configuration
+            )
+            let repository = LibraryRepository(container: container)
+            let paper = Paper(
+                id: paperID,
+                fingerprint: fingerprint,
+                title: "Original Study",
+                titleProvenance: .firstPage,
+                publicationYear: 2024,
+                publicationYearProvenance: .embeddedMetadata,
+                doi: "10.1000/original",
+                doiProvenance: .firstPage,
+                arxivID: "2401.01234",
+                arxivIDProvenance: .embeddedMetadata,
+                storageMode: .referenced,
+                bookmarkData: Data([1, 2, 3]),
+                sourceFilename: "original.pdf",
+                rememberedLocation: "/Research/original.pdf",
+                sourceFileSize: 4_096,
+                authorCredits: [
+                    AuthorCredit(
+                        id: authorID,
+                        position: 0,
+                        displayName: "Ada Researcher",
+                        familyName: "Researcher",
+                        provenance: .firstPage
+                    )
+                ]
+            )
+            try repository.insert(paper)
+
+            let before = try repository.paperInfoSnapshot(paperID: paperID)
+            let change = try repository.updatePaperInfo(
+                paperID: paperID,
+                update: PaperInfoUpdate(
+                    title: "  Revised Canopy Study\n",
+                    publicationYear: 2026,
+                    doi: " HTTPS://DOI.ORG/10.5555/Canopy.Test ",
+                    arxivID: " arXiv: 2607.01234V2 "
+                )
+            )
+            committedChange = change
+
+            #expect(change.before == before)
+            #expect(change.after.title == "Revised Canopy Study")
+            #expect(change.after.titleProvenance == .userEntry)
+            #expect(change.after.publicationYear == 2026)
+            #expect(change.after.publicationYearProvenance == .userEntry)
+            #expect(change.after.doi == "10.5555/canopy.test")
+            #expect(change.after.doiProvenance == .userEntry)
+            #expect(change.after.arxivID == "2607.01234v2")
+            #expect(change.after.arxivIDProvenance == .userEntry)
+            #expect(paper.fingerprint == fingerprint)
+            #expect(paper.bookmarkData == Data([1, 2, 3]))
+            #expect(paper.rememberedLocation == "/Research/original.pdf")
+            #expect(paper.authorCredits.map(\.id) == [authorID])
+            #expect(paper.authorCredits.map(\.provenance) == [.firstPage])
+        }
+
+        let configuration = ModelConfiguration(url: storeURL)
+        let reopened = try ModelContainer(
+            for: Schema(versionedSchema: CanopySchemaV1.self),
+            migrationPlan: CanopyMigrationPlan.self,
+            configurations: configuration
+        )
+        let repository = LibraryRepository(container: reopened)
+        let expectedAfter = try #require(committedChange).after
+        #expect(try repository.paperInfoSnapshot(paperID: paperID) == expectedAfter)
+        let paper = try #require(try repository.paper(id: paperID))
+        #expect(paper.fingerprint == fingerprint)
+        #expect(paper.rememberedLocation == "/Research/original.pdf")
+        #expect(paper.authorCredits.map(\.id) == [authorID])
+    }
+
+    @MainActor
+    @Test("an invalid Paper Info field rejects the whole staged update")
+    func invalidPaperInfoRejectsWholeUpdate() throws {
+        let container = try CanopyModelContainer.make(inMemory: true)
+        let repository = LibraryRepository(container: container)
+        let paper = Paper(
+            fingerprint: Data(repeating: 11, count: 32),
+            title: "Original Metadata",
+            titleProvenance: .firstPage,
+            publicationYear: 2024,
+            publicationYearProvenance: .embeddedMetadata,
+            doi: "10.1000/original",
+            doiProvenance: .firstPage,
+            arxivID: "2401.01234",
+            arxivIDProvenance: .embeddedMetadata,
+            storageMode: .referenced,
+            sourceFilename: "original.pdf",
+            sourceFileSize: 512
+        )
+        try repository.insert(paper)
+        let before = try repository.paperInfoSnapshot(paperID: paper.id)
+        let invalidUpdates: [(PaperInfoUpdate, LibraryRepositoryError)] = [
+            (
+                PaperInfoUpdate(
+                    title: " ",
+                    publicationYear: 2026,
+                    doi: "10.5555/revised",
+                    arxivID: "2607.12345"
+                ),
+                .invalidTitle
+            ),
+            (
+                PaperInfoUpdate(
+                    title: "Revised Metadata",
+                    publicationYear: 999,
+                    doi: "10.5555/revised",
+                    arxivID: "2607.12345"
+                ),
+                .invalidPublicationYear
+            ),
+            (
+                PaperInfoUpdate(
+                    title: "Revised Metadata",
+                    publicationYear: 2026,
+                    doi: "not a DOI",
+                    arxivID: "2607.12345"
+                ),
+                .invalidDOI
+            ),
+            (
+                PaperInfoUpdate(
+                    title: "Revised Metadata",
+                    publicationYear: 2026,
+                    doi: "10.5555/revised",
+                    arxivID: "not an arXiv ID"
+                ),
+                .invalidArxivID
+            )
+        ]
+
+        for (update, expectedError) in invalidUpdates {
+            #expect(throws: expectedError) {
+                _ = try repository.updatePaperInfo(paperID: paper.id, update: update)
+            }
+            #expect(try repository.paperInfoSnapshot(paperID: paper.id) == before)
+        }
+    }
+
+    @MainActor
+    @Test("only changed Paper Info fields replace their existing provenance")
+    func unchangedPaperInfoPreservesProvenance() throws {
+        let container = try CanopyModelContainer.make(inMemory: true)
+        let repository = LibraryRepository(container: container)
+        let paper = Paper(
+            fingerprint: Data(repeating: 12, count: 32),
+            title: "Same Metadata",
+            titleProvenance: .firstPage,
+            publicationYear: 2025,
+            publicationYearProvenance: .embeddedMetadata,
+            doi: "10.1000/same",
+            doiProvenance: .firstPage,
+            arxivID: "2401.12345v2",
+            arxivIDProvenance: .filenameFallback,
+            storageMode: .referenced,
+            sourceFilename: "same.pdf",
+            sourceFileSize: 256
+        )
+        try repository.insert(paper)
+        let before = try repository.paperInfoSnapshot(paperID: paper.id)
+
+        let change = try repository.updatePaperInfo(
+            paperID: paper.id,
+            update: PaperInfoUpdate(
+                title: "Changed Title Only",
+                publicationYear: 2025,
+                doi: "HTTPS://DOI.ORG/10.1000/SAME",
+                arxivID: "arXiv: 2401.12345V2"
+            )
+        )
+
+        #expect(change.before == before)
+        #expect(change.after.title == "Changed Title Only")
+        #expect(paper.titleProvenance == .userEntry)
+        #expect(change.after.publicationYear == before.publicationYear)
+        #expect(paper.publicationYearProvenance == .embeddedMetadata)
+        #expect(change.after.doi == before.doi)
+        #expect(paper.doiProvenance == .firstPage)
+        #expect(change.after.arxivID == before.arxivID)
+        #expect(paper.arxivIDProvenance == .filenameFallback)
+    }
+
+    @MainActor
+    @Test("empty optional Paper Info identifiers clear their values and provenance")
+    func emptyPaperInfoIdentifiersBecomeNil() throws {
+        let container = try CanopyModelContainer.make(inMemory: true)
+        let repository = LibraryRepository(container: container)
+        let paper = Paper(
+            fingerprint: Data(repeating: 13, count: 32),
+            title: "Optional Identifiers",
+            titleProvenance: .embeddedMetadata,
+            doi: "10.1000/remove",
+            doiProvenance: .firstPage,
+            arxivID: "2401.12345",
+            arxivIDProvenance: .firstPage,
+            storageMode: .managedCopy,
+            sourceFilename: "optional.pdf",
+            sourceFileSize: 128
+        )
+        try repository.insert(paper)
+
+        let change = try repository.updatePaperInfo(
+            paperID: paper.id,
+            update: PaperInfoUpdate(
+                title: "Optional Identifiers",
+                publicationYear: nil,
+                doi: " \n ",
+                arxivID: nil
+            )
+        )
+
+        #expect(change.after.doi == nil)
+        #expect(change.after.doiProvenance == nil)
+        #expect(change.after.arxivID == nil)
+        #expect(change.after.arxivIDProvenance == nil)
+        #expect(change.after.titleProvenance == .embeddedMetadata)
+    }
+
+    @MainActor
+    @Test("restoring a Paper Info snapshot restores values and provenance atomically")
+    func restoringPaperInfoSnapshotPreservesProvenance() throws {
+        let container = try CanopyModelContainer.make(inMemory: true)
+        let repository = LibraryRepository(container: container)
+        let paper = Paper(
+            fingerprint: Data(repeating: 14, count: 32),
+            title: "Before Edit",
+            titleProvenance: .filenameFallback,
+            publicationYear: 2023,
+            publicationYearProvenance: .embeddedMetadata,
+            doi: "10.1000/before",
+            doiProvenance: .firstPage,
+            arxivID: "2301.12345",
+            arxivIDProvenance: .embeddedMetadata,
+            storageMode: .referenced,
+            bookmarkData: Data([9, 8, 7]),
+            sourceFilename: "before.pdf",
+            sourceFileSize: 1_024,
+            authorCredits: [
+                AuthorCredit(
+                    position: 0,
+                    displayName: "Grace Author",
+                    familyName: "Author",
+                    provenance: .firstPage
+                )
+            ]
+        )
+        try repository.insert(paper)
+        let original = try repository.paperInfoSnapshot(paperID: paper.id)
+        let edit = try repository.updatePaperInfo(
+            paperID: paper.id,
+            update: PaperInfoUpdate(
+                title: "After Edit",
+                publicationYear: 2026,
+                doi: "10.1000/after",
+                arxivID: "2607.12345"
+            )
+        )
+
+        let restore = try repository.restorePaperInfoSnapshot(original)
+
+        #expect(restore.before == edit.after)
+        #expect(restore.after == original)
+        #expect(try repository.paperInfoSnapshot(paperID: paper.id) == original)
+        #expect(paper.bookmarkData == Data([9, 8, 7]))
+        #expect(paper.authorCredits.map(\.displayName) == ["Grace Author"])
+        #expect(paper.authorCredits.map(\.provenance) == [.firstPage])
+    }
+
+    @MainActor
+    @Test("restoring Paper Info rejects inconsistent optional metadata provenance")
+    func restoringPaperInfoRejectsInconsistentProvenance() throws {
+        let container = try CanopyModelContainer.make(inMemory: true)
+        let repository = LibraryRepository(container: container)
+        let paper = Paper(
+            fingerprint: Data(repeating: 15, count: 32),
+            title: "Consistent Metadata",
+            titleProvenance: .firstPage,
+            storageMode: .referenced,
+            sourceFilename: "consistent.pdf",
+            sourceFileSize: 64
+        )
+        try repository.insert(paper)
+        let before = try repository.paperInfoSnapshot(paperID: paper.id)
+        let inconsistent = PaperInfoSnapshot(
+            paperID: paper.id,
+            title: "Changed Metadata",
+            titleProvenance: .userEntry,
+            publicationYear: nil,
+            publicationYearProvenance: nil,
+            doi: "10.1000/missing-provenance",
+            doiProvenance: nil,
+            arxivID: nil,
+            arxivIDProvenance: nil
+        )
+
+        #expect(throws: LibraryRepositoryError.invalidMetadataProvenance) {
+            _ = try repository.restorePaperInfoSnapshot(inconsistent)
+        }
+        #expect(try repository.paperInfoSnapshot(paperID: paper.id) == before)
+    }
+
+    @MainActor
     @Test("annotation lifecycle survives reopening and preserves its composite anchor")
     func annotationLifecycleRoundTrip() throws {
         let directory = FileManager.default.temporaryDirectory
@@ -525,6 +850,66 @@ struct CanopyCoreTests {
         )
 
         #expect(paper.sourceState == .available)
+    }
+
+    @MainActor
+    @Test("removing a referenced Paper preserves its user-controlled Source PDF")
+    func removingReferencedPaperPreservesSource() throws {
+        let fixture = try TemporaryFile(contents: Data("referenced-pdf".utf8), filename: "referenced.pdf")
+        defer { fixture.remove() }
+        let container = try CanopyModelContainer.make(inMemory: true)
+        let repository = LibraryRepository(container: container)
+        let paper = Paper(
+            fingerprint: try DocumentFingerprint.sha256(of: fixture.url),
+            title: "Referenced Paper",
+            storageMode: .referenced,
+            sourceFilename: fixture.url.lastPathComponent,
+            rememberedLocation: fixture.url.path,
+            sourceFileSize: Int64(Data("referenced-pdf".utf8).count)
+        )
+        try repository.insert(paper)
+
+        let snapshot = try repository.removePaper(
+            paperID: paper.id,
+            managedStore: ManagedPaperStore(rootURL: fixture.directory)
+        )
+
+        #expect(try repository.paper(id: paper.id) == nil)
+        #expect(FileManager.default.fileExists(atPath: fixture.url.path))
+
+        try repository.restoreRemovedPaper(
+            snapshot: snapshot,
+            managedStore: ManagedPaperStore(rootURL: fixture.directory)
+        )
+        #expect(try repository.paper(id: paper.id)?.title == "Referenced Paper")
+        #expect(FileManager.default.fileExists(atPath: fixture.url.path))
+    }
+
+    @MainActor
+    @Test("removing a managed Paper deletes Canopy's Source PDF copy")
+    func removingManagedPaperDeletesSourceCopy() throws {
+        let fixture = try TemporaryFile(contents: Data("managed-pdf".utf8), filename: "managed.pdf")
+        defer { fixture.remove() }
+        let container = try CanopyModelContainer.make(inMemory: true)
+        let repository = LibraryRepository(container: container)
+        let paper = Paper(
+            fingerprint: try DocumentFingerprint.sha256(of: fixture.url),
+            title: "Managed Paper",
+            storageMode: .managedCopy,
+            managedRelativePath: fixture.url.lastPathComponent,
+            sourceFilename: fixture.url.lastPathComponent,
+            sourceFileSize: Int64(Data("managed-pdf".utf8).count)
+        )
+        try repository.insert(paper)
+
+        let snapshot = try repository.removePaper(
+            paperID: paper.id,
+            managedStore: ManagedPaperStore(rootURL: fixture.directory)
+        )
+
+        #expect(try repository.paper(id: paper.id) == nil)
+        #expect(!FileManager.default.fileExists(atPath: fixture.url.path))
+        #expect(snapshot.managedCopyWasStaged)
     }
 }
 

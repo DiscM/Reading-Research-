@@ -10,6 +10,7 @@ extension Notification.Name {
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.undoManager) private var undoManager
     @State private var selectedPaperID: UUID?
     @State private var inspectorPresented = true
     @State private var annotationNavigation: AnnotationNavigation?
@@ -19,6 +20,10 @@ struct ContentView: View {
     @State private var readerReloadToken = UUID()
     @State private var fileImporterPresented = false
     @State private var workflow = AddPapersWorkflow()
+    @State private var paperInfoWorkflow = PaperInfoWorkflow()
+    @State private var paperInfoUndoTarget = PaperInfoUndoTarget()
+    @State private var paperRemovalUndoTarget = PaperRemovalUndoTarget()
+    @State private var commandErrorMessage: String?
 
     private var repository: LibraryRepository { LibraryRepository(context: modelContext) }
     private var selectedPaper: Paper? {
@@ -31,7 +36,19 @@ struct ContentView: View {
             LibrarySidebarView(
                 selection: $selectedPaperID,
                 onAddPapers: { fileImporterPresented = true },
-                onDropURLs: workflow.prepare
+                onDropURLs: workflow.prepare,
+                onClearRecentHistory: repository.clearRecentHistory,
+                onRemovePaper: { paperID in
+                    let snapshot = try repository.removePaper(paperID: paperID)
+                    PaperRemovalUndo.register(
+                        snapshot: snapshot,
+                        repository: repository,
+                        target: paperRemovalUndoTarget,
+                        undoManager: undoManager,
+                        onError: { commandErrorMessage = $0.localizedDescription }
+                    )
+                },
+                onGetInfo: presentPaperInfo
             )
             .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 360)
         } detail: {
@@ -43,7 +60,12 @@ struct ContentView: View {
                 focusedAnnotationID: $focusedAnnotationID,
                 annotationUndoTarget: annotationUndoTarget,
                 annotationSession: annotationSession,
-                reloadToken: $readerReloadToken
+                reloadToken: $readerReloadToken,
+                onGetInfo: {
+                    if let selectedPaperID {
+                        presentPaperInfo(selectedPaperID)
+                    }
+                }
             )
                 .inspector(isPresented: $inspectorPresented) {
                     AnnotationInspectorView(
@@ -80,6 +102,14 @@ struct ContentView: View {
             focusedAnnotationID = nil
             annotationSession.beginVerification(paperID: selectedPaperID)
         }
+        .focusedValue(
+            \.paperInfoCommandAction,
+            selectedPaperID.map { paperID in
+                PaperInfoCommandAction {
+                    presentPaperInfo(paperID)
+                }
+            }
+        )
         .sheet(isPresented: $workflow.isStorageChoicePresented) {
             AddBatchStorageSheet(workflow: workflow) {
                 workflow.start(repository: repository)
@@ -95,6 +125,54 @@ struct ContentView: View {
         }
         .sheet(isPresented: $workflow.isSummaryPresented) {
             AddBatchSummarySheet(workflow: workflow)
+        }
+        .sheet(
+            isPresented: Binding(
+                get: { paperInfoWorkflow.isPresented },
+                set: { if !$0 { paperInfoWorkflow.dismiss() } }
+            )
+        ) {
+            PaperInfoView(
+                workflow: paperInfoWorkflow,
+                onSave: savePaperInfo
+            )
+        }
+        .alert(
+            "Couldn’t Complete Action",
+            isPresented: Binding(
+                get: { commandErrorMessage != nil },
+                set: { if !$0 { commandErrorMessage = nil } }
+            )
+        ) {
+            Button("Dismiss", role: .cancel) {}
+        } message: {
+            Text(commandErrorMessage ?? "Canopy could not complete this action.")
+        }
+    }
+
+    private func presentPaperInfo(_ paperID: UUID) {
+        do {
+            try paperInfoWorkflow.present(paperID: paperID, repository: repository)
+        } catch {
+            commandErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func savePaperInfo() {
+        guard let paperID = paperInfoWorkflow.paperID else { return }
+        do {
+            let update = try paperInfoWorkflow.draft.makeUpdate()
+            let change = try repository.updatePaperInfo(paperID: paperID, update: update)
+            PaperInfoUndo.register(
+                change: change,
+                repository: repository,
+                target: paperInfoUndoTarget,
+                undoManager: undoManager,
+                onError: { commandErrorMessage = $0.localizedDescription }
+            )
+            paperInfoWorkflow.finishSaving(change)
+        } catch {
+            paperInfoWorkflow.errorMessage = error.localizedDescription
         }
     }
 }

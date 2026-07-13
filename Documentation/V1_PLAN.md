@@ -139,7 +139,7 @@ Status labels describe the current branch, not release readiness. The release ga
 
 ### 1. Import and document identity
 
-**Status: Partially implemented.** The functional Add Papers foundation, identity checks, duplicate review, storage choices, progress, summaries, and exact-match repair or relocation are available. The remaining recovery surfaces, removal workflows, and background availability work stay in this slice.
+**Status: Partially implemented.** The functional Add Papers foundation, identity checks, duplicate review, storage choices, progress, summaries, exact-match repair or relocation, and confirmed referenced/managed removal are available. The remaining recovery surfaces and background availability work stay in this slice.
 
 - Implement open-panel and drag-and-drop Add Batches.
 - Route the sidebar toolbar button, File → Add Papers (`⌘O`), and library drag-and-drop through one shared Add Batch workflow. After selection or drop, show the same compact sheet with file count, total size, **Reference Originals** selected by default, **Keep Copies in Canopy**, Add Papers, and Cancel.
@@ -170,7 +170,7 @@ Status labels describe the current branch, not release readiness. The release ga
 
 ### 2. Library
 
-**Status: Partially implemented.** Validated local metadata extraction, deterministic title inference, alphabetical browsing, and basic metadata/note search are available. Paper Info editing, recent-history presentation and sorting controls, and complete removal semantics remain.
+**Status: Partially implemented.** Validated local metadata extraction and deterministic title inference are available. The library presents Recent and remaining sections, supports Title and Date Added sorting, ranks title matches before author/year and note matches, clears recent history without deleting Papers, and applies distinct referenced/managed removal semantics with native Undo. Paper Info stages atomic title, year, DOI, and arXiv edits from all three entry points while showing provenance, Author Credits, and source details. Author Credit editing and reordering plus Reparse Metadata remain.
 
 - Implement validated metadata extraction and editable fields.
 - Add deterministic first-page title inference.

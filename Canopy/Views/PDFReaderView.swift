@@ -15,6 +15,7 @@ struct PDFReaderView: View {
     let annotationUndoTarget: AnnotationUndoTarget
     let annotationSession: AnnotationSession
     @Binding var reloadToken: UUID
+    let onGetInfo: () -> Void
 
     @Environment(\.undoManager) private var undoManager
 
@@ -198,6 +199,11 @@ struct PDFReaderView: View {
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
                 .frame(minWidth: 58, alignment: .leading)
+
+            Button(action: onGetInfo) {
+                Label("Paper Info", systemImage: "info.circle")
+            }
+            .help("Show Paper Info")
 
             Button {
                 inspectorPresented.toggle()
