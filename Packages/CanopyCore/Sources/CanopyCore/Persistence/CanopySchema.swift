@@ -3,7 +3,7 @@ import SwiftData
 public enum CanopySchemaV1: VersionedSchema {
     public static let versionIdentifier = Schema.Version(1, 0, 0)
     public static var models: [any PersistentModel.Type] {
-        [Paper.self, Annotation.self]
+        [Paper.self, AuthorCredit.self, Annotation.self]
     }
 }
 

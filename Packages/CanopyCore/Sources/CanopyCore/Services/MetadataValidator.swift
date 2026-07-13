@@ -15,5 +15,34 @@ public enum MetadataValidator {
         guard title.range(of: #"^[0-9a-f]{8}-[0-9a-f-]{27,}$"#, options: [.regularExpression, .caseInsensitive]) == nil else { return nil }
         return title
     }
+
+    public static func normalizedDOI(_ rawValue: String?) -> String? {
+        guard var value = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), !value.isEmpty else {
+            return nil
+        }
+        for prefix in ["https://doi.org/", "http://doi.org/", "doi:"] where value.hasPrefix(prefix) {
+            value.removeFirst(prefix.count)
+        }
+        guard value.range(of: #"^10\.\d{4,9}/\S+$"#, options: .regularExpression) != nil else { return nil }
+        return value
+    }
+
+    public static func normalizedArxivID(_ rawValue: String?) -> String? {
+        guard var value = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), !value.isEmpty else {
+            return nil
+        }
+        if value.hasPrefix("arxiv:") {
+            value.removeFirst("arxiv:".count)
+            value = value.trimmingCharacters(in: .whitespaces)
+        }
+        guard value.range(of: #"^(\d{4}\.\d{4,5}|[a-z-]+/\d{7})(v\d+)?$"#, options: .regularExpression) != nil else { return nil }
+        return value
+    }
+
+    public static func validPublicationYear(_ year: Int?, now: Date = .now) -> Bool {
+        guard let year else { return true }
+        let nextYear = Calendar(identifier: .gregorian).component(.year, from: now) + 1
+        return (1000...nextYear).contains(year)
+    }
 }
 

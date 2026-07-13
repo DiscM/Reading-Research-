@@ -14,6 +14,11 @@ Items are deliberately unprioritized until the v1 reading loop is stable and obs
 - Semantic and hybrid retrieval using local embeddings.
 - Grounded library chat with page-linked evidence.
 
+## Library maintenance
+
+- Batch Broken Reference management: verify remembered locations, repair exact-content references, remove selected Papers, and route changed Source PDFs through Add Papers and Potential Duplicate Review.
+- Proactive managed-copy storage estimation and warnings for unusually large Add Batches.
+
 ## Annotation and knowledge work
 
 - Semantic annotation categories such as claim, evidence, method, limitation, and question.
@@ -27,6 +32,7 @@ Items are deliberately unprioritized until the v1 reading loop is stable and obs
 
 ## Metadata, citations, and discovery
 
+- User-managed Author Identities that manually link and unlink Author Credits or aliases across Papers; never infer identity from names alone.
 - Crossref, arXiv, PubMed, and DOI metadata enrichment.
 - BibTeX, RIS, and CSL-JSON interoperability.
 - Citation keys and formatted citations.
@@ -61,4 +67,3 @@ Items are deliberately unprioritized until the v1 reading loop is stable and obs
 - Secure BYOK or hosted model routing.
 - Per-request privacy disclosures, local-only overrides, redaction, cancellation, and budgets.
 - Cloud services only after Canopy defines explicit consent and data-boundary contracts.
-

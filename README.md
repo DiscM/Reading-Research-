@@ -6,6 +6,8 @@ Canopy is a dependable, offline-first research PDF reader for macOS. Version 1 f
 
 This branch is a ground-up rebuild. It intentionally contains no source code or data migrations from the archived Research Paper Reader prototype.
 
+The first functional slice is available: **Add Papers** supports multi-file selection and drag-and-drop, referenced or managed storage, PDF validation and local metadata parsing, SHA-256 duplicate detection, deterministic potential-duplicate review, progress, partial-success reporting, and exact-match reference repair or relocation.
+
 - Prototype branch: `codex/archive-research-paper-reader-prototype`
 - Prototype tag: `archive/research-paper-reader-prototype-2026-07-10`
 - Deferred capabilities: [`Documentation/DEFERRED_FEATURES.md`](Documentation/DEFERRED_FEATURES.md)

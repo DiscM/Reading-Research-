@@ -30,9 +30,10 @@ struct CanopyApp: App {
 private struct CanopyCommands: Commands {
     var body: some Commands {
         CommandGroup(after: .newItem) {
-            Button("Import PDFs…") {}
+            Button("Add Papers…") {
+                NotificationCenter.default.post(name: .addPapersRequested, object: nil)
+            }
                 .keyboardShortcut("o")
         }
     }
 }
-

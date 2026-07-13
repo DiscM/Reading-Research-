@@ -6,7 +6,7 @@ Canopy v1 is a Mac App Store application for macOS 15 or later. It is fully offl
 
 The complete v1 journey is:
 
-1. Import one or more PDFs from an open panel or drag and drop.
+1. Add one or more PDFs from an open panel or drag and drop.
 2. Reference the originals by default or explicitly copy the import batch into Canopy.
 3. Browse recent and alphabetical library sections and search title, authors, year, and notes.
 4. Open a PDF in a continuous vertical reader.
@@ -75,6 +75,8 @@ The primary `WindowGroup` contains a stable sidebar-detail layout with a native 
 - Detail: PDFKit reader and reader toolbar
 - Inspector: one page-ordered annotation list with quotations and inline note editing
 
+Paper metadata is managed in a dedicated **Paper Info** sheet opened from an info button in the reader toolbar, the Paper row's **Get Info** context-menu command, or `⌘I`. The sheet contains editable bibliographic fields and Author Credits, field provenance, source status and location, and Reparse Metadata; it does not occupy another column. All edits and approved reparse replacements remain staged until the user chooses Save; Cancel discards the entire transaction. Author Credits use ordered rows with add, remove, and drag-to-reorder controls; each exposes a display name and permits correction of the derived family name when expanded.
+
 Window selection and expansion are scene-scoped. Window geometry and column widths are app preferences. Each paper stores page, viewport, zoom, and inspector visibility. The reader saves navigation state with a debounce; highlight creation and deletion save transactionally; note typing saves after a short debounce and on focus loss.
 
 ## Library behavior
@@ -90,7 +92,7 @@ Window selection and expansion are scene-scoped. Window geometry and column widt
 
 ## Metadata behavior
 
-Canopy reads embedded PDF metadata locally and validates every field before assignment. Identifier-shaped titles—including arXiv IDs, DOIs, URLs, UUIDs, filenames, and generic export labels—are rejected. If the title is unusable, deterministic first-page layout analysis attempts to locate the prominent title block. Low-confidence results fall back to a cleaned filename. Title, authors, and year are always editable.
+Canopy reads embedded PDF metadata locally and validates every field before assignment. Identifier-shaped titles—including arXiv IDs, DOIs, URLs, UUIDs, filenames, and generic export labels—are rejected. If the title is unusable, deterministic first-page layout analysis attempts to locate the prominent title block. Low-confidence results fall back to a cleaned filename. Title is the sole required bibliographic field; Paper Info cannot save it empty. Author Credits, year, DOI, and arXiv ID are optional. Each retained field records its current Metadata Provenance. Manual edits replace earlier inferred values. Reparse Metadata presents field-by-field replacements for approval rather than overwriting immediately. DOI and arXiv ID may be empty, but malformed nonempty identifiers block Paper Info from saving and never participate in duplicate matching. Publication year may be blank or a four-digit value from 1000 through the next calendar year; invalid values remain visible for correction and block Save.
 
 ## Reader behavior
 
@@ -125,17 +127,39 @@ PDFKit adapters remain in the app/platform layer. Core logic accepts value repre
 ### 0. Foundation
 
 - Generate the Xcode project and establish App Store sandbox entitlements.
+- Discard the unshipped scaffold's development SwiftData container; replace its draft schema rather than migrating it. No real user library data exists yet.
 - Define the versioned SwiftData schema and repository boundary.
 - Establish the three-pane window shell and build/run entrypoint.
 - Add temporary and on-disk persistence test helpers.
 
 ### 1. Import and document identity
 
-- Implement open-panel and drag-and-drop batch imports.
-- Add reference/copy batch choice, defaulting to reference.
+- Implement open-panel and drag-and-drop Add Batches.
+- Route the sidebar toolbar button, File → Add Papers (`⌘O`), and library drag-and-drop through one shared Add Batch workflow. After selection or drop, show the same compact sheet with file count, total size, **Reference Originals** selected by default, **Keep Copies in Canopy**, Add Papers, and Cancel.
+- Run Preflight silently and show review or summary UI only for duplicates, skipped candidates, invalid files, or failures.
+- If Preflight lasts beyond a short delay, show non-cancellable progress while keeping the app responsive; no library changes occur until Preflight completes. Use a determinate 0–100% bar weighted primarily by total bytes hashed, plus “Processing n of total” and the current filename. Reserve a small final portion for metadata parsing so 100% means Preflight is complete.
+- Continue the same progress surface through two labeled phases: **Checking Papers** for Preflight and **Adding Papers** for managed-file copies and database commits.
+- Commit accepted Papers independently during Adding Papers. Preserve successful additions, continue after isolated failures when safe, and identify each failure in the exception-only Add Batch Summary.
+- Do not retain Add Batch Summary history. Keep the exception report available until dismissal and provide Copy Report for troubleshooting.
+- Copy Report includes filenames and filesystem paths with the home directory abbreviated as `~/`, but excludes PDF text, bookmark data, content fingerprints, and metadata beyond fields already visible in the summary.
 - Create and resolve security-scoped bookmarks.
 - Stream SHA-256 fingerprints and collapse exact duplicates.
+- Compare Potential Duplicates without creating version relationships; offer Add as Separate Paper, Keep Existing, or Cancel Remaining Additions.
+- Present Potential Duplicates in one list-and-detail review. Require a decision per candidate, while offering reversible **Add All as Separate** and **Keep All Existing** bulk choices before final confirmation.
+- Compare each triggered candidate with side-by-side metadata and provenance, filename, Remembered Location, file size, page count, embedded dates, normalized extracted-text similarity, and the pages whose extracted text differs. Full paragraph-level and visual PDF diffing is deferred.
+- Trigger Potential Duplicate Review only from deterministic evidence: exact DOI, exact base arXiv identifier, exact normalized title plus matching author surname, or exact normalized title plus matching year. General text similarity may inform an already-triggered comparison but never trigger one.
+- Compare Add Batch candidates both against the existing library and against earlier candidates in the same Preflight so a single batch cannot introduce Exact or Potential Duplicates unnoticed.
+- When a referenced Add Batch contains multiple exact-matching candidates, show their paths and let the user choose the source location to retain. For managed-copy batches, retain one exact candidate and skip the others without a location prompt.
 - Validate PDFs and report scanned, encrypted, damaged, missing, offline, and changed states.
+- Preserve a referenced Source PDF's Remembered Location. Present Broken References in place with a broken-link symbol and Source Missing label; opening one offers Locate Source, Remove from Library, or Cancel.
+- Require an exact SHA-256 match for Repair Reference.
+- When Add Papers finds an Exact Duplicate of a Paper with a Broken Reference, offer Repair Existing Paper or Keep Broken instead of creating another Paper.
+- When Add Papers finds an Exact Duplicate of a healthy referenced Paper, offer Use New Location, Open Existing Paper, Reveal Current Source, or Dismiss. Relocate Source requires the same SHA-256 fingerprint and only replaces the bookmark and Remembered Location.
+- Repairing an externally referenced Paper preserves referenced storage and creates a new bookmark; the Add Batch storage choice applies only to newly added Papers.
+- If a Canopy-managed Source PDF is absent, mark the Paper Library Copy Missing. An exact SHA-256 match selected by the user is copied back into managed storage; nonmatching content is rejected or routed through Add Papers as separate.
+- If a referenced file remains reachable but its SHA-256 fingerprint changes, mark the Paper Source Changed and block its old annotations and reading state from applying. Offer Locate Original, Add Changed File as Separate Paper, Remove from Library, or Cancel; never silently replace the existing Paper's source.
+- Distinguish Source Unavailable for temporarily unreachable external or cloud locations from Broken Reference. Preserve the bookmark, expose Retry, and return the Paper to healthy automatically after access and identity checks succeed.
+- When the library opens, perform lightweight background availability checks that do not intentionally materialize File Provider placeholders. Resolve bookmark access, compare attributes, and conditionally hash only when the user opens a Paper or explicitly retries it; Canopy itself makes no network requests.
 
 ### 2. Library
 
@@ -178,4 +202,3 @@ A release candidate must pass:
 - Manual fixture-library checks and accessibility inspection
 
 No feature is complete without its empty, error, offline/unavailable, cancellation, persistence, and relaunch behavior.
-
