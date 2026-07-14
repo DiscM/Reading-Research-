@@ -23,6 +23,8 @@ struct ContentView: View {
     @State private var paperInfoWorkflow = PaperInfoWorkflow()
     @State private var paperInfoUndoTarget = PaperInfoUndoTarget()
     @State private var paperRemovalUndoTarget = PaperRemovalUndoTarget()
+    @State private var sourceRecoveryWorkflow = SourceRecoveryWorkflow()
+    @State private var paperRemovalRequest: PaperRemovalRequest?
     @State private var commandErrorMessage: String?
 
     private var repository: LibraryRepository { LibraryRepository(context: modelContext) }
@@ -38,17 +40,9 @@ struct ContentView: View {
                 onAddPapers: { fileImporterPresented = true },
                 onDropURLs: workflow.prepare,
                 onClearRecentHistory: repository.clearRecentHistory,
-                onRemovePaper: { paperID in
-                    let snapshot = try repository.removePaper(paperID: paperID)
-                    PaperRemovalUndo.register(
-                        snapshot: snapshot,
-                        repository: repository,
-                        target: paperRemovalUndoTarget,
-                        undoManager: undoManager,
-                        onError: { commandErrorMessage = $0.localizedDescription }
-                    )
-                },
-                onGetInfo: presentPaperInfo
+                onRequestRemoval: requestPaperRemoval,
+                onGetInfo: presentPaperInfo,
+                onSourceRecoveryAction: performSourceRecoveryAction
             )
             .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 360)
         } detail: {
@@ -65,6 +59,14 @@ struct ContentView: View {
                     if let selectedPaperID {
                         presentPaperInfo(selectedPaperID)
                     }
+                },
+                onSourceRecoveryAction: { action in
+                    if let selectedPaperID {
+                        performSourceRecoveryAction(action, selectedPaperID)
+                    }
+                },
+                onCancelSourceRecovery: {
+                    selectedPaperID = nil
                 }
             )
                 .inspector(isPresented: $inspectorPresented) {
@@ -89,6 +91,17 @@ struct ContentView: View {
         ) { result in
             if case let .success(urls) = result {
                 workflow.prepare(urls: urls)
+            }
+        }
+        .fileImporter(
+            isPresented: $sourceRecoveryWorkflow.isImporterPresented,
+            allowedContentTypes: [.pdf],
+            allowsMultipleSelection: false
+        ) { result in
+            if case let .success(urls) = result, let url = urls.first {
+                recoverSource(from: url)
+            } else {
+                sourceRecoveryWorkflow.cancel()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .addPapersRequested)) { _ in
@@ -153,6 +166,22 @@ struct ContentView: View {
         } message: {
             Text(commandErrorMessage ?? "Canopy could not complete this action.")
         }
+        .confirmationDialog(
+            "Remove from Library?",
+            isPresented: Binding(
+                get: { paperRemovalRequest != nil },
+                set: { if !$0 { paperRemovalRequest = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: paperRemovalRequest
+        ) { request in
+            Button("Remove “\(request.title)”", role: .destructive) {
+                removePaper(request)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { request in
+            Text(removalMessage(for: request.storageMode))
+        }
     }
 
     private func presentPaperInfo(_ paperID: UUID) {
@@ -179,4 +208,75 @@ struct ContentView: View {
             paperInfoWorkflow.errorMessage = error.localizedDescription
         }
     }
+
+    private func performSourceRecoveryAction(_ action: SourceRecoveryAction, _ paperID: UUID) {
+        guard let paper = try? repository.paper(id: paperID) else { return }
+        switch action {
+        case .retry:
+            selectedPaperID = paperID
+            readerReloadToken = UUID()
+        case .repairReference, .locateOriginal, .restoreLibraryCopy:
+            sourceRecoveryWorkflow.begin(for: paper)
+        case .addChangedAsSeparate:
+            fileImporterPresented = true
+        case .removeFromLibrary:
+            requestPaperRemoval(paperID)
+        }
+    }
+
+    private func recoverSource(from url: URL) {
+        Task { @MainActor in
+            do {
+                let paperID = try await sourceRecoveryWorkflow.recover(from: url, repository: repository)
+                selectedPaperID = paperID
+                readerReloadToken = UUID()
+            } catch {
+                commandErrorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func removePaper(_ request: PaperRemovalRequest) {
+        do {
+            let snapshot = try repository.removePaper(paperID: request.id)
+            PaperRemovalUndo.register(
+                snapshot: snapshot,
+                repository: repository,
+                target: paperRemovalUndoTarget,
+                undoManager: undoManager,
+                onError: { commandErrorMessage = $0.localizedDescription }
+            )
+            if selectedPaperID == request.id {
+                selectedPaperID = nil
+            }
+            paperRemovalRequest = nil
+        } catch {
+            paperRemovalRequest = nil
+            commandErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func requestPaperRemoval(_ paperID: UUID) {
+        guard let paper = try? repository.paper(id: paperID) else { return }
+        paperRemovalRequest = PaperRemovalRequest(
+            id: paper.id,
+            title: paper.title,
+            storageMode: paper.storageMode
+        )
+    }
+
+    private func removalMessage(for storageMode: PaperStorageMode) -> String {
+        switch storageMode {
+        case .referenced:
+            "Canopy will delete this Paper’s highlights, notes, and reading progress. The original Source PDF will remain in its current location. You can undo this action."
+        case .managedCopy:
+            "Canopy will remove its Source PDF copy along with this Paper’s highlights, notes, and reading progress. You can undo this action."
+        }
+    }
+}
+
+private struct PaperRemovalRequest {
+    let id: UUID
+    let title: String
+    let storageMode: PaperStorageMode
 }

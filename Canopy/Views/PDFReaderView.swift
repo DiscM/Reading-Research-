@@ -16,6 +16,8 @@ struct PDFReaderView: View {
     let annotationSession: AnnotationSession
     @Binding var reloadToken: UUID
     let onGetInfo: () -> Void
+    let onSourceRecoveryAction: (SourceRecoveryAction) -> Void
+    let onCancelSourceRecovery: () -> Void
 
     @Environment(\.undoManager) private var undoManager
 
@@ -73,9 +75,19 @@ struct PDFReaderView: View {
                             systemImage: loadError.systemImage,
                             description: Text(loadError.message)
                         )
-                        if loadError == .sourceUnavailable {
-                            Button("Retry") {
-                                reloadToken = UUID()
+                        if let paper {
+                            VStack(spacing: 8) {
+                                ForEach(SourceRecoveryAction.actions(for: paper.sourceState)) { action in
+                                    Button(
+                                        action.title,
+                                        role: action == .removeFromLibrary ? .destructive : nil
+                                    ) {
+                                        onSourceRecoveryAction(action)
+                                    }
+                                }
+                                if paper.sourceState == .brokenReference || paper.sourceState == .sourceChanged {
+                                    Button("Cancel", role: .cancel, action: onCancelSourceRecovery)
+                                }
                             }
                         }
                     }

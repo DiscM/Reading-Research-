@@ -7,13 +7,13 @@ struct LibrarySidebarView: View {
     let onAddPapers: () -> Void
     let onDropURLs: ([URL]) -> Void
     let onClearRecentHistory: () throws -> Void
-    let onRemovePaper: (UUID) throws -> Void
+    let onRequestRemoval: (UUID) -> Void
     let onGetInfo: (UUID) -> Void
+    let onSourceRecoveryAction: (SourceRecoveryAction, UUID) -> Void
     @Query(sort: \Paper.title) private var papers: [Paper]
     @State private var searchText = ""
     @State private var sortOrder = LibrarySortOrder.title
     @State private var isDropTargeted = false
-    @State private var removalRequest: PaperRemovalRequest?
     @State private var persistenceErrorTitle: String?
     @State private var persistenceErrorMessage: String?
 
@@ -110,33 +110,24 @@ struct LibrarySidebarView: View {
         } message: {
             Text(persistenceErrorMessage ?? "Canopy could not save the change.")
         }
-        .confirmationDialog(
-            "Remove from Library?",
-            isPresented: Binding(
-                get: { removalRequest != nil },
-                set: { if !$0 { removalRequest = nil } }
-            ),
-            titleVisibility: .visible,
-            presenting: removalRequest
-        ) { request in
-            Button("Remove “\(request.title)”", role: .destructive) {
-                removePaper(request)
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: { request in
-            Text(removalMessage(for: request.storageMode))
-        }
     }
 
     private func paperRow(_ paper: Paper) -> some View {
-        HStack(spacing: 8) {
-            sourceStateSymbol(for: paper)
+        let sourcePresentation = SourceStatePresentation(paper.sourceState)
+        return HStack(spacing: 8) {
+            sourceStateSymbol(for: sourcePresentation)
             VStack(alignment: .leading, spacing: 2) {
                 Text(paper.title)
                     .lineLimit(1)
                 if !paper.authorsDisplayText.isEmpty {
                     Text(paper.authorsDisplayText)
                         .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                if let sourceStateLabel = sourcePresentation.label {
+                    Text(sourceStateLabel)
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
@@ -150,12 +141,21 @@ struct LibrarySidebarView: View {
 
             Divider()
 
-            Button("Remove from Library…", systemImage: "trash", role: .destructive) {
-                removalRequest = PaperRemovalRequest(
-                    id: paper.id,
-                    title: paper.title,
-                    storageMode: paper.storageMode
-                )
+            let recoveryActions = sourcePresentation.actions
+            ForEach(recoveryActions) { action in
+                Button(
+                    action.title,
+                    systemImage: action.systemImage,
+                    role: action == .removeFromLibrary ? .destructive : nil
+                ) {
+                    onSourceRecoveryAction(action, paper.id)
+                }
+            }
+
+            if !recoveryActions.contains(.removeFromLibrary) {
+                Button("Remove from Library…", systemImage: "trash", role: .destructive) {
+                    onRequestRemoval(paper.id)
+                }
             }
         }
     }
@@ -169,56 +169,25 @@ struct LibrarySidebarView: View {
         }
     }
 
-    private func removePaper(_ request: PaperRemovalRequest) {
-        do {
-            try onRemovePaper(request.id)
-            if selection == request.id {
-                selection = nil
-            }
-            removalRequest = nil
-        } catch {
-            removalRequest = nil
-            persistenceErrorTitle = "Couldn’t Remove Paper"
-            persistenceErrorMessage = error.localizedDescription
-        }
-    }
-
-    private func removalMessage(for storageMode: PaperStorageMode) -> String {
-        switch storageMode {
-        case .referenced:
-            "Canopy will delete this Paper’s highlights, notes, and reading progress. The original Source PDF will remain in its current location. You can undo this action."
-        case .managedCopy:
-            "Canopy will remove its Source PDF copy along with this Paper’s highlights, notes, and reading progress. You can undo this action."
-        }
-    }
-
     @ViewBuilder
-    private func sourceStateSymbol(for paper: Paper) -> some View {
-        switch paper.sourceState {
-        case .available:
+    private func sourceStateSymbol(for presentation: SourceStatePresentation) -> some View {
+        if let systemImage = presentation.systemImage, let label = presentation.label {
+            switch presentation.severity {
+            case .neutral:
+                Image(systemName: systemImage)
+                    .foregroundStyle(.secondary)
+                    .help(label)
+            case .warning:
+                Image(systemName: systemImage)
+                    .foregroundStyle(.orange)
+                    .help(label)
+            case .critical:
+                Image(systemName: systemImage)
+                    .foregroundStyle(.red)
+                    .help(label)
+            }
+        } else {
             EmptyView()
-        case .sourceUnavailable:
-            Image(systemName: "externaldrive.badge.exclamationmark")
-                .foregroundStyle(.secondary)
-                .help("Source Unavailable")
-        case .brokenReference:
-            Image(systemName: "link.badge.plus")
-                .foregroundStyle(.orange)
-                .help("Source Missing")
-        case .sourceChanged:
-            Image(systemName: "exclamationmark.triangle")
-                .foregroundStyle(.orange)
-                .help("Source Changed")
-        case .libraryCopyMissing:
-            Image(systemName: "doc.badge.ellipsis")
-                .foregroundStyle(.red)
-                .help("Library Copy Missing")
         }
     }
-}
-
-private struct PaperRemovalRequest {
-    let id: UUID
-    let title: String
-    let storageMode: PaperStorageMode
 }

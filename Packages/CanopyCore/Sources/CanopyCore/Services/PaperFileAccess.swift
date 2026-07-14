@@ -3,11 +3,13 @@ import Foundation
 public enum PaperFileAccessError: LocalizedError {
     case cannotCreateBookmark
     case cannotAccessSource
+    case contentIdentityMismatch
 
     public var errorDescription: String? {
         switch self {
         case .cannotCreateBookmark: "Canopy could not retain permission to access this PDF."
         case .cannotAccessSource: "Canopy could not access the selected PDF."
+        case .contentIdentityMismatch: "The selected PDF does not match the Paper's original content."
         }
     }
 }
@@ -58,6 +60,33 @@ public struct ManagedPaperStore: Sendable {
         } catch {
             try? FileManager.default.removeItem(at: temporary)
             throw error
+        }
+    }
+
+    public func restoreMissingCopy(
+        from sourceURL: URL,
+        relativePath: String,
+        expectedFingerprint: Data
+    ) throws -> URL {
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        let destination = try managedURL(relativePath: relativePath)
+        guard !FileManager.default.fileExists(atPath: destination.path) else {
+            throw PaperFileAccessError.cannotAccessSource
+        }
+        let temporary = rootURL.appendingPathComponent(".\(UUID().uuidString).restore.partial")
+        do {
+            try FileManager.default.copyItem(at: sourceURL, to: temporary)
+            guard try DocumentFingerprint.sha256(of: temporary) == expectedFingerprint else {
+                throw PaperFileAccessError.contentIdentityMismatch
+            }
+            try FileManager.default.moveItem(at: temporary, to: destination)
+            return destination
+        } catch let error as PaperFileAccessError {
+            try? FileManager.default.removeItem(at: temporary)
+            throw error
+        } catch {
+            try? FileManager.default.removeItem(at: temporary)
+            throw PaperFileAccessError.cannotAccessSource
         }
     }
 

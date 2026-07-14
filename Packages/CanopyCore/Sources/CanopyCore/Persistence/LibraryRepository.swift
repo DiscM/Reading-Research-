@@ -451,10 +451,11 @@ public final class LibraryRepository {
         do {
             let access = try PaperSourceAccess(paper: paper, managedStore: managedStore)
             if access.attributesChanged || paper.sourceState != .available {
-                paper.sourceFileSize = access.verifiedFileSize
-                paper.sourceModificationDate = access.verifiedModificationDate
-                paper.sourceState = .available
-                try save()
+                try markSourceAvailable(
+                    paper,
+                    fileSize: access.verifiedFileSize,
+                    modificationDate: access.verifiedModificationDate
+                )
             }
             return access
         } catch let error as PaperSourceAccessError {
@@ -495,9 +496,86 @@ public final class LibraryRepository {
         try save()
     }
 
+    public func restoreManagedCopy(
+        paperID: UUID,
+        from sourceURL: URL,
+        managedStore suppliedManagedStore: ManagedPaperStore? = nil
+    ) async throws {
+        guard let paper = try paper(id: paperID) else {
+            throw LibraryRepositoryError.paperNotFound
+        }
+        guard paper.storageMode == .managedCopy,
+              let relativePath = paper.managedRelativePath else {
+            throw LibraryRepositoryError.incompatibleStorageMode
+        }
+        let expectedFingerprint = paper.fingerprint
+
+        let managedStore = try suppliedManagedStore ?? ManagedPaperStore.applicationSupport()
+        let restoredURL: URL
+        do {
+            restoredURL = try await Task.detached(priority: .userInitiated) {
+                try managedStore.restoreMissingCopy(
+                    from: sourceURL,
+                    relativePath: relativePath,
+                    expectedFingerprint: expectedFingerprint
+                )
+            }.value
+        } catch PaperFileAccessError.contentIdentityMismatch {
+            throw LibraryRepositoryError.contentIdentityMismatch
+        }
+
+        do {
+            guard let paper = try self.paper(id: paperID) else {
+                throw LibraryRepositoryError.paperNotFound
+            }
+            guard paper.storageMode == .managedCopy,
+                  paper.managedRelativePath == relativePath else {
+                throw LibraryRepositoryError.incompatibleStorageMode
+            }
+            guard paper.fingerprint == expectedFingerprint else {
+                throw LibraryRepositoryError.contentIdentityMismatch
+            }
+            let attributes = try FileManager.default.attributesOfItem(atPath: restoredURL.path)
+            try markSourceAvailable(
+                paper,
+                fileSize: (attributes[.size] as? NSNumber)?.int64Value ?? 0,
+                modificationDate: attributes[.modificationDate] as? Date
+            )
+        } catch {
+            let operationError = error
+            do {
+                try managedStore.remove(relativePath: relativePath)
+            } catch {
+                throw PaperFileAccessError.cannotAccessSource
+            }
+            throw operationError
+        }
+    }
+
     public func save() throws {
         if context.hasChanges {
             try context.save()
+        }
+    }
+
+    private func markSourceAvailable(
+        _ paper: Paper,
+        fileSize: Int64,
+        modificationDate: Date?
+    ) throws {
+        let previousFileSize = paper.sourceFileSize
+        let previousModificationDate = paper.sourceModificationDate
+        let previousSourceState = paper.sourceState
+        paper.sourceFileSize = fileSize
+        paper.sourceModificationDate = modificationDate
+        paper.sourceState = .available
+        do {
+            try save()
+        } catch {
+            paper.sourceFileSize = previousFileSize
+            paper.sourceModificationDate = previousModificationDate
+            paper.sourceState = previousSourceState
+            throw error
         }
     }
 

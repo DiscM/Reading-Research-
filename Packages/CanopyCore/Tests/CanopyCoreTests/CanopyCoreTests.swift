@@ -187,7 +187,6 @@ struct CanopyCoreTests {
             sourceFileSize: 10
         )
         try repository.insert(paper)
-
         #expect(throws: LibraryRepositoryError.contentIdentityMismatch) {
             try repository.repairReference(
                 paperID: paper.id,
@@ -206,6 +205,91 @@ struct CanopyCoreTests {
         #expect(paper.sourceState == .available)
         #expect(paper.bookmarkData == Data([9]))
         #expect(paper.rememberedLocation == "/New/missing.pdf")
+    }
+
+    @MainActor
+    @Test("managed copy recovery restores only the Paper's exact Source PDF")
+    func exactManagedCopyRecovery() async throws {
+        let source = try TemporaryFile(contents: Data("original-source".utf8), filename: "located.pdf")
+        defer { source.remove() }
+        let managedDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: managedDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: managedDirectory) }
+        let container = try CanopyModelContainer.make(inMemory: true)
+        let repository = LibraryRepository(container: container)
+        let paper = Paper(
+            fingerprint: try DocumentFingerprint.sha256(of: source.url),
+            title: "Missing Library Copy",
+            storageMode: .managedCopy,
+            sourceState: .libraryCopyMissing,
+            managedRelativePath: "managed-source.pdf",
+            sourceFilename: "original.pdf",
+            sourceFileSize: 0
+        )
+        try repository.insert(paper)
+
+        try await repository.restoreManagedCopy(
+            paperID: paper.id,
+            from: source.url,
+            managedStore: ManagedPaperStore(rootURL: managedDirectory)
+        )
+
+        let restoredURL = managedDirectory.appendingPathComponent("managed-source.pdf")
+        #expect(try Data(contentsOf: restoredURL) == Data("original-source".utf8))
+        #expect(paper.sourceState == .available)
+        #expect(paper.sourceFileSize == Int64(Data("original-source".utf8).count))
+    }
+
+    @MainActor
+    @Test("managed copy recovery rejects different PDF bytes and leaves the copy missing")
+    func managedCopyRecoveryRejectsMismatch() async throws {
+        let original = try TemporaryFile(contents: Data("original-source".utf8), filename: "original.pdf")
+        let different = try TemporaryFile(contents: Data("different-source".utf8), filename: "different.pdf")
+        defer {
+            original.remove()
+            different.remove()
+        }
+        let managedDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: managedDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: managedDirectory) }
+        let container = try CanopyModelContainer.make(inMemory: true)
+        let repository = LibraryRepository(container: container)
+        let paper = Paper(
+            fingerprint: try DocumentFingerprint.sha256(of: original.url),
+            title: "Missing Library Copy",
+            storageMode: .managedCopy,
+            sourceState: .libraryCopyMissing,
+            managedRelativePath: "managed-source.pdf",
+            sourceFilename: "original.pdf",
+            sourceFileSize: 0
+        )
+        try repository.insert(paper)
+        let unrelatedPaper = Paper(
+            fingerprint: Data(repeating: 19, count: 32),
+            title: "Saved title",
+            storageMode: .referenced,
+            sourceFilename: "unrelated.pdf",
+            sourceFileSize: 1
+        )
+        try repository.insert(unrelatedPaper)
+        unrelatedPaper.title = "Pending user edit"
+
+        await #expect(throws: LibraryRepositoryError.contentIdentityMismatch) {
+            try await repository.restoreManagedCopy(
+                paperID: paper.id,
+                from: different.url,
+                managedStore: ManagedPaperStore(rootURL: managedDirectory)
+            )
+        }
+
+        #expect(!FileManager.default.fileExists(
+            atPath: managedDirectory.appendingPathComponent("managed-source.pdf").path
+        ))
+        #expect(paper.sourceState == .libraryCopyMissing)
+        #expect(unrelatedPaper.title == "Pending user edit")
+        #expect(repository.context.hasChanges)
     }
 
     @MainActor

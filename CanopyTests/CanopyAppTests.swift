@@ -27,6 +27,63 @@ struct CanopyAppTests {
         #expect(workflow.isStorageChoicePresented)
     }
 
+    @Test("source recovery actions match each library source state")
+    func sourceRecoveryActionsMatchState() {
+        #expect(SourceRecoveryAction.actions(for: .available) == [])
+        #expect(SourceRecoveryAction.actions(for: .sourceUnavailable) == [.retry])
+        #expect(SourceRecoveryAction.actions(for: .brokenReference) == [.repairReference, .removeFromLibrary])
+        #expect(SourceRecoveryAction.actions(for: .sourceChanged) == [
+            .locateOriginal,
+            .addChangedAsSeparate,
+            .removeFromLibrary
+        ])
+        #expect(SourceRecoveryAction.actions(for: .libraryCopyMissing) == [
+            .restoreLibraryCopy,
+            .removeFromLibrary
+        ])
+    }
+
+    @MainActor
+    @Test("source recovery workflow restores a selected exact managed copy")
+    func sourceRecoveryWorkflowRestoresManagedCopy() async throws {
+        let selectedDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: selectedDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: selectedDirectory) }
+        let selectedURL = selectedDirectory.appendingPathComponent("selected.pdf")
+        try Data("recover-this-source".utf8).write(to: selectedURL)
+        let managedDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: managedDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: managedDirectory) }
+        let container = try CanopyModelContainer.make(inMemory: true)
+        let repository = LibraryRepository(container: container)
+        let paper = Paper(
+            fingerprint: try DocumentFingerprint.sha256(of: selectedURL),
+            title: "Recover Me",
+            storageMode: .managedCopy,
+            sourceState: .libraryCopyMissing,
+            managedRelativePath: "managed.pdf",
+            sourceFilename: "managed.pdf",
+            sourceFileSize: 0
+        )
+        try repository.insert(paper)
+        let workflow = SourceRecoveryWorkflow()
+        workflow.begin(for: paper)
+
+        let recoveredPaperID = try await workflow.recover(
+            from: selectedURL,
+            repository: repository,
+            managedStore: ManagedPaperStore(rootURL: managedDirectory)
+        )
+
+        #expect(recoveredPaperID == paper.id)
+        #expect(paper.sourceState == .available)
+        #expect(FileManager.default.fileExists(
+            atPath: managedDirectory.appendingPathComponent("managed.pdf").path
+        ))
+    }
+
     @MainActor
     @Test("recent Papers appear above the remaining title-sorted Library without duplication")
     func recentAndLibrarySections() {
