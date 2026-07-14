@@ -22,6 +22,7 @@ struct CanopyApp: App {
         }
         .modelContainer(container)
         .defaultSize(width: 1200, height: 760)
+        .windowResizability(.contentMinSize)
         .commands {
             CanopyCommands()
         }

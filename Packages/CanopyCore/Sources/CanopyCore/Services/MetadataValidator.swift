@@ -12,9 +12,20 @@ public enum MetadataValidator {
             "paper", "article", "manuscript", "main"
         ]
         guard !rejected.contains(lowered) else { return nil }
-        guard !lowered.hasSuffix(".pdf") else { return nil }
+        let sourceFilenameExtensions = [
+            ".pdf", ".doc", ".docx", ".rtf", ".tex", ".odt", ".pages", ".ppt", ".pptx", ".key",
+            ".md", ".txt", ".html", ".htm", ".xml", ".csv"
+        ]
+        guard !sourceFilenameExtensions.contains(where: lowered.hasSuffix) else { return nil }
+        guard lowered.range(
+            of: #"^(?:microsoft\s+(?:word|powerpoint)|libreoffice(?:\s+(?:writer|impress|draw|calc))?|google\s+(?:docs|slides|sheets)|pdf\s*creator|adobe\s+acrobat|acrobat\s+pdfmaker)(?:\s*[-–—:].*)?$"#,
+            options: .regularExpression
+        ) == nil else { return nil }
         guard !lowered.hasPrefix("http://"), !lowered.hasPrefix("https://") else { return nil }
-        guard title.range(of: #"^(arxiv:\s*)?\d{4}\.\d{4,5}(v\d+)?$"#, options: [.regularExpression, .caseInsensitive]) == nil else { return nil }
+        guard title.range(
+            of: #"^(?:arxiv:\s*)?\d{4}\.\d{4,5}(?:v\d+)?(?:\s+\[[^\]]+\])?(?:\s+\d{1,2}\s+[a-z]{3,9}\s+\d{4})?$"#,
+            options: [.regularExpression, .caseInsensitive]
+        ) == nil else { return nil }
         guard title.range(of: #"^10\.\d{4,9}/\S+$"#, options: .regularExpression) == nil else { return nil }
         guard title.range(of: #"^[0-9a-f]{8}-[0-9a-f-]{27,}$"#, options: [.regularExpression, .caseInsensitive]) == nil else { return nil }
         return title
