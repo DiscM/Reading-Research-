@@ -2,10 +2,6 @@ import CanopyCore
 import PDFKit
 import SwiftUI
 
-extension Notification.Name {
-    static let findInPaperRequested = Notification.Name("Canopy.findInPaperRequested")
-}
-
 struct PDFReaderView: View {
     let paper: Paper?
     let repository: LibraryRepository
@@ -113,11 +109,7 @@ struct PDFReaderView: View {
         .onChange(of: inspectorPresented) { _, isPresented in
             scheduleSave(isInspectorPresented: isPresented)
         }
-        .onReceive(NotificationCenter.default.publisher(for: .findInPaperRequested)) { _ in
-            if documentSession != nil {
-                findFieldFocused = true
-            }
-        }
+        .focusedValue(\.paperCommandContext, paperCommandContext)
         .onDisappear {
             flushPendingSave()
         }
@@ -145,6 +137,35 @@ struct PDFReaderView: View {
 
     private var findTaskID: String {
         "\(documentSession?.paperID.uuidString ?? "none"):\(findQuery)"
+    }
+
+    private var paperCommandContext: PaperCommandContext? {
+        guard documentSession != nil else { return nil }
+        return PaperCommandContext(
+            availableCommands: PaperCommand.availableReaderCommands(hasFindMatches: !matches.isEmpty),
+            perform: performPaperCommand
+        )
+    }
+
+    private func performPaperCommand(_ paperCommand: PaperCommand) {
+        switch paperCommand {
+        case .focusFind:
+            findFieldFocused = true
+        case .nextFindMatch:
+            nextMatch()
+        case .previousFindMatch:
+            previousMatch()
+        case .zoomIn:
+            command = PDFReaderCommand(action: .zoomIn)
+        case .zoomOut:
+            command = PDFReaderCommand(action: .zoomOut)
+        case .fitWidth:
+            command = PDFReaderCommand(action: .fitWidth)
+        case .actualSize:
+            command = PDFReaderCommand(action: .actualSize)
+        case .toggleAnnotations:
+            inspectorPresented.toggle()
+        }
     }
 
     private var readerControls: some View {
@@ -211,6 +232,8 @@ struct PDFReaderView: View {
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
                 .frame(minWidth: 58, alignment: .leading)
+                .accessibilityLabel("Find results")
+                .accessibilityValue(findResultText.isEmpty ? "No search" : findResultText)
 
             Button(action: onGetInfo) {
                 Label("Paper Info", systemImage: "info.circle")
@@ -223,6 +246,7 @@ struct PDFReaderView: View {
                 Label("Annotations", systemImage: "sidebar.right")
             }
             .help("Show or Hide Annotations")
+            .accessibilityValue(inspectorPresented ? "Shown" : "Hidden")
         }
         .controlSize(.small)
         .padding(.horizontal, 10)

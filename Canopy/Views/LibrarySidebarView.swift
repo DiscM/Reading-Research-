@@ -134,6 +134,10 @@ struct LibrarySidebarView: View {
             }
         }
         .tag(paper.id)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(paper.title)
+        .accessibilityValue(paperAccessibilityValue(paper, presentation: sourcePresentation))
+        .accessibilityHint("Select to open this Paper")
         .contextMenu {
             Button("Get Info", systemImage: "info.circle") {
                 onGetInfo(paper.id)
@@ -160,6 +164,18 @@ struct LibrarySidebarView: View {
         }
     }
 
+    private func paperAccessibilityValue(
+        _ paper: Paper,
+        presentation: SourceStatePresentation
+    ) -> String {
+        [paper.authorsDisplayText, presentation.label]
+            .compactMap { value in
+                guard let value, !value.isEmpty else { return nil }
+                return value
+            }
+            .joined(separator: ", ")
+    }
+
     private func clearRecentHistory() {
         do {
             try onClearRecentHistory()
@@ -177,14 +193,17 @@ struct LibrarySidebarView: View {
                 Image(systemName: systemImage)
                     .foregroundStyle(.secondary)
                     .help(label)
+                    .accessibilityHidden(true)
             case .warning:
                 Image(systemName: systemImage)
                     .foregroundStyle(.orange)
                     .help(label)
+                    .accessibilityHidden(true)
             case .critical:
                 Image(systemName: systemImage)
                     .foregroundStyle(.red)
                     .help(label)
+                    .accessibilityHidden(true)
             }
         } else {
             EmptyView()

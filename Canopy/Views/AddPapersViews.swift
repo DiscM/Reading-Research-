@@ -49,6 +49,8 @@ struct AddBatchProgressSheet: View {
             Text(workflow.progressPhase)
                 .font(.headline)
             ProgressView(value: workflow.progressFraction, total: 1)
+                .accessibilityLabel(workflow.progressPhase)
+                .accessibilityValue("\(workflow.progressCount), \(workflow.progressFraction.formatted(.percent.precision(.fractionLength(0))))")
             HStack {
                 Text(workflow.progressCount)
                 Spacer()
@@ -59,6 +61,8 @@ struct AddBatchProgressSheet: View {
             Text(workflow.progressFilename)
                 .lineLimit(1)
                 .truncationMode(.middle)
+                .accessibilityLabel("Current Source PDF")
+                .accessibilityValue(workflow.progressFilename)
         }
         .padding(24)
         .frame(width: 460)
@@ -103,6 +107,9 @@ struct PotentialDuplicateReviewSheet: View {
                             .foregroundStyle(.secondary)
                     }
                     .tag(duplicate.candidate.id)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(duplicate.candidate.metadata.title)
+                    .accessibilityValue(decisionLabel(for: duplicate))
                 }
                 .navigationSplitViewColumnWidth(min: 220, ideal: 260)
             } detail: {
@@ -225,6 +232,7 @@ struct AddBatchSummarySheet: View {
                 HStack(alignment: .top) {
                     Image(systemName: symbol(for: item.kind))
                         .foregroundStyle(color(for: item.kind))
+                        .accessibilityLabel(accessibilityLabel(for: item.kind))
                     VStack(alignment: .leading, spacing: 3) {
                         Text(item.filename)
                         Text(item.message)
@@ -274,6 +282,10 @@ struct AddBatchSummarySheet: View {
 
     private func symbol(for kind: AddBatchSummaryItem.Kind) -> String {
         switch kind { case .duplicate: "doc.on.doc"; case .skipped: "minus.circle"; case .failure: "exclamationmark.triangle" }
+    }
+
+    private func accessibilityLabel(for kind: AddBatchSummaryItem.Kind) -> String {
+        switch kind { case .duplicate: "Duplicate"; case .skipped: "Skipped"; case .failure: "Failure" }
     }
 
     private func color(for kind: AddBatchSummaryItem.Kind) -> Color {

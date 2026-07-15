@@ -10,6 +10,20 @@ struct CanopyAppTests {
         #expect(Bool(true))
     }
 
+    @Test("Paper commands disable find navigation until the reader has matches")
+    func paperCommandAvailability() {
+        let withoutMatches = PaperCommand.availableReaderCommands(hasFindMatches: false)
+        let withMatches = PaperCommand.availableReaderCommands(hasFindMatches: true)
+
+        #expect(withoutMatches.contains(.focusFind))
+        #expect(withoutMatches.contains(.zoomIn))
+        #expect(withoutMatches.contains(.toggleAnnotations))
+        #expect(!withoutMatches.contains(.nextFindMatch))
+        #expect(!withoutMatches.contains(.previousFindMatch))
+        #expect(withMatches.contains(.nextFindMatch))
+        #expect(withMatches.contains(.previousFindMatch))
+    }
+
     @MainActor
     @Test("selected and dropped PDFs converge on the shared Add Batch sheet")
     func sharedAddBatchEntry() throws {

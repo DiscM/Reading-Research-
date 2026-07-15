@@ -31,6 +31,7 @@ struct CanopyApp: App {
 
 private struct CanopyCommands: Commands {
     @FocusedValue(\.paperInfoCommandAction) private var paperInfoCommandAction
+    @FocusedValue(\.paperCommandContext) private var paperCommandContext
 
     var body: some Commands {
         CommandGroup(after: .newItem) {
@@ -49,9 +50,61 @@ private struct CanopyCommands: Commands {
         }
         CommandGroup(after: .textEditing) {
             Button("Find in Paper…") {
-                NotificationCenter.default.post(name: .findInPaperRequested, object: nil)
+                paperCommandContext?.perform(.focusFind)
             }
             .keyboardShortcut("f")
+            .disabled(!canPerform(.focusFind))
         }
+        CommandMenu("Paper") {
+            Button("Find Next") {
+                paperCommandContext?.perform(.nextFindMatch)
+            }
+            .keyboardShortcut("g")
+            .disabled(!canPerform(.nextFindMatch))
+
+            Button("Find Previous") {
+                paperCommandContext?.perform(.previousFindMatch)
+            }
+            .keyboardShortcut("g", modifiers: [.command, .shift])
+            .disabled(!canPerform(.previousFindMatch))
+
+            Divider()
+
+            Button("Zoom In") {
+                paperCommandContext?.perform(.zoomIn)
+            }
+            .keyboardShortcut("+")
+            .disabled(!canPerform(.zoomIn))
+
+            Button("Zoom Out") {
+                paperCommandContext?.perform(.zoomOut)
+            }
+            .keyboardShortcut("-")
+            .disabled(!canPerform(.zoomOut))
+
+            Button("Actual Size") {
+                paperCommandContext?.perform(.actualSize)
+            }
+            .keyboardShortcut("0")
+            .disabled(!canPerform(.actualSize))
+
+            Button("Fit Width") {
+                paperCommandContext?.perform(.fitWidth)
+            }
+            .keyboardShortcut("2")
+            .disabled(!canPerform(.fitWidth))
+
+            Divider()
+
+            Button("Show or Hide Annotations") {
+                paperCommandContext?.perform(.toggleAnnotations)
+            }
+            .keyboardShortcut("i", modifiers: [.command, .option])
+            .disabled(!canPerform(.toggleAnnotations))
+        }
+    }
+
+    private func canPerform(_ command: PaperCommand) -> Bool {
+        paperCommandContext?.canPerform(command) == true
     }
 }
