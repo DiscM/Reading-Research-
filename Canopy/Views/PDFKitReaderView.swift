@@ -22,6 +22,8 @@ struct PDFReaderCommand: Equatable {
 }
 
 struct PDFKitReaderView: NSViewRepresentable {
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+
     let document: PDFDocument
     let restoredState: PaperReaderState?
     let command: PDFReaderCommand?
@@ -58,7 +60,11 @@ struct PDFKitReaderView: NSViewRepresentable {
         }
         context.coordinator.perform(command, in: pdfView)
         context.coordinator.showMatches(matches, selectedIndex: selectedMatchIndex, in: pdfView)
-        context.coordinator.showAnnotations(annotations, in: pdfView)
+        context.coordinator.showAnnotations(
+            annotations,
+            opacity: appearance.overlayOpacity,
+            in: pdfView
+        )
         context.coordinator.navigate(to: annotationNavigation, annotations: annotations, in: pdfView)
     }
 
@@ -66,6 +72,10 @@ struct PDFKitReaderView: NSViewRepresentable {
         coordinator.detach()
         nsView.document?.cancelFindString()
         nsView.document = nil
+    }
+
+    private var appearance: HighlightAppearancePreferences {
+        HighlightAppearancePreferences(increasedContrast: colorSchemeContrast == .increased)
     }
 
     @MainActor
@@ -77,6 +87,7 @@ struct PDFKitReaderView: NSViewRepresentable {
         private var lastSelectedMatchIndex: Int?
         private var lastMatchesVersion: UUID?
         private var lastAnnotationSignature: [AnnotationSignature] = []
+        private var lastOverlayOpacity: CGFloat?
         private var lastAnnotationNavigationID: UUID?
         private var overlayAnnotations: [(page: PDFPage, annotation: PDFAnnotation)] = []
         private var highlightPopover: NSPopover?
@@ -126,6 +137,8 @@ struct PDFKitReaderView: NSViewRepresentable {
         func detach() {
             closeHighlightPopover()
             removeAnnotationOverlays()
+            lastAnnotationSignature = []
+            lastOverlayOpacity = nil
             for observer in observers {
                 NotificationCenter.default.removeObserver(observer)
             }
@@ -205,17 +218,26 @@ struct PDFKitReaderView: NSViewRepresentable {
             isUpdatingSearchSelection = false
         }
 
-        func showAnnotations(_ annotations: [Annotation], in pdfView: PDFView) {
+        func showAnnotations(
+            _ annotations: [Annotation],
+            opacity: CGFloat,
+            in pdfView: PDFView
+        ) {
             let signature = annotations.map(AnnotationSignature.init)
-            guard signature != lastAnnotationSignature else { return }
+            guard signature != lastAnnotationSignature || opacity != lastOverlayOpacity else { return }
             lastAnnotationSignature = signature
+            lastOverlayOpacity = opacity
             removeAnnotationOverlays()
 
             guard let document = pdfView.document else { return }
             for annotationModel in annotations {
                 guard let anchor = annotationModel.anchor,
                       let page = document.page(at: anchor.pageIndex),
-                      let overlay = makeOverlay(for: anchor, color: annotationModel.color) else { continue }
+                      let overlay = makeOverlay(
+                        for: anchor,
+                        color: annotationModel.color,
+                        opacity: opacity
+                      ) else { continue }
                 page.addAnnotation(overlay)
                 overlayAnnotations.append((page, overlay))
             }
@@ -385,11 +407,12 @@ struct PDFKitReaderView: NSViewRepresentable {
 
         private func makeOverlay(
             for anchor: AnnotationAnchor,
-            color: HighlightColor
+            color: HighlightColor,
+            opacity: CGFloat
         ) -> PDFAnnotation? {
             guard let bounds = bounds(of: anchor.quadrilaterals) else { return nil }
             let annotation = PDFAnnotation(bounds: bounds, forType: .highlight, withProperties: nil)
-            annotation.color = color.nsColor.withAlphaComponent(0.42)
+            annotation.color = color.nsColor.withAlphaComponent(opacity)
             annotation.markupType = .highlight
             annotation.quadrilateralPoints = anchor.quadrilaterals.flatMap { quadrilateral in
                 [
@@ -497,6 +520,7 @@ private struct AnnotationSignature: Equatable {
 private struct HighlightPaletteView: View {
     let onCreate: (HighlightColor, Bool) -> Void
 
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @State private var selectedColor = HighlightColor.yellow
     @State private var addNote = false
 
@@ -515,16 +539,24 @@ private struct HighlightPaletteView: View {
                             .padding(.vertical, 5)
                             .background(
                                 RoundedRectangle(cornerRadius: 6)
-                                    .fill(color.swiftUIColor.opacity(selectedColor == color ? 0.2 : 0.08))
+                                    .fill(color.swiftUIColor.opacity(
+                                        selectedColor == color
+                                            ? appearance.selectedPaletteFillOpacity
+                                            : appearance.unselectedPaletteFillOpacity
+                                    ))
                             )
                             .overlay {
                                 RoundedRectangle(cornerRadius: 6)
-                                    .stroke(selectedColor == color ? Color.accentColor : .clear, lineWidth: 2)
+                                    .stroke(
+                                        selectedColor == color ? Color.accentColor : .clear,
+                                        lineWidth: appearance.selectedBorderWidth
+                                    )
                             }
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("\(color.displayName) highlight")
                     .accessibilityAddTraits(selectedColor == color ? .isSelected : [])
+                    .accessibilityValue(selectedColor == color ? "Selected" : "Not selected")
                 }
             }
 
@@ -541,16 +573,8 @@ private struct HighlightPaletteView: View {
         .padding(12)
         .frame(width: 520)
     }
-}
 
-private extension HighlightColor {
-    var nsColor: NSColor {
-        switch self {
-        case .yellow: .systemYellow
-        case .green: .systemGreen
-        case .blue: .systemBlue
-        case .pink: .systemPink
-        case .purple: .systemPurple
-        }
+    private var appearance: HighlightAppearancePreferences {
+        HighlightAppearancePreferences(increasedContrast: colorSchemeContrast == .increased)
     }
 }

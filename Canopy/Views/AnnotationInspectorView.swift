@@ -138,6 +138,7 @@ private struct AnnotationRow: View {
     let onSaveError: (Error) -> Void
 
     @Environment(\.undoManager) private var undoManager
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @State private var draftNote: String
     @State private var savedNote: String
     @FocusState private var noteFocused: Bool
@@ -187,7 +188,10 @@ private struct AnnotationRow: View {
                     .lineLimit(6)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(8)
-                    .background(annotation.color.swiftUIColor.opacity(0.18), in: RoundedRectangle(cornerRadius: 6))
+                    .background(
+                        annotation.color.swiftUIColor.opacity(appearance.inspectorFillOpacity),
+                        in: RoundedRectangle(cornerRadius: 6)
+                    )
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Go to highlight on page \(annotation.pageIndex + 1)")
@@ -227,6 +231,10 @@ private struct AnnotationRow: View {
         }
     }
 
+    private var appearance: HighlightAppearancePreferences {
+        HighlightAppearancePreferences(increasedContrast: colorSchemeContrast == .increased)
+    }
+
     private func saveNote() {
         guard draftNote != savedNote else { return }
         let oldNote = savedNote
@@ -254,12 +262,28 @@ struct HighlightColorLabel: View {
     let color: HighlightColor
     var selected = false
 
+    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+
     var body: some View {
         HStack(spacing: 4) {
-            Circle()
-                .fill(color.swiftUIColor)
-                .frame(width: 10, height: 10)
-                .overlay(Circle().stroke(.primary.opacity(0.45), lineWidth: 1))
+            if differentiateWithoutColor {
+                Image(systemName: color.differentiateWithoutColorSymbol)
+                    .foregroundStyle(
+                        colorSchemeContrast == .increased ? Color.primary : color.swiftUIColor
+                    )
+                    .frame(width: 12, height: 12)
+            } else {
+                Circle()
+                    .fill(color.swiftUIColor)
+                    .frame(width: 10, height: 10)
+                    .overlay(
+                        Circle().stroke(
+                            .primary.opacity(colorSchemeContrast == .increased ? 0.8 : 0.45),
+                            lineWidth: appearance.swatchBorderWidth
+                        )
+                    )
+            }
             Text(color.displayName)
             if selected {
                 Image(systemName: "checkmark")
@@ -267,27 +291,10 @@ struct HighlightColorLabel: View {
         }
         .font(.caption)
         .accessibilityElement(children: .combine)
-    }
-}
-
-extension HighlightColor {
-    var displayName: String {
-        switch self {
-        case .yellow: "Yellow"
-        case .green: "Green"
-        case .blue: "Blue"
-        case .pink: "Pink"
-        case .purple: "Purple"
-        }
+        .accessibilityValue(selected ? "Selected" : "Not selected")
     }
 
-    var swiftUIColor: Color {
-        switch self {
-        case .yellow: .yellow
-        case .green: .green
-        case .blue: .blue
-        case .pink: .pink
-        case .purple: .purple
-        }
+    private var appearance: HighlightAppearancePreferences {
+        HighlightAppearancePreferences(increasedContrast: colorSchemeContrast == .increased)
     }
 }

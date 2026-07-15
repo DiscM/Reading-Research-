@@ -24,6 +24,21 @@ struct CanopyAppTests {
         #expect(withMatches.contains(.previousFindMatch))
     }
 
+    @Test("highlight appearance strengthens contrast and provides non-color symbols")
+    func highlightAppearancePreferences() {
+        let standard = HighlightAppearancePreferences(increasedContrast: false)
+        let increased = HighlightAppearancePreferences(increasedContrast: true)
+
+        #expect(increased.overlayOpacity > standard.overlayOpacity)
+        #expect(increased.inspectorFillOpacity > standard.inspectorFillOpacity)
+        #expect(increased.selectedPaletteFillOpacity > standard.selectedPaletteFillOpacity)
+        #expect(increased.unselectedPaletteFillOpacity > standard.unselectedPaletteFillOpacity)
+        #expect(increased.swatchBorderWidth > standard.swatchBorderWidth)
+        #expect(increased.selectedBorderWidth > standard.selectedBorderWidth)
+        let nonColorSymbols = HighlightColor.allCases.map(\.differentiateWithoutColorSymbol)
+        #expect(Set(nonColorSymbols).count == HighlightColor.allCases.count)
+    }
+
     @MainActor
     @Test("selected and dropped PDFs converge on the shared Add Batch sheet")
     func sharedAddBatchEntry() throws {
