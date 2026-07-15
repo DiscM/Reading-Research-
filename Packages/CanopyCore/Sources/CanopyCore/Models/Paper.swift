@@ -6,7 +6,7 @@ public enum PaperStorageMode: String, Codable, Sendable {
     case managedCopy
 }
 
-public enum PaperSourceState: String, Codable, Sendable {
+public enum PaperSourceState: String, Codable, Sendable, Equatable {
     case available
     case sourceUnavailable
     case brokenReference

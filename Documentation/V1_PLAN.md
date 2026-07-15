@@ -139,7 +139,7 @@ Status labels describe the current branch, not release readiness. The release ga
 
 ### 1. Import and document identity
 
-**Status: Partially implemented.** The functional Add Papers foundation, identity checks, duplicate review, storage choices, progress, summaries, exact-match repair or relocation, in-reader and library recovery actions, managed-copy restoration, and confirmed referenced/managed removal are available. Background availability checks remain in this slice.
+**Status: Implemented.** The functional Add Papers foundation, identity checks, duplicate review, storage choices, progress, summaries, exact-match repair or relocation, in-reader and library recovery actions, managed-copy restoration, confirmed referenced/managed removal, and lightweight background availability checks are available.
 
 - Implement open-panel and drag-and-drop Add Batches.
 - Route the sidebar toolbar button, File → Add Papers (`⌘O`), and library drag-and-drop through one shared Add Batch workflow. After selection or drop, show the same compact sheet with file count, total size, **Reference Originals** selected by default, **Keep Copies in Canopy**, Add Papers, and Cancel.

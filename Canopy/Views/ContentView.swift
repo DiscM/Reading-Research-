@@ -24,6 +24,7 @@ struct ContentView: View {
     @State private var paperInfoUndoTarget = PaperInfoUndoTarget()
     @State private var paperRemovalUndoTarget = PaperRemovalUndoTarget()
     @State private var sourceRecoveryWorkflow = SourceRecoveryWorkflow()
+    @State private var didCheckSourceAvailability = false
     @State private var paperRemovalRequest: PaperRemovalRequest?
     @State private var commandErrorMessage: String?
 
@@ -110,6 +111,9 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .openPaperRequested)) { notification in
             selectedPaperID = notification.object as? UUID
         }
+        .task {
+            await checkSourceAvailabilityOnce()
+        }
         .onChange(of: selectedPaperID) {
             annotationNavigation = nil
             focusedAnnotationID = nil
@@ -189,6 +193,22 @@ struct ContentView: View {
             try paperInfoWorkflow.present(paperID: paperID, repository: repository)
         } catch {
             commandErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func checkSourceAvailabilityOnce() async {
+        guard !didCheckSourceAvailability else { return }
+        didCheckSourceAvailability = true
+        do {
+            let requests = try repository.sourceAvailabilityRequests()
+            let managedStore = try? ManagedPaperStore.applicationSupport()
+            let results = await Task.detached(priority: .utility) {
+                PaperSourceAvailabilityChecker().check(requests, managedStore: managedStore)
+            }.value
+            try repository.applySourceAvailabilityResults(results)
+        } catch {
+            // A background check must not interrupt the library. Opening or Retry
+            // still runs the full source-verification path and surfaces failures.
         }
     }
 

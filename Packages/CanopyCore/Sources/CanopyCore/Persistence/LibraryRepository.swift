@@ -144,6 +144,58 @@ public final class LibraryRepository {
         return try context.fetch(descriptor).first
     }
 
+    public func sourceAvailabilityRequests() throws -> [PaperSourceAvailabilityRequest] {
+        try context.fetch(FetchDescriptor<Paper>()).compactMap { paper in
+            guard paper.sourceState != .brokenReference, paper.sourceState != .sourceChanged else {
+                return nil
+            }
+            return PaperSourceAvailabilityRequest(
+                paperID: paper.id,
+                storageMode: paper.storageMode,
+                bookmarkData: paper.bookmarkData,
+                managedRelativePath: paper.managedRelativePath,
+                sourceFileSize: paper.sourceFileSize,
+                sourceModificationDate: paper.sourceModificationDate,
+                sourceState: paper.sourceState
+            )
+        }
+    }
+
+    public func applySourceAvailabilityResults(
+        _ results: [PaperSourceAvailabilityResult]
+    ) throws {
+        guard !results.isEmpty else { return }
+        let papersByID = Dictionary(
+            uniqueKeysWithValues: try context.fetch(FetchDescriptor<Paper>()).map { ($0.id, $0) }
+        )
+        var changed = false
+        for result in results {
+            let request = result.request
+            guard let paper = papersByID[result.paperID],
+                  paper.storageMode == request.storageMode,
+                  paper.sourceState == request.sourceState,
+                  paper.bookmarkData == request.bookmarkData,
+                  paper.managedRelativePath == request.managedRelativePath,
+                  paper.sourceFileSize == request.sourceFileSize,
+                  paper.sourceModificationDate == request.sourceModificationDate else {
+                continue
+            }
+            let nextState: PaperSourceState
+            if result.status == .available, result.attributesChanged {
+                continue
+            } else {
+                nextState = result.status
+            }
+            if paper.sourceState != nextState {
+                paper.sourceState = nextState
+                changed = true
+            }
+        }
+        if changed {
+            try save()
+        }
+    }
+
     public func paperInfoSnapshot(paperID: UUID) throws -> PaperInfoSnapshot {
         guard let paper = try paper(id: paperID) else {
             throw LibraryRepositoryError.paperNotFound

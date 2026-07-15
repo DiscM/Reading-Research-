@@ -1190,6 +1190,118 @@ struct CanopyCoreTests {
         #expect(paper.sourceState == .available)
     }
 
+    @Test("availability check compares attributes without reading Source PDF identity")
+    func lightweightAvailabilityCheckDoesNotFingerprint() throws {
+        let fixture = try TemporaryFile(contents: Data("original-bytes".utf8), filename: "paper.pdf")
+        defer { fixture.remove() }
+        let attributes = try FileManager.default.attributesOfItem(atPath: fixture.url.path)
+        let modificationDate = try #require(attributes[.modificationDate] as? Date)
+        let request = PaperSourceAvailabilityRequest(
+            paperID: UUID(),
+            storageMode: .managedCopy,
+            bookmarkData: nil,
+            managedRelativePath: fixture.url.lastPathComponent,
+            sourceFileSize: Int64(Data("original-bytes".utf8).count),
+            sourceModificationDate: modificationDate
+        )
+
+        try Data("changed!-bytes".utf8).write(to: fixture.url)
+        try FileManager.default.setAttributes(
+            [.modificationDate: modificationDate],
+            ofItemAtPath: fixture.url.path
+        )
+
+        let result = PaperSourceAvailabilityChecker().check(
+            request,
+            managedStore: ManagedPaperStore(rootURL: fixture.directory)
+        )
+
+        #expect(result.status == .available)
+    }
+
+    @Test("availability check reports a missing managed Source PDF")
+    func lightweightAvailabilityCheckReportsMissingManagedCopy() {
+        let request = PaperSourceAvailabilityRequest(
+            paperID: UUID(),
+            storageMode: .managedCopy,
+            bookmarkData: nil,
+            managedRelativePath: "missing.pdf",
+            sourceFileSize: 10,
+            sourceModificationDate: nil
+        )
+        let store = ManagedPaperStore(
+            rootURL: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        )
+
+        let result = PaperSourceAvailabilityChecker().check(request, managedStore: store)
+
+        #expect(result.status == .libraryCopyMissing)
+    }
+
+    @MainActor
+    @Test("library availability results recover unchanged sources and defer changed attributes")
+    func repositoryAppliesLightweightAvailabilityResults() throws {
+        let container = try CanopyModelContainer.make(inMemory: true)
+        let repository = LibraryRepository(container: container)
+        let recovered = Paper(
+            fingerprint: Data("recovered".utf8),
+            title: "Recovered",
+            storageMode: .managedCopy,
+            sourceState: .sourceUnavailable,
+            managedRelativePath: "recovered.pdf",
+            sourceFilename: "recovered.pdf",
+            sourceFileSize: 10
+        )
+        let pendingIdentityCheck = Paper(
+            fingerprint: Data("pending".utf8),
+            title: "Pending",
+            storageMode: .managedCopy,
+            sourceState: .sourceUnavailable,
+            managedRelativePath: "pending.pdf",
+            sourceFilename: "pending.pdf",
+            sourceFileSize: 10
+        )
+        let recoveredDuringCheck = Paper(
+            fingerprint: Data("raced".utf8),
+            title: "Recovered During Check",
+            storageMode: .managedCopy,
+            sourceState: .sourceUnavailable,
+            managedRelativePath: "raced.pdf",
+            sourceFilename: "raced.pdf",
+            sourceFileSize: 10
+        )
+        try repository.insert(recovered)
+        try repository.insert(pendingIdentityCheck)
+        try repository.insert(recoveredDuringCheck)
+        let requests = try repository.sourceAvailabilityRequests()
+        let recoveredRequest = try #require(requests.first { $0.paperID == recovered.id })
+        let pendingRequest = try #require(requests.first { $0.paperID == pendingIdentityCheck.id })
+        let racedRequest = try #require(requests.first { $0.paperID == recoveredDuringCheck.id })
+        recoveredDuringCheck.sourceState = .available
+
+        try repository.applySourceAvailabilityResults([
+            PaperSourceAvailabilityResult(
+                request: recoveredRequest,
+                status: .available,
+                attributesChanged: false
+            ),
+            PaperSourceAvailabilityResult(
+                request: pendingRequest,
+                status: .available,
+                attributesChanged: true
+            ),
+            PaperSourceAvailabilityResult(
+                request: racedRequest,
+                status: .libraryCopyMissing,
+                attributesChanged: false
+            )
+        ])
+
+        #expect(recovered.sourceState == .available)
+        #expect(pendingIdentityCheck.sourceState == .sourceUnavailable)
+        #expect(recoveredDuringCheck.sourceState == .available)
+    }
+
     @MainActor
     @Test("removing a referenced Paper preserves its user-controlled Source PDF")
     func removingReferencedPaperPreservesSource() throws {
