@@ -139,6 +139,7 @@ private struct AnnotationRow: View {
 
     @Environment(\.undoManager) private var undoManager
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    @Environment(\.canopyAccessibilityOverrides) private var accessibilityOverrides
     @State private var draftNote: String
     @State private var savedNote: String
     @FocusState private var noteFocused: Bool
@@ -232,7 +233,11 @@ private struct AnnotationRow: View {
     }
 
     private var appearance: HighlightAppearancePreferences {
-        HighlightAppearancePreferences(increasedContrast: colorSchemeContrast == .increased)
+        HighlightAppearancePreferences(increasedContrast: usesIncreasedContrast)
+    }
+
+    private var usesIncreasedContrast: Bool {
+        accessibilityOverrides.usesIncreasedContrast(system: colorSchemeContrast == .increased)
     }
 
     private func saveNote() {
@@ -264,13 +269,14 @@ struct HighlightColorLabel: View {
 
     @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    @Environment(\.canopyAccessibilityOverrides) private var accessibilityOverrides
 
     var body: some View {
         HStack(spacing: 4) {
-            if differentiateWithoutColor {
+            if usesDifferentiateWithoutColor {
                 Image(systemName: color.differentiateWithoutColorSymbol)
                     .foregroundStyle(
-                        colorSchemeContrast == .increased ? Color.primary : color.swiftUIColor
+                        usesIncreasedContrast ? Color.primary : color.swiftUIColor
                     )
                     .frame(width: 12, height: 12)
             } else {
@@ -279,7 +285,7 @@ struct HighlightColorLabel: View {
                     .frame(width: 10, height: 10)
                     .overlay(
                         Circle().stroke(
-                            .primary.opacity(colorSchemeContrast == .increased ? 0.8 : 0.45),
+                            .primary.opacity(usesIncreasedContrast ? 0.8 : 0.45),
                             lineWidth: appearance.swatchBorderWidth
                         )
                     )
@@ -295,6 +301,14 @@ struct HighlightColorLabel: View {
     }
 
     private var appearance: HighlightAppearancePreferences {
-        HighlightAppearancePreferences(increasedContrast: colorSchemeContrast == .increased)
+        HighlightAppearancePreferences(increasedContrast: usesIncreasedContrast)
+    }
+
+    private var usesIncreasedContrast: Bool {
+        accessibilityOverrides.usesIncreasedContrast(system: colorSchemeContrast == .increased)
+    }
+
+    private var usesDifferentiateWithoutColor: Bool {
+        accessibilityOverrides.differentiatesWithoutColor(system: differentiateWithoutColor)
     }
 }

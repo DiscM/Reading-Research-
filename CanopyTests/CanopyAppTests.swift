@@ -39,6 +39,33 @@ struct CanopyAppTests {
         #expect(Set(nonColorSymbols).count == HighlightColor.allCases.count)
     }
 
+    @Test("Accessibility menu preferences preserve system choices and expose appearance modes")
+    func accessibilityMenuPreferences() {
+        #expect(CanopyAppearanceMode.allCases.map(\.title) == ["Follow System", "Light", "Dark"])
+        #expect(CanopyAppearanceMode.system.preferredColorScheme == nil)
+        #expect(CanopyAppearanceMode.light.preferredColorScheme == .light)
+        #expect(CanopyAppearanceMode.dark.preferredColorScheme == .dark)
+
+        let defaults = CanopyAccessibilityOverrides()
+        #expect(!defaults.usesIncreasedContrast(system: false))
+        #expect(defaults.usesIncreasedContrast(system: true))
+        #expect(!defaults.differentiatesWithoutColor(system: false))
+        #expect(defaults.differentiatesWithoutColor(system: true))
+
+        let appOverrides = CanopyAccessibilityOverrides(
+            increasedContrast: true,
+            differentiateWithoutColor: true
+        )
+        #expect(appOverrides.usesIncreasedContrast(system: false))
+        #expect(appOverrides.differentiatesWithoutColor(system: false))
+        #expect(appOverrides.interfaceContrastAmount(systemIncreasedContrast: false) == 1.2)
+        #expect(appOverrides.interfaceContrastAmount(systemIncreasedContrast: true) == 1)
+        #expect(
+            appOverrides.sourceDocumentContrastCompensation(systemIncreasedContrast: false)
+                == 1 / 1.2
+        )
+    }
+
     @MainActor
     @Test("selected and dropped PDFs converge on the shared Add Batch sheet")
     func sharedAddBatchEntry() throws {

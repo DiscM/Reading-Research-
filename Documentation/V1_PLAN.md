@@ -197,7 +197,7 @@ Status labels describe the current branch, not release readiness. The release ga
 
 ### 5. Release hardening
 
-**Status: In progress.** The v1 surfaces expose keyboard-reachable reader commands and explicit VoiceOver labels or values for source status, progress, duplicate decisions, find results, and inspector state. Highlight overlays, fills, borders, and non-color symbols adapt to increased-contrast and Differentiate Without Color preferences while system materials support Light and Dark appearances. Manual cross-mode inspection, fixture coverage, packaging, and App Store work remain.
+**Status: In progress.** The v1 surfaces expose keyboard-reachable reader commands and explicit VoiceOver labels or values for source status, progress, duplicate decisions, find results, and inspector state. A persistent Accessibility menu offers Follow System, Light, and Dark appearances plus app-level Increase Contrast and Differentiate Without Color options; macOS accessibility settings remain the baseline and app options can strengthen them. Highlight overlays, fills, borders, and non-color symbols adapt to the effective preferences. Manual cross-mode inspection, fixture coverage, packaging, and App Store work remain.
 
 - Complete keyboard and VoiceOver coverage.
 - Validate light, dark, increased-contrast, and differentiate-without-color modes.

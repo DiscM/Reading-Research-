@@ -5,6 +5,7 @@ import SwiftUI
 @main
 struct CanopyApp: App {
     private let container: ModelContainer
+    private var accessibilityPreferences = CanopyAccessibilityPreferences()
 
     init() {
         do {
@@ -17,8 +18,10 @@ struct CanopyApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .frame(minWidth: 900, minHeight: 600)
+            CanopyContentRoot(
+                appearanceMode: accessibilityPreferences.appearanceMode,
+                accessibilityOverrides: accessibilityPreferences.overrides
+            )
         }
         .modelContainer(container)
         .defaultSize(width: 1200, height: 760)
@@ -29,9 +32,31 @@ struct CanopyApp: App {
     }
 }
 
+private struct CanopyContentRoot: View {
+    let appearanceMode: CanopyAppearanceMode
+    let accessibilityOverrides: CanopyAccessibilityOverrides
+
+    @Environment(\.colorSchemeContrast) private var systemColorSchemeContrast
+
+    var body: some View {
+        ContentView()
+            .frame(minWidth: 900, minHeight: 600)
+            .environment(\.canopyAccessibilityOverrides, accessibilityOverrides)
+            .contrast(appContrastAmount)
+            .preferredColorScheme(appearanceMode.preferredColorScheme)
+    }
+
+    private var appContrastAmount: Double {
+        accessibilityOverrides.interfaceContrastAmount(
+            systemIncreasedContrast: systemColorSchemeContrast == .increased
+        )
+    }
+}
+
 private struct CanopyCommands: Commands {
     @FocusedValue(\.paperInfoCommandAction) private var paperInfoCommandAction
     @FocusedValue(\.paperCommandContext) private var paperCommandContext
+    private var accessibilityPreferences = CanopyAccessibilityPreferences()
 
     var body: some Commands {
         CommandGroup(after: .newItem) {
@@ -101,6 +126,28 @@ private struct CanopyCommands: Commands {
             }
             .keyboardShortcut("i", modifiers: [.command, .option])
             .disabled(!canPerform(.toggleAnnotations))
+        }
+        CommandMenu("Accessibility") {
+            Picker("Appearance", selection: accessibilityPreferences.appearanceModeSelection) {
+                ForEach(CanopyAppearanceMode.allCases) { mode in
+                    Text(mode.title).tag(mode.rawValue)
+                }
+            }
+
+            Divider()
+
+            Toggle("Increase Contrast", isOn: accessibilityPreferences.increasedContrastSelection)
+            Toggle(
+                "Differentiate Without Color",
+                isOn: accessibilityPreferences.differentiateWithoutColorSelection
+            )
+
+            Divider()
+
+            Button("Reset to System Defaults") {
+                accessibilityPreferences.reset()
+            }
+            .disabled(accessibilityPreferences.usesSystemDefaults)
         }
     }
 

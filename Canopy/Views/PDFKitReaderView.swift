@@ -22,7 +22,9 @@ struct PDFReaderCommand: Equatable {
 }
 
 struct PDFKitReaderView: NSViewRepresentable {
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    @Environment(\.canopyAccessibilityOverrides) private var accessibilityOverrides
 
     let document: PDFDocument
     let restoredState: PaperReaderState?
@@ -75,7 +77,11 @@ struct PDFKitReaderView: NSViewRepresentable {
     }
 
     private var appearance: HighlightAppearancePreferences {
-        HighlightAppearancePreferences(increasedContrast: colorSchemeContrast == .increased)
+        HighlightAppearancePreferences(
+            increasedContrast: accessibilityOverrides.usesIncreasedContrast(
+                system: colorSchemeContrast == .increased
+            )
+        )
     }
 
     @MainActor
@@ -320,14 +326,17 @@ struct PDFKitReaderView: NSViewRepresentable {
             popover.behavior = .transient
             popover.animates = false
             popover.contentSize = NSSize(width: 520, height: 126)
-            popover.contentViewController = NSHostingController(rootView: HighlightPaletteView { [weak self] color, addNote in
+            let palette = HighlightPaletteView { [weak self] color, addNote in
                 guard let self else { return }
                 self.parent.onCreateAnnotations(anchors, color, addNote)
                 self.closeHighlightPopover()
                 self.isUpdatingSearchSelection = true
                 pdfView.setCurrentSelection(nil, animate: false)
                 self.isUpdatingSearchSelection = false
-            })
+            }
+            .environment(\.canopyAccessibilityOverrides, parent.accessibilityOverrides)
+            .environment(\.colorScheme, parent.colorScheme)
+            popover.contentViewController = NSHostingController(rootView: palette)
             let selectionRect = pdfView.convert(selection.bounds(for: firstPage), from: firstPage)
             popover.show(relativeTo: selectionRect, of: pdfView, preferredEdge: .maxY)
             highlightPopover = popover
@@ -521,6 +530,7 @@ private struct HighlightPaletteView: View {
     let onCreate: (HighlightColor, Bool) -> Void
 
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    @Environment(\.canopyAccessibilityOverrides) private var accessibilityOverrides
     @State private var selectedColor = HighlightColor.yellow
     @State private var addNote = false
 
@@ -575,6 +585,10 @@ private struct HighlightPaletteView: View {
     }
 
     private var appearance: HighlightAppearancePreferences {
-        HighlightAppearancePreferences(increasedContrast: colorSchemeContrast == .increased)
+        HighlightAppearancePreferences(
+            increasedContrast: accessibilityOverrides.usesIncreasedContrast(
+                system: colorSchemeContrast == .increased
+            )
+        )
     }
 }

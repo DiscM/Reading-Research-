@@ -16,6 +16,8 @@ struct PDFReaderView: View {
     let onCancelSourceRecovery: () -> Void
 
     @Environment(\.undoManager) private var undoManager
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    @Environment(\.canopyAccessibilityOverrides) private var accessibilityOverrides
 
     @State private var documentSession: PDFDocumentSession?
     @State private var restoredState: PaperReaderState?
@@ -64,6 +66,7 @@ struct PDFReaderView: View {
                         onSnapshotChange: updateSnapshot
                     )
                     .id(documentSession.paperID)
+                    .contrast(sourceDocumentContrastCompensation)
                 } else if let loadError {
                     VStack(spacing: 12) {
                         ContentUnavailableView(
@@ -137,6 +140,12 @@ struct PDFReaderView: View {
 
     private var findTaskID: String {
         "\(documentSession?.paperID.uuidString ?? "none"):\(findQuery)"
+    }
+
+    private var sourceDocumentContrastCompensation: Double {
+        accessibilityOverrides.sourceDocumentContrastCompensation(
+            systemIncreasedContrast: colorSchemeContrast == .increased
+        )
     }
 
     private var paperCommandContext: PaperCommandContext? {
