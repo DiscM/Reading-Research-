@@ -8,6 +8,11 @@ struct PDFReaderSnapshot: Equatable {
     var zoomScale: Double
 }
 
+struct PDFPageAreaSelection: Equatable {
+    let pageIndex: Int
+    let rectangle: CGRect
+}
+
 struct PDFReaderCommand: Equatable {
     enum Action: Equatable {
         case goToPage(Int)
@@ -24,6 +29,7 @@ struct PDFReaderCommand: Equatable {
 struct PDFKitReaderView: NSViewRepresentable {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
     @Environment(\.canopyAccessibilityOverrides) private var accessibilityOverrides
 
     let document: PDFDocument
@@ -32,9 +38,15 @@ struct PDFKitReaderView: NSViewRepresentable {
     let matches: [PDFSelection]
     let matchesVersion: UUID
     let selectedMatchIndex: Int?
+    let allowsTextAnnotations: Bool
+    let isAreaAnnotationMode: Bool
+    let pdfInteractionResetID: UUID
     let annotations: [Annotation]
     let annotationNavigation: AnnotationNavigation?
-    let onCreateAnnotations: ([AnnotationAnchor], HighlightColor, Bool) -> Void
+    let onCreateAnnotations: ([TextAnnotationAnchor], HighlightColor, Bool) -> Void
+    let onCreateAreaAnnotation: (PDFPageAreaSelection, HighlightColor, Bool) -> Void
+    let onAreaAnnotationModeEnded: () -> Void
+    let onTextSelectionRejected: (String) -> Void
     let onSnapshotChange: (PDFReaderSnapshot) -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -42,11 +54,12 @@ struct PDFKitReaderView: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> PDFView {
-        let pdfView = PDFView()
+        let pdfView = AreaSelectionPDFView()
         pdfView.displayMode = .singlePageContinuous
         pdfView.displayDirection = .vertical
         pdfView.displaysPageBreaks = true
         pdfView.autoScales = restoredState == nil
+        pdfView.setAccessibilityIdentifier("paper-pdf-view")
         pdfView.document = document
         context.coordinator.attach(to: pdfView)
         context.coordinator.restore(restoredState, in: pdfView)
@@ -60,11 +73,19 @@ struct PDFKitReaderView: NSViewRepresentable {
             context.coordinator.attach(to: pdfView)
             context.coordinator.restore(restoredState, in: pdfView)
         }
+        context.coordinator.resetPDFInteraction(
+            ifNeeded: pdfInteractionResetID,
+            in: pdfView
+        )
         context.coordinator.perform(command, in: pdfView)
+        context.coordinator.updateAreaAnnotationMode(isAreaAnnotationMode, in: pdfView)
         context.coordinator.showMatches(matches, selectedIndex: selectedMatchIndex, in: pdfView)
         context.coordinator.showAnnotations(
             annotations,
-            opacity: appearance.overlayOpacity,
+            appearance: appearance,
+            differentiatesWithoutColor: accessibilityOverrides.differentiatesWithoutColor(
+                system: differentiateWithoutColor
+            ),
             in: pdfView
         )
         context.coordinator.navigate(to: annotationNavigation, annotations: annotations, in: pdfView)
@@ -89,11 +110,13 @@ struct PDFKitReaderView: NSViewRepresentable {
         var parent: PDFKitReaderView
         private weak var pdfView: PDFView?
         private var observers: [NSObjectProtocol] = []
+        private var lastPDFInteractionResetID: UUID?
         private var lastCommandID: UUID?
         private var lastSelectedMatchIndex: Int?
         private var lastMatchesVersion: UUID?
         private var lastAnnotationSignature: [AnnotationSignature] = []
-        private var lastOverlayOpacity: CGFloat?
+        private var lastAnnotationAppearance: HighlightAppearancePreferences?
+        private var lastDifferentiatesWithoutColor: Bool?
         private var lastAnnotationNavigationID: UUID?
         private var overlayAnnotations: [(page: PDFPage, annotation: PDFAnnotation)] = []
         private var highlightPopover: NSPopover?
@@ -109,6 +132,15 @@ struct PDFKitReaderView: NSViewRepresentable {
         func attach(to pdfView: PDFView) {
             detach()
             self.pdfView = pdfView
+            if let areaSelectionView = pdfView as? AreaSelectionPDFView {
+                areaSelectionView.onAreaSelectionCompleted = { [weak self, weak areaSelectionView] selection, viewRectangle in
+                    guard let self, let areaSelectionView else { return }
+                    self.areaSelectionCompleted(selection, viewRectangle: viewRectangle, in: areaSelectionView)
+                }
+                areaSelectionView.onAreaSelectionCancelled = { [weak self] in
+                    self?.parent.onAreaAnnotationModeEnded()
+                }
+            }
             let center = NotificationCenter.default
             for name in [Notification.Name.PDFViewPageChanged, .PDFViewScaleChanged, .PDFViewVisiblePagesChanged] {
                 observers.append(center.addObserver(forName: name, object: pdfView, queue: .main) { [weak self] _ in
@@ -143,13 +175,44 @@ struct PDFKitReaderView: NSViewRepresentable {
         func detach() {
             closeHighlightPopover()
             removeAnnotationOverlays()
+            pdfView?.setCurrentSelection(nil, animate: false)
             lastAnnotationSignature = []
-            lastOverlayOpacity = nil
+            lastAnnotationAppearance = nil
+            lastDifferentiatesWithoutColor = nil
             for observer in observers {
                 NotificationCenter.default.removeObserver(observer)
             }
             observers.removeAll()
+            if let areaSelectionView = pdfView as? AreaSelectionPDFView {
+                areaSelectionView.onAreaSelectionCompleted = nil
+                areaSelectionView.onAreaSelectionCancelled = nil
+                areaSelectionView.setAreaSelectionEnabled(false)
+            }
             pdfView = nil
+        }
+
+        func updateAreaAnnotationMode(_ enabled: Bool, in pdfView: PDFView) {
+            guard let areaSelectionView = pdfView as? AreaSelectionPDFView else { return }
+            if enabled {
+                closeHighlightPopover()
+                isUpdatingSearchSelection = true
+                pdfView.setCurrentSelection(nil, animate: false)
+                isUpdatingSearchSelection = false
+            }
+            areaSelectionView.setAreaSelectionEnabled(enabled)
+        }
+
+        func resetPDFInteraction(ifNeeded resetID: UUID, in pdfView: PDFView) {
+            guard resetID != lastPDFInteractionResetID else { return }
+            lastPDFInteractionResetID = resetID
+            closeHighlightPopover()
+            lastSelectedMatchIndex = nil
+            lastMatchesVersion = nil
+            isUpdatingSearchSelection = true
+            pdfView.highlightedSelections = []
+            pdfView.setCurrentSelection(nil, animate: false)
+            isUpdatingSearchSelection = false
+            (pdfView as? AreaSelectionPDFView)?.setAreaSelectionEnabled(false)
         }
 
         func restore(_ state: PaperReaderState?, in pdfView: PDFView) {
@@ -217,6 +280,9 @@ struct PDFKitReaderView: NSViewRepresentable {
                 isUpdatingSearchSelection = false
                 return
             }
+            // Streaming Find updates the highlighted result set for every match.
+            // Keep the reader stationary unless the selected result itself changed.
+            guard selectionChanged else { return }
             let selection = matches[selectedIndex]
             isUpdatingSearchSelection = true
             pdfView.setCurrentSelection(selection, animate: true)
@@ -226,26 +292,46 @@ struct PDFKitReaderView: NSViewRepresentable {
 
         func showAnnotations(
             _ annotations: [Annotation],
-            opacity: CGFloat,
+            appearance: HighlightAppearancePreferences,
+            differentiatesWithoutColor: Bool,
             in pdfView: PDFView
         ) {
             let signature = annotations.map(AnnotationSignature.init)
-            guard signature != lastAnnotationSignature || opacity != lastOverlayOpacity else { return }
+            guard signature != lastAnnotationSignature
+                    || appearance != lastAnnotationAppearance
+                    || differentiatesWithoutColor != lastDifferentiatesWithoutColor else { return }
             lastAnnotationSignature = signature
-            lastOverlayOpacity = opacity
+            lastAnnotationAppearance = appearance
+            lastDifferentiatesWithoutColor = differentiatesWithoutColor
             removeAnnotationOverlays()
 
             guard let document = pdfView.document else { return }
             for annotationModel in annotations {
-                guard let anchor = annotationModel.anchor,
-                      let page = document.page(at: anchor.pageIndex),
-                      let overlay = makeOverlay(
+                switch annotationModel.kind {
+                case .textHighlight:
+                    guard let anchor = annotationModel.textAnchor,
+                          let page = document.page(at: anchor.pageIndex),
+                          let overlay = makeTextOverlay(
+                            for: anchor,
+                            color: annotationModel.color,
+                            opacity: appearance.overlayOpacity
+                          ) else { continue }
+                    page.addAnnotation(overlay)
+                    overlayAnnotations.append((page, overlay))
+                case .area:
+                    guard let anchor = annotationModel.areaAnchor,
+                          let page = document.page(at: anchor.pageIndex) else { continue }
+                    let overlays = makeAreaOverlays(
                         for: anchor,
                         color: annotationModel.color,
-                        opacity: opacity
-                      ) else { continue }
-                page.addAnnotation(overlay)
-                overlayAnnotations.append((page, overlay))
+                        appearance: appearance,
+                        differentiatesWithoutColor: differentiatesWithoutColor
+                    )
+                    for overlay in overlays {
+                        page.addAnnotation(overlay)
+                        overlayAnnotations.append((page, overlay))
+                    }
+                }
             }
         }
 
@@ -257,11 +343,17 @@ struct PDFKitReaderView: NSViewRepresentable {
             guard let navigation,
                   navigation.id != lastAnnotationNavigationID,
                   let annotation = annotations.first(where: { $0.id == navigation.annotationID }),
-                  let anchor = annotation.anchor,
-                  let page = pdfView.document?.page(at: anchor.pageIndex),
-                  let bounds = bounds(of: anchor.quadrilaterals) else { return }
+                  let page = pdfView.document?.page(at: annotation.pageIndex) else { return }
             lastAnnotationNavigationID = navigation.id
-            pdfView.go(to: bounds.insetBy(dx: -12, dy: -24), on: page)
+            switch annotation.kind {
+            case .textHighlight:
+                guard let anchor = annotation.textAnchor,
+                      let bounds = bounds(of: anchor.quadrilaterals) else { return }
+                pdfView.go(to: bounds.insetBy(dx: -12, dy: -24), on: page)
+            case .area:
+                guard let anchor = annotation.areaAnchor else { return }
+                navigate(to: cgRect(anchor.rect), on: page, in: pdfView)
+            }
         }
 
         private func selectionChanged() {
@@ -269,6 +361,7 @@ struct PDFKitReaderView: NSViewRepresentable {
             pendingHighlightPresentation = nil
 
             guard !isUpdatingSearchSelection,
+                  parent.allowsTextAnnotations,
                   parent.matches.isEmpty,
                   let pdfView,
                   let document = pdfView.document,
@@ -276,6 +369,17 @@ struct PDFKitReaderView: NSViewRepresentable {
                   let text = selection.string,
                   !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 closeHighlightPopover()
+                return
+            }
+
+            guard selection.pages.count == 1 else {
+                closeHighlightPopover()
+                parent.onTextSelectionRejected(
+                    "A text highlight can belong to only one page. Select text on one page at a time."
+                )
+                isUpdatingSearchSelection = true
+                pdfView.setCurrentSelection(nil, animate: false)
+                isUpdatingSearchSelection = false
                 return
             }
 
@@ -326,7 +430,7 @@ struct PDFKitReaderView: NSViewRepresentable {
             popover.behavior = .transient
             popover.animates = false
             popover.contentSize = NSSize(width: 520, height: 126)
-            let palette = HighlightPaletteView { [weak self] color, addNote in
+            let palette = AnnotationPaletteView(kind: .textHighlight) { [weak self] color, addNote in
                 guard let self else { return }
                 self.parent.onCreateAnnotations(anchors, color, addNote)
                 self.closeHighlightPopover()
@@ -341,6 +445,30 @@ struct PDFKitReaderView: NSViewRepresentable {
             popover.show(relativeTo: selectionRect, of: pdfView, preferredEdge: .maxY)
             highlightPopover = popover
             presentedSelectionSignature = signature
+        }
+
+        private func areaSelectionCompleted(
+            _ selection: PDFPageAreaSelection,
+            viewRectangle: CGRect,
+            in pdfView: AreaSelectionPDFView
+        ) {
+            parent.onAreaAnnotationModeEnded()
+            closeHighlightPopover()
+
+            let popover = NSPopover()
+            popover.behavior = .transient
+            popover.animates = false
+            popover.contentSize = NSSize(width: 520, height: 126)
+            let palette = AnnotationPaletteView(kind: .area) { [weak self] color, addNote in
+                guard let self else { return }
+                self.parent.onCreateAreaAnnotation(selection, color, addNote)
+                self.closeHighlightPopover()
+            }
+            .environment(\.canopyAccessibilityOverrides, parent.accessibilityOverrides)
+            .environment(\.colorScheme, parent.colorScheme)
+            popover.contentViewController = NSHostingController(rootView: palette)
+            popover.show(relativeTo: viewRectangle, of: pdfView, preferredEdge: .maxY)
+            highlightPopover = popover
         }
 
         private func selectionSignature(
@@ -364,58 +492,40 @@ struct PDFKitReaderView: NSViewRepresentable {
             return PDFSelectionSignature(ranges: ranges)
         }
 
-        private func captureAnchors(from selection: PDFSelection, in pdfView: PDFView) -> [AnnotationAnchor] {
-            guard let document = pdfView.document else { return [] }
+        private func captureAnchors(from selection: PDFSelection, in pdfView: PDFView) -> [TextAnnotationAnchor] {
+            guard let document = pdfView.document,
+                  selection.pages.count == 1,
+                  let page = selection.pages.first else { return [] }
             let lineSelections = selection.selectionsByLine()
+            let pageIndex = document.index(for: page)
+            guard pageIndex != NSNotFound,
+                  let selectedText = selection.string,
+                  !selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return []
+            }
 
-            return selection.pages.compactMap { page in
-                let pageIndex = document.index(for: page)
-                guard pageIndex != NSNotFound,
-                      let pageText = page.string else { return nil }
-                let string = pageText as NSString
-                let ranges = (0..<selection.numberOfTextRanges(on: page))
-                    .map { selection.range(at: $0, on: page) }
-                    .filter { $0.location != NSNotFound && NSMaxRange($0) <= string.length }
-                guard let firstRange = ranges.first, let lastRange = ranges.last else { return nil }
-
-                let pageSelection = PDFSelection(document: document)
-                pageSelection.add(ranges.compactMap { page.selection(for: $0) })
-                let selectedText = pageSelection.string ?? ""
-                guard !selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-
-                let quadrilaterals = lineSelections.compactMap { line -> AnnotationQuadrilateral? in
-                    guard line.pages.contains(where: { $0 === page }) else { return nil }
-                    let rect = line.bounds(for: page)
-                    guard !rect.isNull, !rect.isEmpty else { return nil }
-                    return AnnotationQuadrilateral(
-                        upperLeft: AnnotationPoint(x: rect.minX, y: rect.maxY),
-                        upperRight: AnnotationPoint(x: rect.maxX, y: rect.maxY),
-                        lowerLeft: AnnotationPoint(x: rect.minX, y: rect.minY),
-                        lowerRight: AnnotationPoint(x: rect.maxX, y: rect.minY)
-                    )
-                }
-                guard !quadrilaterals.isEmpty else { return nil }
-
-                let contextStart = max(firstRange.location - 48, 0)
-                let contextEnd = min(NSMaxRange(lastRange) + 48, string.length)
-                return AnnotationAnchor(
-                    pageIndex: pageIndex,
-                    quadrilaterals: quadrilaterals,
-                    selectedText: selectedText,
-                    contextBefore: string.substring(with: NSRange(
-                        location: contextStart,
-                        length: firstRange.location - contextStart
-                    )),
-                    contextAfter: string.substring(with: NSRange(
-                        location: NSMaxRange(lastRange),
-                        length: contextEnd - NSMaxRange(lastRange)
-                    ))
+            let quadrilaterals = lineSelections.compactMap { line -> AnnotationQuadrilateral? in
+                guard line.pages.contains(where: { $0 === page }) else { return nil }
+                let rect = line.bounds(for: page)
+                guard !rect.isNull, !rect.isEmpty else { return nil }
+                return AnnotationQuadrilateral(
+                    upperLeft: AnnotationPoint(x: rect.minX, y: rect.maxY),
+                    upperRight: AnnotationPoint(x: rect.maxX, y: rect.maxY),
+                    lowerLeft: AnnotationPoint(x: rect.minX, y: rect.minY),
+                    lowerRight: AnnotationPoint(x: rect.maxX, y: rect.minY)
                 )
             }
+            guard !quadrilaterals.isEmpty else { return [] }
+
+            return [TextAnnotationAnchor(
+                pageIndex: pageIndex,
+                quadrilaterals: quadrilaterals,
+                selectedText: selectedText
+            )]
         }
 
-        private func makeOverlay(
-            for anchor: AnnotationAnchor,
+        private func makeTextOverlay(
+            for anchor: TextAnnotationAnchor,
             color: HighlightColor,
             opacity: CGFloat
         ) -> PDFAnnotation? {
@@ -434,6 +544,62 @@ struct PDFKitReaderView: NSViewRepresentable {
                 }
             }
             return annotation
+        }
+
+        private func makeAreaOverlays(
+            for anchor: AreaAnnotationAnchor,
+            color: HighlightColor,
+            appearance: HighlightAppearancePreferences,
+            differentiatesWithoutColor: Bool
+        ) -> [PDFAnnotation] {
+            let rectangle = cgRect(anchor.rect)
+            guard !rectangle.isNull, !rectangle.isEmpty else { return [] }
+
+            let outline = PDFAnnotation(bounds: rectangle, forType: .square, withProperties: nil)
+            outline.color = color.nsColor.withAlphaComponent(appearance.areaBorderOpacity)
+            outline.interiorColor = color.nsColor.withAlphaComponent(appearance.areaFillOpacity)
+            let border = PDFBorder()
+            border.lineWidth = appearance.areaBorderWidth
+            outline.border = border
+
+            guard differentiatesWithoutColor else { return [outline] }
+
+            let symbolSize = min(max(min(rectangle.width, rectangle.height) * 0.22, 14), 32)
+            let symbolBounds = CGRect(
+                x: rectangle.midX - symbolSize / 2,
+                y: rectangle.midY - symbolSize / 2,
+                width: symbolSize,
+                height: symbolSize
+            )
+            let symbol = PDFAnnotation(bounds: symbolBounds, forType: .freeText, withProperties: nil)
+            symbol.contents = color.differentiateWithoutColorGlyph
+            symbol.font = .boldSystemFont(ofSize: symbolSize * 0.72)
+            symbol.fontColor = appearance.increasedContrast ? .labelColor : color.nsColor
+            symbol.alignment = .center
+            symbol.color = .clear
+            return [outline, symbol]
+        }
+
+        private func navigate(to rectangle: CGRect, on page: PDFPage, in pdfView: PDFView) {
+            let pageBounds = page.bounds(for: .cropBox)
+            let horizontalContext = max(rectangle.width * 0.45, 36)
+            let verticalContext = max(rectangle.height * 0.45, 48)
+            let target = rectangle
+                .insetBy(dx: -horizontalContext, dy: -verticalContext)
+                .intersection(pageBounds)
+            guard !target.isNull, !target.isEmpty else { return }
+
+            let visibleSize = pdfView.enclosingScrollView?.contentSize ?? pdfView.bounds.size
+            if visibleSize.width > 0, visibleSize.height > 0 {
+                let targetScale = min(visibleSize.width / target.width, visibleSize.height / target.height) * 0.88
+                pdfView.autoScales = false
+                pdfView.scaleFactor = min(max(targetScale, pdfView.minScaleFactor), pdfView.maxScaleFactor)
+            }
+            pdfView.go(to: target, on: page)
+        }
+
+        private func cgRect(_ rectangle: AnnotationRect) -> CGRect {
+            CGRect(x: rectangle.x, y: rectangle.y, width: rectangle.width, height: rectangle.height)
         }
 
         private func bounds(of quadrilaterals: [AnnotationQuadrilateral]) -> CGRect? {
@@ -502,6 +668,190 @@ struct PDFKitReaderView: NSViewRepresentable {
     }
 }
 
+private final class AreaSelectionPDFView: PDFView {
+    var onAreaSelectionCompleted: ((PDFPageAreaSelection, CGRect) -> Void)?
+    var onAreaSelectionCancelled: (() -> Void)?
+
+    private var areaSelectionEnabled = false
+    private weak var dragPage: PDFPage?
+    private var dragStart: CGPoint?
+    private let selectionOverlay = AreaSelectionOverlayView(frame: .zero)
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        installSelectionOverlay()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        installSelectionOverlay()
+    }
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func layout() {
+        super.layout()
+        selectionOverlay.frame = bounds
+    }
+
+    func setAreaSelectionEnabled(_ enabled: Bool) {
+        guard enabled != areaSelectionEnabled else { return }
+        areaSelectionEnabled = enabled
+        cancelCurrentDrag()
+        setAccessibilityHelp(enabled
+            ? "Area Annotation mode. Drag a rectangle on one page. Press Escape to cancel."
+            : nil)
+        window?.invalidateCursorRects(for: self)
+        if enabled {
+            window?.makeFirstResponder(self)
+            announce("Area Annotation mode. Drag one rectangle on a PDF page. Press Escape to cancel.")
+        }
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        if areaSelectionEnabled {
+            addCursorRect(bounds, cursor: .crosshair)
+        }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard areaSelectionEnabled else {
+            super.mouseDown(with: event)
+            return
+        }
+
+        let viewPoint = convert(event.locationInWindow, from: nil)
+        guard let page = page(for: viewPoint, nearest: false) else {
+            NSSound.beep()
+            return
+        }
+        let pagePoint = clipped(convert(viewPoint, to: page), to: page.bounds(for: .cropBox))
+        dragPage = page
+        dragStart = pagePoint
+        selectionOverlay.selectionRectangle = .zero
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard areaSelectionEnabled,
+              let page = dragPage,
+              let dragStart else {
+            super.mouseDragged(with: event)
+            return
+        }
+        let viewPoint = convert(event.locationInWindow, from: nil)
+        let pagePoint = clipped(convert(viewPoint, to: page), to: page.bounds(for: .cropBox))
+        let pageRectangle = rectangle(from: dragStart, to: pagePoint)
+        selectionOverlay.selectionRectangle = convert(pageRectangle, from: page)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard areaSelectionEnabled,
+              let document,
+              let page = dragPage,
+              let dragStart else {
+            super.mouseUp(with: event)
+            return
+        }
+
+        let viewPoint = convert(event.locationInWindow, from: nil)
+        let pagePoint = clipped(convert(viewPoint, to: page), to: page.bounds(for: .cropBox))
+        let pageRectangle = rectangle(from: dragStart, to: pagePoint)
+        let pageIndex = document.index(for: page)
+        cancelCurrentDrag()
+
+        guard pageIndex != NSNotFound,
+              pageRectangle.width >= 4,
+              pageRectangle.height >= 4 else {
+            NSSound.beep()
+            return
+        }
+
+        areaSelectionEnabled = false
+        window?.invalidateCursorRects(for: self)
+        let viewRectangle = convert(pageRectangle, from: page)
+        announce("Area selected. Choose an annotation color and whether to add a note.")
+        onAreaSelectionCompleted?(
+            PDFPageAreaSelection(pageIndex: pageIndex, rectangle: pageRectangle),
+            viewRectangle
+        )
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if areaSelectionEnabled,
+           event.keyCode == 53 || event.charactersIgnoringModifiers == "\u{1b}" {
+            areaSelectionEnabled = false
+            cancelCurrentDrag()
+            window?.invalidateCursorRects(for: self)
+            announce("Area Annotation cancelled.")
+            onAreaSelectionCancelled?()
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+    private func installSelectionOverlay() {
+        selectionOverlay.autoresizingMask = [.width, .height]
+        selectionOverlay.frame = bounds
+        addSubview(selectionOverlay, positioned: .above, relativeTo: nil)
+    }
+
+    private func cancelCurrentDrag() {
+        dragPage = nil
+        dragStart = nil
+        selectionOverlay.selectionRectangle = nil
+    }
+
+    private func clipped(_ point: CGPoint, to bounds: CGRect) -> CGPoint {
+        CGPoint(
+            x: min(max(point.x, bounds.minX), bounds.maxX),
+            y: min(max(point.y, bounds.minY), bounds.maxY)
+        )
+    }
+
+    private func rectangle(from start: CGPoint, to end: CGPoint) -> CGRect {
+        CGRect(
+            x: min(start.x, end.x),
+            y: min(start.y, end.y),
+            width: abs(end.x - start.x),
+            height: abs(end.y - start.y)
+        )
+    }
+
+    private func announce(_ message: String) {
+        NSAccessibility.post(
+            element: NSApp as Any,
+            notification: .announcementRequested,
+            userInfo: [
+                .announcement: message,
+                .priority: NSNumber(value: NSAccessibilityPriorityLevel.medium.rawValue)
+            ]
+        )
+    }
+}
+
+private final class AreaSelectionOverlayView: NSView {
+    var selectionRectangle: CGRect? {
+        didSet { needsDisplay = true }
+    }
+
+    override var isOpaque: Bool { false }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard let selectionRectangle, !selectionRectangle.isEmpty else { return }
+        let path = NSBezierPath(rect: selectionRectangle)
+        NSColor.controlAccentColor.withAlphaComponent(0.16).setFill()
+        path.fill()
+        NSColor.controlAccentColor.setStroke()
+        path.lineWidth = 2
+        path.setLineDash([6, 3], count: 2, phase: 0)
+        path.stroke()
+    }
+}
+
 private struct PDFSelectionSignature: Equatable {
     let ranges: [PDFSelectionRange]
 }
@@ -514,19 +864,41 @@ private struct PDFSelectionRange: Equatable {
 
 private struct AnnotationSignature: Equatable {
     let id: UUID
+    let kind: AnnotationKind
     let pageIndex: Int
-    let quadrilaterals: Data
+    let geometry: Data
     let color: HighlightColor
 
     init(_ annotation: Annotation) {
         id = annotation.id
+        kind = annotation.kind
         pageIndex = annotation.pageIndex
-        quadrilaterals = annotation.quadrilaterals
+        geometry = annotation.quadrilaterals ?? annotation.areaRect ?? Data()
         color = annotation.color
     }
 }
 
-private struct HighlightPaletteView: View {
+private struct AnnotationPaletteView: View {
+    enum Kind {
+        case textHighlight
+        case area
+
+        var title: String {
+            switch self {
+            case .textHighlight: "Highlight Selection"
+            case .area: "Area Annotation"
+            }
+        }
+
+        var actionTitle: String {
+            switch self {
+            case .textHighlight: "Add Highlight"
+            case .area: "Add Area Annotation"
+            }
+        }
+    }
+
+    let kind: Kind
     let onCreate: (HighlightColor, Bool) -> Void
 
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
@@ -536,7 +908,7 @@ private struct HighlightPaletteView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Highlight Selection")
+            Text(kind.title)
                 .font(.headline)
 
             HStack(spacing: 6) {
@@ -564,7 +936,7 @@ private struct HighlightPaletteView: View {
                             }
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("\(color.displayName) highlight")
+                    .accessibilityLabel("\(color.displayName) annotation color")
                     .accessibilityAddTraits(selectedColor == color ? .isSelected : [])
                     .accessibilityValue(selectedColor == color ? "Selected" : "Not selected")
                 }
@@ -573,15 +945,18 @@ private struct HighlightPaletteView: View {
             HStack {
                 Toggle("Add Note", isOn: $addNote)
                     .toggleStyle(.checkbox)
+                    .accessibilityIdentifier("annotation-palette-add-note")
                 Spacer()
-                Button(addNote ? "Highlight and Add Note" : "Add Highlight") {
+                Button(addNote ? "\(kind.actionTitle) and Add Note" : kind.actionTitle) {
                     onCreate(selectedColor, addNote)
                 }
                 .keyboardShortcut(.defaultAction)
+                .accessibilityIdentifier("annotation-palette-create")
             }
         }
         .padding(12)
         .frame(width: 520)
+        .accessibilityIdentifier("annotation-palette")
     }
 
     private var appearance: HighlightAppearancePreferences {

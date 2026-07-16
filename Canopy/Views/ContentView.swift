@@ -3,12 +3,11 @@ import SwiftData
 import SwiftUI
 import UniformTypeIdentifiers
 
-extension Notification.Name {
-    static let addPapersRequested = Notification.Name("Canopy.addPapersRequested")
-    static let openPaperRequested = Notification.Name("Canopy.openPaperRequested")
-}
-
 struct ContentView: View {
+    let managedCopyReconciliationWarning: String?
+    let isRetryingManagedCopyReconciliation: Bool
+    let onRetryManagedCopyReconciliation: @MainActor () -> Void
+
     @Environment(\.modelContext) private var modelContext
     @Environment(\.undoManager) private var undoManager
     @State private var selectedPaperID: UUID?
@@ -34,11 +33,21 @@ struct ContentView: View {
         return try? repository.paper(id: selectedPaperID)
     }
 
+    init(
+        managedCopyReconciliationWarning: String? = nil,
+        isRetryingManagedCopyReconciliation: Bool = false,
+        onRetryManagedCopyReconciliation: @escaping @MainActor () -> Void = {}
+    ) {
+        self.managedCopyReconciliationWarning = managedCopyReconciliationWarning
+        self.isRetryingManagedCopyReconciliation = isRetryingManagedCopyReconciliation
+        self.onRetryManagedCopyReconciliation = onRetryManagedCopyReconciliation
+    }
+
     var body: some View {
         NavigationSplitView {
             LibrarySidebarView(
                 selection: $selectedPaperID,
-                onAddPapers: { fileImporterPresented = true },
+                onAddPapers: presentAddPapers,
                 onDropURLs: workflow.prepare,
                 onClearRecentHistory: repository.clearRecentHistory,
                 onRequestRemoval: requestPaperRemoval,
@@ -85,6 +94,15 @@ struct ContentView: View {
                         .inspectorColumnWidth(min: 260, ideal: 320, max: 420)
                 }
         }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if let managedCopyReconciliationWarning {
+                ManagedCopyReconciliationWarningView(
+                    errorMessage: managedCopyReconciliationWarning,
+                    isRetrying: isRetryingManagedCopyReconciliation,
+                    onRetry: onRetryManagedCopyReconciliation
+                )
+            }
+        }
         .fileImporter(
             isPresented: $fileImporterPresented,
             allowedContentTypes: [.pdf],
@@ -105,12 +123,6 @@ struct ContentView: View {
                 sourceRecoveryWorkflow.cancel()
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .addPapersRequested)) { _ in
-            fileImporterPresented = true
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .openPaperRequested)) { notification in
-            selectedPaperID = notification.object as? UUID
-        }
         .task {
             await checkSourceAvailabilityOnce()
         }
@@ -119,6 +131,12 @@ struct ContentView: View {
             focusedAnnotationID = nil
             annotationSession.beginVerification(paperID: selectedPaperID)
         }
+        .focusedValue(
+            \.addPapersCommandAction,
+            AddPapersCommandAction {
+                presentAddPapers()
+            }
+        )
         .focusedValue(
             \.paperInfoCommandAction,
             selectedPaperID.map { paperID in
@@ -141,7 +159,9 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $workflow.isSummaryPresented) {
-            AddBatchSummarySheet(workflow: workflow)
+            AddBatchSummarySheet(workflow: workflow) { paperID in
+                selectedPaperID = paperID
+            }
         }
         .sheet(
             isPresented: Binding(
@@ -186,6 +206,17 @@ struct ContentView: View {
         } message: { request in
             Text(removalMessage(for: request.storageMode))
         }
+    }
+
+    private func presentAddPapers() {
+        #if DEBUG
+        if let testLibrary = CanopyUITestLibraryConfiguration.current,
+           let fixtureURL = testLibrary.materializeAddPapersFixture() {
+            workflow.prepare(urls: [fixtureURL])
+            return
+        }
+        #endif
+        fileImporterPresented = true
     }
 
     private func presentPaperInfo(_ paperID: UUID) {
@@ -235,10 +266,14 @@ struct ContentView: View {
         case .retry:
             selectedPaperID = paperID
             readerReloadToken = UUID()
-        case .repairReference, .locateOriginal, .restoreLibraryCopy:
+        case .locateSource, .locateOriginal, .restoreLibraryCopy:
             sourceRecoveryWorkflow.begin(for: paper)
         case .addChangedAsSeparate:
-            fileImporterPresented = true
+            if let url = sourceRecoveryWorkflow.resolveKnownChangedSourceURL(for: paper) {
+                workflow.prepare(urls: [url])
+            } else {
+                fileImporterPresented = true
+            }
         case .removeFromLibrary:
             requestPaperRemoval(paperID)
         }
@@ -291,6 +326,50 @@ struct ContentView: View {
             "Canopy will delete this Paper’s highlights, notes, and reading progress. The original Source PDF will remain in its current location. You can undo this action."
         case .managedCopy:
             "Canopy will remove its Source PDF copy along with this Paper’s highlights, notes, and reading progress. You can undo this action."
+        }
+    }
+}
+
+private struct ManagedCopyReconciliationWarningView: View {
+    let errorMessage: String
+    let isRetrying: Bool
+    let onRetry: @MainActor () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Some Library Files Need Recovery")
+                    .font(.headline)
+                Text("The library is available, but some Canopy-managed PDFs may be unavailable until recovery succeeds.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .textSelection(.enabled)
+            }
+
+            Spacer(minLength: 12)
+
+            if isRetrying {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityLabel("Retrying library file recovery")
+            }
+
+            Button("Retry", action: onRetry)
+                .disabled(isRetrying)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.orange.opacity(0.1))
+        .overlay(alignment: .bottom) {
+            Divider()
         }
     }
 }

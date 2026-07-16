@@ -1,4 +1,6 @@
+import AppKit
 import CanopyCore
+import PDFKit
 import SwiftUI
 
 struct AnnotationInspectorView: View {
@@ -12,6 +14,7 @@ struct AnnotationInspectorView: View {
 
     @Environment(\.undoManager) private var undoManager
     @State private var persistenceErrorMessage: String?
+    @State private var previewDocumentSession: AnnotationPreviewDocumentSession?
 
     var body: some View {
         Group {
@@ -54,7 +57,7 @@ struct AnnotationInspectorView: View {
                     ContentUnavailableView(
                         "No Annotations",
                         systemImage: "highlighter",
-                        description: Text("Select text in the Paper to add a highlight and optional note.")
+                        description: Text("Select text for a highlight, or draw an Area Annotation for a figure, table, equation, or scanned passage.")
                     )
                 } else {
                     ScrollViewReader { proxy in
@@ -64,6 +67,7 @@ struct AnnotationInspectorView: View {
                                     annotation: annotation,
                                     repository: repository,
                                     annotationUndoTarget: annotationUndoTarget,
+                                    previewDocument: previewDocumentSession?.document,
                                     focusRequested: focusedAnnotationID == annotation.id,
                                     onNavigate: { onNavigate(annotation.id) },
                                     onDelete: { delete(annotation) },
@@ -85,6 +89,9 @@ struct AnnotationInspectorView: View {
             }
         }
         .navigationTitle("Annotations")
+        .task(id: previewTaskID) {
+            loadPreviewDocument()
+        }
         .alert(
             "Couldn’t Save Annotation",
             isPresented: Binding(
@@ -125,12 +132,39 @@ struct AnnotationInspectorView: View {
     private func reloadAnnotations() {
         annotationSession.reload(repository: repository)
     }
+
+    private var previewTaskID: String {
+        let paperID = paper?.id.uuidString ?? "none"
+        let verified = annotationSession.isSourceVerified ? "verified" : "unverified"
+        let hasAreas = annotationSession.annotations.contains { $0.kind == .area } ? "areas" : "text"
+        return "\(paperID):\(verified):\(hasAreas)"
+    }
+
+    private func loadPreviewDocument() {
+        previewDocumentSession = nil
+        guard let paper,
+              annotationSession.paperID == paper.id,
+              annotationSession.isSourceVerified,
+              paper.sourceState == .available,
+              annotationSession.annotations.contains(where: { $0.kind == .area }) else {
+            return
+        }
+        do {
+            previewDocumentSession = try AnnotationPreviewDocumentSession(
+                sourceAccess: repository.sourceAccess(paperID: paper.id)
+            )
+        } catch {
+            // The reader and annotation session remain the authoritative source-state
+            // surfaces. A preview can retry when either is reloaded.
+        }
+    }
 }
 
 private struct AnnotationRow: View {
     let annotation: Annotation
     let repository: LibraryRepository
     let annotationUndoTarget: AnnotationUndoTarget
+    let previewDocument: PDFDocument?
     let focusRequested: Bool
     let onNavigate: () -> Void
     let onDelete: () -> Void
@@ -148,6 +182,7 @@ private struct AnnotationRow: View {
         annotation: Annotation,
         repository: LibraryRepository,
         annotationUndoTarget: AnnotationUndoTarget,
+        previewDocument: PDFDocument?,
         focusRequested: Bool,
         onNavigate: @escaping () -> Void,
         onDelete: @escaping () -> Void,
@@ -157,6 +192,7 @@ private struct AnnotationRow: View {
         self.annotation = annotation
         self.repository = repository
         self.annotationUndoTarget = annotationUndoTarget
+        self.previewDocument = previewDocument
         self.focusRequested = focusRequested
         self.onNavigate = onNavigate
         self.onDelete = onDelete
@@ -169,39 +205,43 @@ private struct AnnotationRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("Page \(annotation.pageIndex + 1)", systemImage: "doc.text")
+                Label(
+                    "\(annotationKindName) · Page \(annotation.pageIndex + 1)",
+                    systemImage: annotation.kind == .area ? "rectangle.dashed" : "highlighter"
+                )
                     .font(.caption.weight(.semibold))
                 Spacer()
-                HighlightColorLabel(color: annotation.color, selected: true)
+                Menu {
+                    ForEach(HighlightColor.allCases, id: \.self) { color in
+                        Button {
+                            changeColor(to: color)
+                        } label: {
+                            HighlightColorLabel(color: color, selected: annotation.color == color)
+                        }
+                    }
+                } label: {
+                    HighlightColorLabel(color: annotation.color, selected: true)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .accessibilityLabel("Annotation color")
+                .accessibilityValue(annotation.color.displayName)
                 Button(role: .destructive, action: onDelete) {
-                    Label("Delete Highlight", systemImage: "trash")
+                    Label("Delete Annotation", systemImage: "trash")
                         .labelStyle(.iconOnly)
                 }
                 .buttonStyle(.borderless)
-                .help("Delete Highlight")
+                .help("Delete Annotation")
             }
 
-            Button(action: onNavigate) {
-                Text(annotation.selectedText)
-                    .font(.body)
-                    .foregroundStyle(.primary)
-                    .multilineTextAlignment(.leading)
-                    .lineLimit(6)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(8)
-                    .background(
-                        annotation.color.swiftUIColor.opacity(appearance.inspectorFillOpacity),
-                        in: RoundedRectangle(cornerRadius: 6)
-                    )
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Go to highlight on page \(annotation.pageIndex + 1)")
+            annotationContent
 
             TextField("Add a note", text: $draftNote, axis: .vertical)
                 .lineLimit(2...7)
                 .textFieldStyle(.roundedBorder)
                 .focused($noteFocused)
-                .accessibilityLabel("Note for highlight on page \(annotation.pageIndex + 1)")
+                .accessibilityIdentifier("annotation-note-field")
+                .accessibilityLabel("Note for \(annotationKindName.lowercased()) on page \(annotation.pageIndex + 1)")
                 .onSubmit { saveNote() }
         }
         .padding(.vertical, 6)
@@ -236,6 +276,52 @@ private struct AnnotationRow: View {
         HighlightAppearancePreferences(increasedContrast: usesIncreasedContrast)
     }
 
+    @ViewBuilder
+    private var annotationContent: some View {
+        switch annotation.kind {
+        case .textHighlight:
+            Button(action: onNavigate) {
+                Text(annotation.textAnchor?.selectedText ?? "Text highlight")
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+                    .background(
+                        annotation.color.swiftUIColor.opacity(appearance.inspectorFillOpacity),
+                        in: RoundedRectangle(cornerRadius: 6)
+                    )
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("text-highlight-quotation")
+            .accessibilityLabel("Go to text highlight on page \(annotation.pageIndex + 1)")
+            .accessibilityValue(annotation.textAnchor?.selectedText ?? "")
+        case .area:
+            Button(action: onNavigate) {
+                if let previewDocument, let anchor = annotation.areaAnchor {
+                    AreaAnnotationPreview(
+                        annotationID: annotation.id,
+                        document: previewDocument,
+                        anchor: anchor,
+                        color: annotation.color
+                    )
+                } else {
+                    Label("Area preview unavailable", systemImage: "rectangle.dashed")
+                        .frame(maxWidth: .infinity, minHeight: 92)
+                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 7))
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Go to Area Annotation on page \(annotation.pageIndex + 1)")
+            .accessibilityHint("Centers and zooms the annotated region in the reader.")
+        }
+    }
+
+    private var annotationKindName: String {
+        annotation.kind == .area ? "Area Annotation" : "Text Highlight"
+    }
+
     private var usesIncreasedContrast: Bool {
         accessibilityOverrides.usesIncreasedContrast(system: colorSchemeContrast == .increased)
     }
@@ -260,6 +346,155 @@ private struct AnnotationRow: View {
         } catch {
             onSaveError(error)
         }
+    }
+
+    private func changeColor(to color: HighlightColor) {
+        let previousColor = annotation.color
+        guard color != previousColor else { return }
+        do {
+            try repository.updateAnnotationColor(annotationID: annotation.id, color: color)
+            AnnotationUndo.registerUndoForColorChange(
+                annotationID: annotation.id,
+                previousColor: previousColor,
+                currentColor: color,
+                repository: repository,
+                target: annotationUndoTarget,
+                undoManager: undoManager,
+                onChange: onDidChange,
+                onError: onSaveError
+            )
+            onDidChange()
+        } catch {
+            onSaveError(error)
+        }
+    }
+}
+
+@MainActor
+private final class AnnotationPreviewDocumentSession {
+    let document: PDFDocument
+    private let sourceAccess: PaperSourceAccess
+
+    init(sourceAccess: PaperSourceAccess) throws {
+        self.sourceAccess = sourceAccess
+        guard let document = PDFDocument(url: sourceAccess.url) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        self.document = document
+    }
+}
+
+private struct AreaAnnotationPreview: View {
+    let annotationID: UUID
+    let document: PDFDocument
+    let anchor: AreaAnnotationAnchor
+    let color: HighlightColor
+
+    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    @Environment(\.canopyAccessibilityOverrides) private var accessibilityOverrides
+    @State private var image: NSImage?
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Group {
+                if let image {
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFit()
+                } else {
+                    ProgressView()
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 96, maxHeight: 150)
+            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 7))
+            .clipShape(RoundedRectangle(cornerRadius: 7))
+            .overlay {
+                RoundedRectangle(cornerRadius: 7)
+                    .stroke(
+                        color.swiftUIColor.opacity(appearance.areaBorderOpacity),
+                        lineWidth: appearance.areaBorderWidth
+                    )
+            }
+
+            if usesDifferentiateWithoutColor {
+                Image(systemName: color.differentiateWithoutColorSymbol)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(usesIncreasedContrast ? Color.primary : color.swiftUIColor)
+                    .padding(7)
+                    .background(.regularMaterial, in: Circle())
+                    .padding(6)
+            }
+        }
+        .task(id: annotationID) {
+            image = AreaAnnotationPreviewRenderer.render(document: document, anchor: anchor)
+        }
+        .accessibilityHidden(true)
+    }
+
+    private var appearance: HighlightAppearancePreferences {
+        HighlightAppearancePreferences(increasedContrast: usesIncreasedContrast)
+    }
+
+    private var usesIncreasedContrast: Bool {
+        accessibilityOverrides.usesIncreasedContrast(system: colorSchemeContrast == .increased)
+    }
+
+    private var usesDifferentiateWithoutColor: Bool {
+        accessibilityOverrides.differentiatesWithoutColor(system: differentiateWithoutColor)
+    }
+}
+
+@MainActor
+private enum AreaAnnotationPreviewRenderer {
+    static func render(document: PDFDocument, anchor: AreaAnnotationAnchor) -> NSImage? {
+        guard let page = document.page(at: anchor.pageIndex) else { return nil }
+        let pageBounds = page.bounds(for: .cropBox)
+        let rectangle = CGRect(
+            x: anchor.rect.x,
+            y: anchor.rect.y,
+            width: anchor.rect.width,
+            height: anchor.rect.height
+        )
+        let contextX = max(rectangle.width * 0.22, 18)
+        let contextY = max(rectangle.height * 0.22, 18)
+        let sourceRectangle = rectangle
+            .insetBy(dx: -contextX, dy: -contextY)
+            .intersection(pageBounds)
+        guard !sourceRectangle.isNull, !sourceRectangle.isEmpty else { return nil }
+
+        let targetSize = NSSize(width: 480, height: 150)
+        let image = NSImage(size: targetSize)
+        image.lockFocus()
+        defer { image.unlockFocus() }
+
+        NSColor.textBackgroundColor.setFill()
+        NSBezierPath(rect: CGRect(origin: .zero, size: targetSize)).fill()
+        guard let context = NSGraphicsContext.current?.cgContext else { return nil }
+
+        let scale = min(
+            targetSize.width / sourceRectangle.width,
+            targetSize.height / sourceRectangle.height
+        )
+        let drawnSize = CGSize(
+            width: sourceRectangle.width * scale,
+            height: sourceRectangle.height * scale
+        )
+        let drawnOrigin = CGPoint(
+            x: (targetSize.width - drawnSize.width) / 2,
+            y: (targetSize.height - drawnSize.height) / 2
+        )
+
+        context.saveGState()
+        context.clip(to: CGRect(origin: drawnOrigin, size: drawnSize))
+        context.translateBy(
+            x: drawnOrigin.x - sourceRectangle.minX * scale,
+            y: drawnOrigin.y - sourceRectangle.minY * scale
+        )
+        context.scaleBy(x: scale, y: scale)
+        page.draw(with: .cropBox, to: context)
+        context.restoreGState()
+        return image
     }
 }
 
@@ -290,14 +525,31 @@ struct HighlightColorLabel: View {
                         )
                     )
             }
-            Text(color.displayName)
-            if selected {
-                Image(systemName: "checkmark")
+            Text(presentation.name)
+            if let checkmarkSystemImage = presentation.checkmarkSystemImage {
+                Image(systemName: checkmarkSystemImage)
             }
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .overlay {
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(
+                    Color.primary.opacity(selected ? (usesIncreasedContrast ? 0.9 : 0.6) : 0),
+                    lineWidth: presentation.borderWidth
+                )
         }
         .font(.caption)
         .accessibilityElement(children: .combine)
         .accessibilityValue(selected ? "Selected" : "Not selected")
+    }
+
+    private var presentation: HighlightColorLabelPresentation {
+        HighlightColorLabelPresentation(
+            color: color,
+            selected: selected,
+            increasedContrast: usesIncreasedContrast
+        )
     }
 
     private var appearance: HighlightAppearancePreferences {

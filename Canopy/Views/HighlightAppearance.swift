@@ -9,8 +9,25 @@ struct HighlightAppearancePreferences: Equatable {
     var inspectorFillOpacity: CGFloat { increasedContrast ? 0.28 : 0.18 }
     var selectedPaletteFillOpacity: CGFloat { increasedContrast ? 0.30 : 0.20 }
     var unselectedPaletteFillOpacity: CGFloat { increasedContrast ? 0.14 : 0.08 }
+    var areaFillOpacity: CGFloat { increasedContrast ? 0.24 : 0.14 }
+    var areaBorderOpacity: CGFloat { increasedContrast ? 1.0 : 0.88 }
+    var areaBorderWidth: CGFloat { increasedContrast ? 3.5 : 2 }
     var swatchBorderWidth: CGFloat { increasedContrast ? 2 : 1 }
     var selectedBorderWidth: CGFloat { increasedContrast ? 3 : 2 }
+}
+
+struct HighlightColorLabelPresentation: Equatable {
+    let name: String
+    let checkmarkSystemImage: String?
+    let borderWidth: CGFloat
+
+    init(color: HighlightColor, selected: Bool, increasedContrast: Bool) {
+        name = color.displayName
+        checkmarkSystemImage = selected ? "checkmark" : nil
+        borderWidth = selected
+            ? HighlightAppearancePreferences(increasedContrast: increasedContrast).selectedBorderWidth
+            : 0
+    }
 }
 
 extension HighlightColor {
@@ -31,6 +48,16 @@ extension HighlightColor {
         case .blue: "triangle.fill"
         case .pink: "diamond.fill"
         case .purple: "hexagon.fill"
+        }
+    }
+
+    var differentiateWithoutColorGlyph: String {
+        switch self {
+        case .yellow: "●"
+        case .green: "■"
+        case .blue: "▲"
+        case .pink: "◆"
+        case .purple: "⬢"
         }
     }
 

@@ -1,5 +1,9 @@
 import SwiftUI
 
+struct AddPapersCommandAction {
+    let perform: @MainActor () -> Void
+}
+
 struct PaperInfoCommandAction {
     let perform: @MainActor () -> Void
 }
@@ -13,18 +17,25 @@ enum PaperCommand: Hashable {
     case fitWidth
     case actualSize
     case toggleAnnotations
+    case startAreaAnnotation
 
-    static func availableReaderCommands(hasFindMatches: Bool) -> Set<PaperCommand> {
+    static func availableReaderCommands(
+        hasFindMatches: Bool,
+        hasSelectableText: Bool = true
+    ) -> Set<PaperCommand> {
         var commands: Set<PaperCommand> = [
-            .focusFind,
             .zoomIn,
             .zoomOut,
             .fitWidth,
             .actualSize,
-            .toggleAnnotations
+            .toggleAnnotations,
+            .startAreaAnnotation
         ]
-        if hasFindMatches {
-            commands.formUnion([.nextFindMatch, .previousFindMatch])
+        if hasSelectableText {
+            commands.insert(.focusFind)
+            if hasFindMatches {
+                commands.formUnion([.nextFindMatch, .previousFindMatch])
+            }
         }
         return commands
     }
@@ -43,11 +54,20 @@ private struct PaperInfoCommandActionKey: FocusedValueKey {
     typealias Value = PaperInfoCommandAction
 }
 
+private struct AddPapersCommandActionKey: FocusedValueKey {
+    typealias Value = AddPapersCommandAction
+}
+
 private struct PaperCommandContextKey: FocusedValueKey {
     typealias Value = PaperCommandContext
 }
 
 extension FocusedValues {
+    var addPapersCommandAction: AddPapersCommandAction? {
+        get { self[AddPapersCommandActionKey.self] }
+        set { self[AddPapersCommandActionKey.self] = newValue }
+    }
+
     var paperInfoCommandAction: PaperInfoCommandAction? {
         get { self[PaperInfoCommandActionKey.self] }
         set { self[PaperInfoCommandActionKey.self] = newValue }

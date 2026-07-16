@@ -1,22 +1,22 @@
 # Canopy
 
-Canopy is a dependable, offline-first research PDF reader for macOS. Version 1 focuses on one complete workflow: import a PDF, find it again, read it, highlight text, attach an optional note, and resume where you stopped.
+Canopy is a dependable, offline-first research PDF reader for macOS. Version 1 focuses on one complete workflow: add a Source PDF, find it again, read it, annotate text or a page area, attach an optional note, and resume where you stopped.
 
 ## Status
 
 This branch is a ground-up rebuild. It intentionally contains no source code or data migrations from the archived Research Paper Reader prototype.
 
-The core reading loop has five functional foundations:
+The core reading loop is implemented across five slices:
 
-- **Add Papers** supports multi-file selection and drag-and-drop, referenced or managed storage, PDF validation and local metadata parsing, SHA-256 duplicate detection, deterministic Potential Duplicate Review, progress, partial-success reporting, exact-match reference repair or relocation, and lightweight background source availability checks.
+- **Add Papers** supports multi-file selection and drag-and-drop, referenced or managed storage, cancellable bounded Preflight, PDF validation and local metadata parsing, SHA-256 duplicate detection, per-comparison Potential Duplicate Review, partial-success reporting, exact-match source repair or relocation, and lightweight background availability checks.
 - **Library browsing and management** presents recently opened Papers above the remaining library, supports Title and Date Added sorting, ranks title search matches ahead of metadata and note matches, clears recent history without removing Papers, and removes referenced or managed Papers with storage-specific confirmation and native Undo.
-- **Reader and resume** verifies Source PDF identity before opening, presents a continuous vertical PDFKit reader with page and zoom controls plus document-local find, and restores page, viewport, zoom, and inspector state.
-- **Annotations and notes** currently captures composite text-selection quadrilaterals, presents an accessible five-color contextual palette, renders database-backed overlays without modifying the Source PDF, and provides a page-ordered inspector with navigation and debounced inline notes. Creation, deletion, and note edits save explicitly and participate in native Undo and Redo; Area Annotation and color editing remain pending v1 work.
+- **Reader and resume** verifies Source PDF identity before opening, presents a continuous vertical PDFKit reader with page and zoom controls plus asynchronous cancellable Find, explains PDFs without selectable text, and restores page, viewport, zoom, and inspector state.
+- **Annotations and notes** captures single-page text selections or user-drawn areas, presents an accessible named five-color palette, renders database-backed overlays and area previews without modifying the Source PDF, and provides a page-ordered inspector with navigation, color editing, and debounced inline notes. Create, delete, color, and note changes save explicitly and participate in native Undo and Redo.
 - **Paper Info** opens from the reader, a Paper row, or `⌘I`; stages title, publication year, DOI, arXiv, and ordered Author Credit edits until Save; validates and normalizes the transaction atomically; shows provenance and Source PDF details; can reparse a verified Source PDF through field-by-field replacement choices; and participates in native Undo and Redo.
 
 Annotations remain hidden until the selected Paper's Source PDF is verified in the current reading session. Source changes and annotation-load failures have explicit unavailable, error, and retry states.
 
-V1 refinement and release hardening are still in progress. Remaining product work includes a single-window shell, cancellable and lighter Add Papers Preflight, narrowed Potential Duplicate Review, scanned-PDF messaging, asynchronous Find, Area Annotations, annotation color editing, startup recovery surfaces, and the bounded release checks described in the v1 plan.
+The refined v1 product scope is implemented. Release readiness still requires the manual accessibility/OS checks, an automation-enabled run of the relaunch UI journey, packaging, and App Store work recorded in [`Documentation/RELEASE_CHECKLIST.md`](Documentation/RELEASE_CHECKLIST.md).
 
 - Prototype branch: `codex/archive-research-paper-reader-prototype`
 - Prototype tag: `archive/research-paper-reader-prototype-2026-07-10`

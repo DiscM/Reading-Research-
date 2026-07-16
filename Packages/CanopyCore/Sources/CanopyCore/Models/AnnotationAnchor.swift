@@ -72,6 +72,13 @@ public struct TextAnnotationAnchor: Codable, Equatable, Sendable {
         self.quadrilaterals = quadrilaterals
         self.selectedText = selectedText
     }
+
+    public func isValid(pageCount: Int) -> Bool {
+        pageIndex >= 0
+            && pageIndex < max(pageCount, 1)
+            && !quadrilaterals.isEmpty
+            && !selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 }
 
 public struct AreaAnnotationAnchor: Codable, Equatable, Sendable {
@@ -81,6 +88,12 @@ public struct AreaAnnotationAnchor: Codable, Equatable, Sendable {
     public init(pageIndex: Int, rect: AnnotationRect) {
         self.pageIndex = pageIndex
         self.rect = rect
+    }
+
+    public func isValid(pageCount: Int) -> Bool {
+        pageIndex >= 0
+            && pageIndex < max(pageCount, 1)
+            && rect.isValid
     }
 }
 

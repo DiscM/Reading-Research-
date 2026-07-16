@@ -20,7 +20,7 @@ enum AnnotationUndo {
             repository: repository,
             target: target,
             undoManager: undoManager,
-            actionName: "Add Highlight",
+            actionName: "Add Annotation",
             onChange: onChange,
             onError: onError
         )
@@ -40,7 +40,7 @@ enum AnnotationUndo {
             repository: repository,
             target: target,
             undoManager: undoManager,
-            actionName: "Delete Highlight",
+            actionName: "Delete Annotation",
             onChange: onChange,
             onError: onError
         )
@@ -61,6 +61,29 @@ enum AnnotationUndo {
             annotationID: annotationID,
             noteToApply: previousNote,
             inverseNote: currentNote,
+            repository: repository,
+            target: target,
+            undoManager: undoManager,
+            onChange: onChange,
+            onError: onError
+        )
+    }
+
+    static func registerUndoForColorChange(
+        annotationID: UUID,
+        previousColor: HighlightColor,
+        currentColor: HighlightColor,
+        repository: LibraryRepository,
+        target: AnnotationUndoTarget,
+        undoManager: UndoManager?,
+        onChange: @escaping () -> Void,
+        onError: @escaping (Error) -> Void
+    ) {
+        guard let undoManager else { return }
+        registerColorChange(
+            annotationID: annotationID,
+            colorToApply: previousColor,
+            inverseColor: currentColor,
             repository: repository,
             target: target,
             undoManager: undoManager,
@@ -156,5 +179,36 @@ enum AnnotationUndo {
             }
         }
         undoManager.setActionName("Edit Annotation Note")
+    }
+
+    private static func registerColorChange(
+        annotationID: UUID,
+        colorToApply: HighlightColor,
+        inverseColor: HighlightColor,
+        repository: LibraryRepository,
+        target: AnnotationUndoTarget,
+        undoManager: UndoManager,
+        onChange: @escaping () -> Void,
+        onError: @escaping (Error) -> Void
+    ) {
+        undoManager.registerUndo(withTarget: target) { target in
+            do {
+                try repository.updateAnnotationColor(annotationID: annotationID, color: colorToApply)
+                registerColorChange(
+                    annotationID: annotationID,
+                    colorToApply: inverseColor,
+                    inverseColor: colorToApply,
+                    repository: repository,
+                    target: target,
+                    undoManager: undoManager,
+                    onChange: onChange,
+                    onError: onError
+                )
+                onChange()
+            } catch {
+                onError(error)
+            }
+        }
+        undoManager.setActionName("Change Annotation Color")
     }
 }

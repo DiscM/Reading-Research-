@@ -23,16 +23,19 @@ public enum CanopyModelContainer {
             .appendingPathComponent("CanopyV1.store")
     }
 
-    public static func make(inMemory: Bool = false) throws -> ModelContainer {
+    public static func make(
+        inMemory: Bool = false,
+        storeURL: URL = defaultStoreURL
+    ) throws -> ModelContainer {
         let configuration: ModelConfiguration
         if inMemory {
             configuration = ModelConfiguration(isStoredInMemoryOnly: true)
         } else {
             try FileManager.default.createDirectory(
-                at: defaultStoreURL.deletingLastPathComponent(),
+                at: storeURL.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
-            configuration = ModelConfiguration(url: defaultStoreURL)
+            configuration = ModelConfiguration(url: storeURL)
         }
         return try ModelContainer(
             for: Schema(versionedSchema: CanopySchemaV1.self),

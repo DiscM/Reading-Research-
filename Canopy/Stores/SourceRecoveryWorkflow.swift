@@ -4,7 +4,7 @@ import Observation
 
 enum SourceRecoveryAction: Hashable, Identifiable {
     case retry
-    case repairReference
+    case locateSource
     case locateOriginal
     case addChangedAsSeparate
     case restoreLibraryCopy
@@ -15,7 +15,7 @@ enum SourceRecoveryAction: Hashable, Identifiable {
     var title: String {
         switch self {
         case .retry: "Retry"
-        case .repairReference: "Locate Source…"
+        case .locateSource: "Locate Source…"
         case .locateOriginal: "Locate Original…"
         case .addChangedAsSeparate: "Add Changed File as Separate Paper…"
         case .restoreLibraryCopy: "Restore Library Copy…"
@@ -26,7 +26,7 @@ enum SourceRecoveryAction: Hashable, Identifiable {
     var systemImage: String {
         switch self {
         case .retry: "arrow.clockwise"
-        case .repairReference: "link.badge.plus"
+        case .locateSource: "link.badge.plus"
         case .locateOriginal: "folder.badge.questionmark"
         case .addChangedAsSeparate: "doc.badge.plus"
         case .restoreLibraryCopy: "arrow.down.doc"
@@ -62,12 +62,12 @@ struct SourceStatePresentation {
             label = "Source Unavailable"
             systemImage = "externaldrive.badge.exclamationmark"
             severity = .neutral
-            actions = [.retry]
+            actions = [.retry, .locateSource]
         case .brokenReference:
             label = "Source Missing"
             systemImage = "link.badge.plus"
             severity = .warning
-            actions = [.repairReference, .removeFromLibrary]
+            actions = [.locateSource, .removeFromLibrary]
         case .sourceChanged:
             label = "Source Changed"
             systemImage = "exclamationmark.triangle"
@@ -96,6 +96,39 @@ final class SourceRecoveryWorkflow {
     func cancel() {
         request = nil
         isImporterPresented = false
+    }
+
+    /// Resolves the bookmark that identified a changed referenced Source PDF.
+    /// The returned URL is probed under its security scope, then handed to the
+    /// ordinary Add Papers workflow, which owns access for the Add Batch itself.
+    func resolveKnownChangedSourceURL(for paper: Paper) -> URL? {
+        guard paper.sourceState == .sourceChanged,
+              paper.storageMode == .referenced,
+              let bookmarkData = paper.bookmarkData else {
+            return nil
+        }
+
+        var isStale = false
+        guard let url = try? URL(
+            resolvingBookmarkData: bookmarkData,
+            options: [.withSecurityScope, .withoutUI],
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        ), url.pathExtension.caseInsensitiveCompare("pdf") == .orderedSame else {
+            return nil
+        }
+
+        let hasSecurityScope = url.startAccessingSecurityScopedResource()
+        defer {
+            if hasSecurityScope {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+        guard FileManager.default.fileExists(atPath: url.path),
+              FileManager.default.isReadableFile(atPath: url.path) else {
+            return nil
+        }
+        return url
     }
 
     func recover(

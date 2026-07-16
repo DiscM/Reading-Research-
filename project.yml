@@ -33,6 +33,7 @@ targets:
     scheme:
       testTargets:
         - CanopyTests
+        - CanopyUITests
   CanopyTests:
     type: bundle.unit-test
     platform: macOS
@@ -44,4 +45,13 @@ targets:
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
-
+  CanopyUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: CanopyUITests
+    dependencies:
+      - target: Canopy
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES

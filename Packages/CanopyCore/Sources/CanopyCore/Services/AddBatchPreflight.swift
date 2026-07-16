@@ -147,11 +147,26 @@ public struct ExactDuplicate: Equatable, Sendable {
     public let existingPaper: PaperIdentitySnapshot
 }
 
+public struct PotentialDuplicateMatch: Identifiable, Equatable, Sendable {
+    public var id: UUID { existingPaper.id }
+    public let existingPaper: PaperIdentitySnapshot
+    public let triggerReasons: [String]
+
+    public init(existingPaper: PaperIdentitySnapshot, triggerReasons: [String]) {
+        self.existingPaper = existingPaper
+        self.triggerReasons = triggerReasons
+    }
+}
+
 public struct PotentialDuplicate: Identifiable, Equatable, Sendable {
     public var id: UUID { candidate.id }
     public let candidate: PreflightCandidate
-    public let existingPapers: [PaperIdentitySnapshot]
-    public let triggerReasons: [String]
+    public let matches: [PotentialDuplicateMatch]
+
+    public init(candidate: PreflightCandidate, matches: [PotentialDuplicateMatch]) {
+        self.candidate = candidate
+        self.matches = matches
+    }
 }
 
 public struct WithinBatchExactDuplicate: Equatable, Sendable {
@@ -233,9 +248,13 @@ public struct AddBatchPreflight<Analyzer: DocumentAnalyzing>: Sendable {
                     result.withinBatchExactDuplicates.append(WithinBatchExactDuplicate(retained: retained, duplicate: candidate))
                 } else {
                     let comparisonPapers = existingPapers + processedCandidates.map(identitySnapshot)
-                    let matches = comparisonPapers.compactMap { paper -> (PaperIdentitySnapshot, [String])? in
+                    let matches = comparisonPapers.compactMap { paper -> PotentialDuplicateMatch? in
                         let reasons = duplicateReasons(candidate: candidate, paper: paper)
-                        return reasons.isEmpty ? nil : (paper, reasons)
+                        guard !reasons.isEmpty else { return nil }
+                        return PotentialDuplicateMatch(
+                            existingPaper: paper,
+                            triggerReasons: Array(Set(reasons)).sorted()
+                        )
                     }
                     processedCandidates.append(candidate)
                     if matches.isEmpty {
@@ -243,8 +262,7 @@ public struct AddBatchPreflight<Analyzer: DocumentAnalyzing>: Sendable {
                     } else {
                         result.potentialDuplicates.append(PotentialDuplicate(
                             candidate: candidate,
-                            existingPapers: matches.map(\.0),
-                            triggerReasons: Array(Set(matches.flatMap(\.1))).sorted()
+                            matches: matches
                         ))
                     }
                 }

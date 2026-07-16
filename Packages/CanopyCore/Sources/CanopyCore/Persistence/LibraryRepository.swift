@@ -379,12 +379,7 @@ public final class LibraryRepository {
             throw LibraryRepositoryError.annotationsUnavailable
         }
         guard !anchors.isEmpty,
-              anchors.allSatisfy({
-                  $0.pageIndex >= 0
-                      && $0.pageIndex < max(paper.pageCount, 1)
-                      && !$0.quadrilaterals.isEmpty
-                      && !$0.selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-              }) else {
+              anchors.allSatisfy({ $0.isValid(pageCount: paper.pageCount) }) else {
             throw LibraryRepositoryError.invalidAnnotationAnchor
         }
 
@@ -415,9 +410,7 @@ public final class LibraryRepository {
         guard paper.sourceState == .available else {
             throw LibraryRepositoryError.annotationsUnavailable
         }
-        guard anchor.pageIndex >= 0,
-              anchor.pageIndex < max(paper.pageCount, 1),
-              anchor.rect.isValid else {
+        guard anchor.isValid(pageCount: paper.pageCount) else {
             throw LibraryRepositoryError.invalidAnnotationAnchor
         }
 
@@ -848,10 +841,7 @@ public final class LibraryRepository {
         switch snapshot.kind {
         case .textHighlight:
             guard let anchor = snapshot.textAnchor,
-                  anchor.pageIndex >= 0,
-                  anchor.pageIndex < max(paper.pageCount, 1),
-                  !anchor.quadrilaterals.isEmpty,
-                  !anchor.selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                  anchor.isValid(pageCount: paper.pageCount) else {
                 throw LibraryRepositoryError.invalidAnnotationAnchor
             }
             return try Annotation(
@@ -864,9 +854,7 @@ public final class LibraryRepository {
             )
         case .area:
             guard let anchor = snapshot.areaAnchor,
-                  anchor.pageIndex >= 0,
-                  anchor.pageIndex < max(paper.pageCount, 1),
-                  anchor.rect.isValid else {
+                  anchor.isValid(pageCount: paper.pageCount) else {
                 throw LibraryRepositoryError.invalidAnnotationAnchor
             }
             return try Annotation(

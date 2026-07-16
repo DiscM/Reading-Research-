@@ -134,6 +134,7 @@ struct LibrarySidebarView: View {
             }
         }
         .tag(paper.id)
+        .accessibilityIdentifier("paper-row")
         .accessibilityElement(children: .combine)
         .accessibilityLabel(paper.title)
         .accessibilityValue(paperAccessibilityValue(paper, presentation: sourcePresentation))

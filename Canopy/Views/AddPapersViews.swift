@@ -34,10 +34,12 @@ struct AddBatchStorageSheet: View {
                 .keyboardShortcut(.cancelAction)
                 Button("Add Papers", action: onAdd)
                     .keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier("confirm-add-papers-button")
             }
         }
         .padding(24)
         .frame(width: 440)
+        .accessibilityIdentifier("add-papers-storage-sheet")
     }
 }
 
@@ -46,10 +48,10 @@ struct AddBatchProgressSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(workflow.progressPhase)
+            Text(workflow.progressPhase.title)
                 .font(.headline)
             ProgressView(value: workflow.progressFraction, total: 1)
-                .accessibilityLabel(workflow.progressPhase)
+                .accessibilityLabel(workflow.progressPhase.title)
                 .accessibilityValue("\(workflow.progressCount), \(workflow.progressFraction.formatted(.percent.precision(.fractionLength(0))))")
             HStack {
                 Text(workflow.progressCount)
@@ -63,6 +65,15 @@ struct AddBatchProgressSheet: View {
                 .truncationMode(.middle)
                 .accessibilityLabel("Current Source PDF")
                 .accessibilityValue(workflow.progressFilename)
+            if workflow.canCancelCheckingPapers {
+                HStack {
+                    Spacer()
+                    Button("Cancel") {
+                        workflow.cancelCheckingPapers()
+                    }
+                    .keyboardShortcut(.cancelAction)
+                }
+            }
         }
         .padding(24)
         .frame(width: 460)
@@ -127,7 +138,8 @@ struct PotentialDuplicateReviewSheet: View {
 
             Divider()
             HStack {
-                Button("Cancel Remaining Additions") { workflow.cancelPotentialReview() }
+                Button("Cancel Add Batch", role: .cancel) { workflow.cancelPotentialReview() }
+                    .keyboardShortcut(.cancelAction)
                 Spacer()
                 Text("\(workflow.potentialDecisions.count) of \(workflow.potentialDuplicates.count) decided")
                     .font(.caption)
@@ -138,7 +150,7 @@ struct PotentialDuplicateReviewSheet: View {
             }
             .padding()
         }
-        .frame(width: 860)
+        .frame(width: 980)
         .onAppear { selectedID = workflow.potentialDuplicates.first?.candidate.id }
         .interactiveDismissDisabled()
     }
@@ -159,24 +171,25 @@ private struct PotentialDuplicateComparison: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Text(duplicate.triggerReasons.joined(separator: " • "))
-                    .font(.callout.weight(.medium))
-                    .foregroundStyle(.orange)
+                ForEach(duplicate.matches) { match in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Trigger: \(match.triggerReasons.joined(separator: " • "))")
+                            .font(.callout.weight(.medium))
+                            .foregroundStyle(.orange)
+                            .accessibilityLabel("Potential duplicate trigger for \(match.existingPaper.title)")
+                            .accessibilityValue(match.triggerReasons.joined(separator: ", "))
 
-                comparisonSection("Candidate", title: duplicate.candidate.metadata.title,
-                                  authors: duplicate.candidate.metadata.authors.map(\.displayName).joined(separator: ", "),
-                                  year: duplicate.candidate.metadata.publicationYear,
-                                  doi: duplicate.candidate.metadata.doi,
-                                  arxiv: duplicate.candidate.metadata.arxivID,
-                                  location: duplicate.candidate.url.path)
-
-                ForEach(duplicate.existingPapers) { paper in
-                    comparisonSection("Existing Paper", title: paper.title,
-                                      authors: paper.authorFamilyNames.joined(separator: ", "),
-                                      year: paper.publicationYear,
-                                      doi: paper.doi,
-                                      arxiv: paper.arxivID,
-                                      location: paper.rememberedLocation)
+                        HStack(alignment: .top, spacing: 16) {
+                            comparisonSection(
+                                "Candidate",
+                                fields: PotentialDuplicateComparisonFields(candidate: duplicate.candidate)
+                            )
+                            comparisonSection(
+                                "Existing Paper",
+                                fields: PotentialDuplicateComparisonFields(existingPaper: match.existingPaper)
+                            )
+                        }
+                    }
                 }
 
                 Picker("Decision", selection: $decision) {
@@ -192,24 +205,22 @@ private struct PotentialDuplicateComparison: View {
 
     private func comparisonSection(
         _ heading: String,
-        title: String,
-        authors: String,
-        year: Int?,
-        doi: String?,
-        arxiv: String?,
-        location: String?
+        fields: PotentialDuplicateComparisonFields
     ) -> some View {
         GroupBox(heading) {
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 7) {
-                row("Title", title)
-                row("Authors", authors.isEmpty ? "—" : authors)
-                row("Year", year.map(String.init) ?? "—")
-                row("DOI", doi ?? "—")
-                row("arXiv", arxiv ?? "—")
-                row("Location", location ?? "Managed by Canopy")
+                row("Title", fields.title)
+                row("Authors", fields.authors)
+                row("Year", fields.year)
+                row("DOI", fields.doi)
+                row("arXiv", fields.arxivID)
+                row(fields.sourceLabel, fields.source)
+                row("File Size", fields.fileSize)
+                row("Page Count", fields.pageCount)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     private func row(_ label: String, _ value: String) -> some View {
@@ -220,9 +231,56 @@ private struct PotentialDuplicateComparison: View {
     }
 }
 
+struct PotentialDuplicateComparisonFields: Equatable {
+    let title: String
+    let authors: String
+    let year: String
+    let doi: String
+    let arxivID: String
+    let sourceLabel: String
+    let source: String
+    let fileSize: String
+    let pageCount: String
+
+    init(candidate: PreflightCandidate) {
+        title = candidate.metadata.title
+        authors = Self.display(candidate.metadata.authors.map(\.displayName).joined(separator: ", "))
+        year = candidate.metadata.publicationYear.map(String.init) ?? "—"
+        doi = Self.display(candidate.metadata.doi)
+        arxivID = Self.display(candidate.metadata.arxivID)
+        sourceLabel = "Filename"
+        source = candidate.url.lastPathComponent
+        fileSize = ByteCountFormatter.string(fromByteCount: candidate.fileSize, countStyle: .file)
+        pageCount = String(candidate.metadata.pageCount)
+    }
+
+    init(existingPaper paper: PaperIdentitySnapshot) {
+        title = paper.title
+        authors = Self.display(paper.authorDisplayNames.joined(separator: ", "))
+        year = paper.publicationYear.map(String.init) ?? "—"
+        doi = Self.display(paper.doi)
+        arxivID = Self.display(paper.arxivID)
+        if let rememberedLocation = paper.rememberedLocation, !rememberedLocation.isEmpty {
+            sourceLabel = "Remembered Location"
+            source = rememberedLocation
+        } else {
+            sourceLabel = "Filename"
+            source = Self.display(paper.sourceFilename)
+        }
+        fileSize = ByteCountFormatter.string(fromByteCount: paper.sourceFileSize, countStyle: .file)
+        pageCount = String(paper.pageCount)
+    }
+
+    private static func display(_ value: String?) -> String {
+        guard let value, !value.isEmpty else { return "—" }
+        return value
+    }
+}
+
 struct AddBatchSummarySheet: View {
     @Environment(\.modelContext) private var modelContext
     @Bindable var workflow: AddPapersWorkflow
+    let onOpenPaper: (UUID) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -252,7 +310,8 @@ struct AddBatchSummarySheet: View {
                                         workflow.performSummaryAction(
                                             action,
                                             itemID: item.id,
-                                            repository: LibraryRepository(context: modelContext)
+                                            repository: LibraryRepository(context: modelContext),
+                                            onOpenPaper: onOpenPaper
                                         )
                                     }
                                     .buttonStyle(.link)

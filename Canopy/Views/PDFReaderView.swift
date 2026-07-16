@@ -1,4 +1,5 @@
 import CanopyCore
+import Foundation
 import PDFKit
 import SwiftUI
 
@@ -24,13 +25,10 @@ struct PDFReaderView: View {
     @State private var loadError: PDFReaderLoadError?
     @State private var snapshot = PDFReaderSnapshot(pageIndex: 0, viewport: nil, zoomScale: 1)
     @State private var pageEntry = "1"
-    @State private var command: PDFReaderCommand?
-    @State private var findQuery = ""
-    @State private var matches: [PDFSelection] = []
-    @State private var matchesVersion = UUID()
-    @State private var selectedMatchIndex: Int?
-    @State private var pendingSave: PendingReaderSave?
-    @State private var failedSave: PendingReaderSave?
+    @State private var transientState = PDFReaderTransientState()
+    @State private var findSession = PDFDocumentFindSession()
+    @State private var pendingSave: PDFReaderPendingSave?
+    @State private var failedSave: PDFReaderPendingSave?
     @State private var persistenceErrorMessage: String?
     @FocusState private var findFieldFocused: Bool
 
@@ -40,6 +38,20 @@ struct PDFReaderView: View {
         VStack(spacing: 0) {
             if documentSession != nil {
                 readerControls
+                if paper?.hasSelectableText == false {
+                    Label(
+                        "This PDF has no selectable text. Find and text highlighting are unavailable; Area Annotation still works.",
+                        systemImage: "text.magnifyingglass"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 7)
+                    .accessibilityLabel(
+                        "This PDF has no selectable text. Find and text highlighting are unavailable. Area Annotation remains available."
+                    )
+                }
                 Divider()
             }
 
@@ -54,15 +66,25 @@ struct PDFReaderView: View {
                     PDFKitReaderView(
                         document: documentSession.document,
                         restoredState: restoredState,
-                        command: command,
-                        matches: matches,
-                        matchesVersion: matchesVersion,
-                        selectedMatchIndex: selectedMatchIndex,
+                        command: transientState.command,
+                        matches: findSession.matches,
+                        matchesVersion: findSession.resultsVersion,
+                        selectedMatchIndex: transientState.selectedMatchIndex,
+                        allowsTextAnnotations: paper?.hasSelectableText != false,
+                        isAreaAnnotationMode: transientState.isAreaAnnotationMode,
+                        pdfInteractionResetID: transientState.pdfInteractionResetID,
                         annotations: annotationSession.paperID == paper?.id && annotationSession.isSourceVerified
                             ? annotationSession.annotations
                             : [],
                         annotationNavigation: annotationNavigation,
                         onCreateAnnotations: createAnnotations,
+                        onCreateAreaAnnotation: createAreaAnnotation,
+                        onAreaAnnotationModeEnded: {
+                            transientState.isAreaAnnotationMode = false
+                        },
+                        onTextSelectionRejected: { message in
+                            transientState.annotationGuidanceMessage = message
+                        },
                         onSnapshotChange: updateSnapshot
                     )
                     .id(documentSession.paperID)
@@ -106,14 +128,28 @@ struct PDFReaderView: View {
         }
         .task(id: findTaskID) {
             try? await Task.sleep(for: .milliseconds(200))
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled,
+                  paper?.hasSelectableText != false,
+                  documentSession?.document != nil else { return }
             updateFindMatches()
+        }
+        .onChange(of: transientState.findQuery) {
+            findSession.cancel(clearResults: true)
+            transientState.selectedMatchIndex = nil
+        }
+        .onChange(of: findSession.resultsVersion) {
+            if findSession.matches.isEmpty {
+                transientState.selectedMatchIndex = nil
+            } else if transientState.selectedMatchIndex == nil {
+                transientState.selectedMatchIndex = 0
+            }
         }
         .onChange(of: inspectorPresented) { _, isPresented in
             scheduleSave(isInspectorPresented: isPresented)
         }
         .focusedValue(\.paperCommandContext, paperCommandContext)
         .onDisappear {
+            findSession.cancel(clearResults: true)
             flushPendingSave()
         }
         .alert(
@@ -132,6 +168,20 @@ struct PDFReaderView: View {
         } message: {
             Text(persistenceErrorMessage ?? "Canopy could not save changes to this Paper.")
         }
+        .alert(
+            "Select Text on One Page",
+            isPresented: Binding(
+                get: { transientState.annotationGuidanceMessage != nil },
+                set: { if !$0 { transientState.annotationGuidanceMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(
+                transientState.annotationGuidanceMessage
+                    ?? "Select text on one page at a time, then add the highlight again."
+            )
+        }
     }
 
     private var loadTaskID: String {
@@ -139,7 +189,7 @@ struct PDFReaderView: View {
     }
 
     private var findTaskID: String {
-        "\(documentSession?.paperID.uuidString ?? "none"):\(findQuery)"
+        "\(documentSession?.paperID.uuidString ?? "none"):\(transientState.findQuery)"
     }
 
     private var sourceDocumentContrastCompensation: Double {
@@ -151,7 +201,10 @@ struct PDFReaderView: View {
     private var paperCommandContext: PaperCommandContext? {
         guard documentSession != nil else { return nil }
         return PaperCommandContext(
-            availableCommands: PaperCommand.availableReaderCommands(hasFindMatches: !matches.isEmpty),
+            availableCommands: PaperCommand.availableReaderCommands(
+                hasFindMatches: !findSession.matches.isEmpty,
+                hasSelectableText: paper?.hasSelectableText != false
+            ),
             perform: performPaperCommand
         )
     }
@@ -165,15 +218,17 @@ struct PDFReaderView: View {
         case .previousFindMatch:
             previousMatch()
         case .zoomIn:
-            command = PDFReaderCommand(action: .zoomIn)
+            transientState.command = PDFReaderCommand(action: .zoomIn)
         case .zoomOut:
-            command = PDFReaderCommand(action: .zoomOut)
+            transientState.command = PDFReaderCommand(action: .zoomOut)
         case .fitWidth:
-            command = PDFReaderCommand(action: .fitWidth)
+            transientState.command = PDFReaderCommand(action: .fitWidth)
         case .actualSize:
-            command = PDFReaderCommand(action: .actualSize)
+            transientState.command = PDFReaderCommand(action: .actualSize)
         case .toggleAnnotations:
             inspectorPresented.toggle()
+        case .startAreaAnnotation:
+            transientState.isAreaAnnotationMode = true
         }
     }
 
@@ -184,6 +239,7 @@ struct PDFReaderView: View {
                 .multilineTextAlignment(.trailing)
                 .disabled(documentSession == nil)
                 .onSubmit(goToEnteredPage)
+                .accessibilityIdentifier("reader-page-field")
                 .accessibilityLabel("Page number")
 
             Text("of \(pageCount)")
@@ -191,7 +247,7 @@ struct PDFReaderView: View {
                 .monospacedDigit()
 
             Button {
-                command = PDFReaderCommand(action: .zoomOut)
+                transientState.command = PDFReaderCommand(action: .zoomOut)
             } label: {
                 Label("Zoom Out", systemImage: "minus.magnifyingglass")
             }
@@ -199,43 +255,53 @@ struct PDFReaderView: View {
             .help("Zoom Out")
 
             Button {
-                command = PDFReaderCommand(action: .zoomIn)
+                transientState.command = PDFReaderCommand(action: .zoomIn)
             } label: {
                 Label("Zoom In", systemImage: "plus.magnifyingglass")
             }
             .disabled(documentSession == nil)
+            .accessibilityIdentifier("reader-zoom-in")
             .help("Zoom In")
 
             Menu {
                 Button("Fit Width") {
-                    command = PDFReaderCommand(action: .fitWidth)
+                    transientState.command = PDFReaderCommand(action: .fitWidth)
                 }
                 Button("Actual Size") {
-                    command = PDFReaderCommand(action: .actualSize)
+                    transientState.command = PDFReaderCommand(action: .actualSize)
                 }
             } label: {
                 Label("Zoom Options", systemImage: "rectangle.expand.vertical")
             }
             .disabled(documentSession == nil)
 
-            TextField("Find", text: $findQuery)
+            TextField("Find", text: $transientState.findQuery)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 180)
                 .focused($findFieldFocused)
-                .disabled(documentSession == nil)
+                .disabled(documentSession == nil || paper?.hasSelectableText == false)
                 .accessibilityLabel("Find in Paper")
 
             Button(action: previousMatch) {
                 Label("Previous Match", systemImage: "chevron.up")
             }
-            .disabled(matches.isEmpty)
+            .disabled(findSession.matches.isEmpty)
             .help("Previous Match")
 
             Button(action: nextMatch) {
                 Label("Next Match", systemImage: "chevron.down")
             }
-            .disabled(matches.isEmpty)
+            .disabled(findSession.matches.isEmpty)
             .help("Next Match")
+
+            if findSession.isFinding {
+                Button {
+                    findSession.cancel()
+                } label: {
+                    Label("Cancel Find", systemImage: "xmark.circle")
+                }
+                .help("Cancel Find")
+            }
 
             Text(findResultText)
                 .foregroundStyle(.secondary)
@@ -243,6 +309,22 @@ struct PDFReaderView: View {
                 .frame(minWidth: 58, alignment: .leading)
                 .accessibilityLabel("Find results")
                 .accessibilityValue(findResultText.isEmpty ? "No search" : findResultText)
+
+            Button {
+                transientState.isAreaAnnotationMode.toggle()
+            } label: {
+                Label(
+                    transientState.isAreaAnnotationMode ? "Cancel Area Annotation" : "Area Annotation",
+                    systemImage: transientState.isAreaAnnotationMode ? "xmark" : "rectangle.dashed"
+                )
+            }
+            .disabled(documentSession == nil)
+            .help(transientState.isAreaAnnotationMode ? "Cancel Area Annotation" : "Draw an Area Annotation")
+            .accessibilityHint(
+                transientState.isAreaAnnotationMode
+                    ? "Stops drawing an Area Annotation. You can also press Escape."
+                    : "Choose this, then drag one rectangle on a PDF page. Press Escape to cancel."
+            )
 
             Button(action: onGetInfo) {
                 Label("Paper Info", systemImage: "info.circle")
@@ -256,28 +338,80 @@ struct PDFReaderView: View {
             }
             .help("Show or Hide Annotations")
             .accessibilityValue(inspectorPresented ? "Shown" : "Hidden")
+
+            #if DEBUG
+            if CanopyUITestLibraryConfiguration.isRequested {
+                Text("Zoom \(zoomScaleTestValue)")
+                    .font(.caption2)
+                    .accessibilityIdentifier("reader-zoom-scale")
+                    .accessibilityValue(zoomScaleTestValue)
+
+                Text("Viewport Y \(viewportYTestValue)")
+                    .font(.caption2)
+                    .accessibilityIdentifier("reader-viewport-y")
+                    .accessibilityValue(viewportYTestValue)
+            }
+            #endif
         }
         .controlSize(.small)
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
         .background(.regularMaterial)
+        .overlay(alignment: .bottomLeading) {
+            if transientState.isAreaAnnotationMode {
+                Text("Drag one rectangle on a page. Press Esc to cancel.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 12)
+                    .offset(y: 18)
+                    .accessibilityLabel(
+                        "Area Annotation mode. Drag one rectangle on a page. Press Escape to cancel."
+                    )
+            }
+        }
+    }
+
+    private var zoomScaleTestValue: String {
+        snapshot.zoomScale.formatted(.number.precision(.fractionLength(4)))
+    }
+
+    private var viewportYTestValue: String {
+        guard let viewport = snapshot.viewport else { return "none" }
+        return String(
+            format: "%.2f",
+            locale: Locale(identifier: "en_US_POSIX"),
+            viewport.y
+        )
     }
 
     private var findResultText: String {
-        guard !findQuery.isEmpty else { return "" }
-        guard let selectedMatchIndex, !matches.isEmpty else { return "0 results" }
-        return "\(selectedMatchIndex + 1) of \(matches.count)"
+        guard !transientState.findQuery.isEmpty else { return "" }
+        if findSession.isFinding {
+            return findSession.matches.isEmpty
+                ? "Searching…"
+                : "\(findSession.matches.count) found…"
+        }
+        guard let selectedMatchIndex = transientState.selectedMatchIndex,
+              !findSession.matches.isEmpty else { return "0 results" }
+        return "\(selectedMatchIndex + 1) of \(findSession.matches.count)"
     }
 
     @MainActor
     private func loadPaper() {
-        flushPendingSave()
+        let transitionOutcome = PDFReaderPaperTransition.perform(
+            outgoingSave: pendingSave,
+            incomingPaperID: paper?.id,
+            repository: repository,
+            findSession: findSession,
+            transientState: &transientState,
+            focusedAnnotationID: &focusedAnnotationID
+        )
+        applyOutgoingSave(from: transitionOutcome)
         annotationSession.beginVerification(paperID: paper?.id)
         documentSession = nil
         restoredState = nil
+        snapshot = PDFReaderSnapshot(pageIndex: 0, viewport: nil, zoomScale: 1)
         loadError = nil
-        findQuery = ""
-        clearFindMatches()
         pageEntry = "1"
         guard let paper else { return }
 
@@ -285,7 +419,10 @@ struct PDFReaderView: View {
         do {
             let sourceAccess = try repository.sourceAccess(paperID: paper.id)
             let session = try PDFDocumentSession(paperID: paper.id, sourceAccess: sourceAccess)
-            let savedState = try repository.readerState(paperID: paper.id)
+            if let restoreError = transitionOutcome.restoreError {
+                throw restoreError
+            }
+            let savedState = transitionOutcome.restoredState
             restoredState = savedState
             if let savedState {
                 snapshot = PDFReaderSnapshot(
@@ -318,6 +455,22 @@ struct PDFReaderView: View {
         }
     }
 
+    private func applyOutgoingSave(from outcome: PDFReaderPaperTransitionOutcome) {
+        guard let outgoingSave = outcome.outgoingSave else { return }
+        if let outgoingSaveError = outcome.outgoingSaveError {
+            failedSave = outgoingSave
+            persistenceErrorMessage = outgoingSaveError.localizedDescription
+            return
+        }
+        if pendingSave == outgoingSave {
+            pendingSave = nil
+        }
+        if failedSave?.paperID == outgoingSave.paperID {
+            failedSave = nil
+            persistenceErrorMessage = nil
+        }
+    }
+
     private func updateSnapshot(_ newSnapshot: PDFReaderSnapshot) {
         snapshot = newSnapshot
         pageEntry = String(newSnapshot.pageIndex + 1)
@@ -326,7 +479,7 @@ struct PDFReaderView: View {
 
     private func scheduleSave(isInspectorPresented: Bool) {
         guard let documentSession else { return }
-        pendingSave = PendingReaderSave(
+        pendingSave = PDFReaderPendingSave(
             paperID: documentSession.paperID,
             state: PaperReaderState(
                 pageIndex: snapshot.pageIndex,
@@ -342,7 +495,7 @@ struct PDFReaderView: View {
         persist(pendingSave)
     }
 
-    private func persist(_ save: PendingReaderSave) {
+    private func persist(_ save: PDFReaderPendingSave) {
         do {
             try repository.saveReaderState(paperID: save.paperID, state: save.state)
             if pendingSave == save {
@@ -368,7 +521,7 @@ struct PDFReaderView: View {
         let enteredPage = Int(pageEntry) ?? (snapshot.pageIndex + 1)
         let pageIndex = min(max(enteredPage - 1, 0), pageCount - 1)
         pageEntry = String(pageIndex + 1)
-        command = PDFReaderCommand(action: .goToPage(pageIndex))
+        transientState.command = PDFReaderCommand(action: .goToPage(pageIndex))
     }
 
     private func updateFindMatches() {
@@ -376,42 +529,39 @@ struct PDFReaderView: View {
             clearFindMatches()
             return
         }
-        let query = findQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let query = transientState.findQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else {
             clearFindMatches()
             return
         }
-        matches = document.findString(query, withOptions: .caseInsensitive)
-        matchesVersion = UUID()
-        selectedMatchIndex = matches.isEmpty ? nil : 0
+        findSession.start(query: query, in: document)
     }
 
     private func clearFindMatches() {
-        matches = []
-        matchesVersion = UUID()
-        selectedMatchIndex = nil
+        findSession.cancel(clearResults: true)
+        transientState.selectedMatchIndex = nil
     }
 
     private func previousMatch() {
-        guard !matches.isEmpty else { return }
-        let current = selectedMatchIndex ?? 0
-        selectedMatchIndex = (current - 1 + matches.count) % matches.count
+        guard !findSession.matches.isEmpty else { return }
+        let current = transientState.selectedMatchIndex ?? 0
+        transientState.selectedMatchIndex = (current - 1 + findSession.matches.count) % findSession.matches.count
     }
 
     private func nextMatch() {
-        guard !matches.isEmpty else { return }
-        let current = selectedMatchIndex ?? -1
-        selectedMatchIndex = (current + 1) % matches.count
+        guard !findSession.matches.isEmpty else { return }
+        let current = transientState.selectedMatchIndex ?? -1
+        transientState.selectedMatchIndex = (current + 1) % findSession.matches.count
     }
 
     private func createAnnotations(
-        anchors: [AnnotationAnchor],
+        anchors: [TextAnnotationAnchor],
         color: HighlightColor,
         addNote: Bool
     ) {
         guard let paper else { return }
         do {
-            let annotations = try repository.createAnnotations(
+            let annotations = try repository.createTextAnnotations(
                 paperID: paper.id,
                 anchors: anchors,
                 color: color
@@ -435,6 +585,47 @@ struct PDFReaderView: View {
             persistenceErrorMessage = error.localizedDescription
         }
     }
+
+    private func createAreaAnnotation(
+        _ selection: PDFPageAreaSelection,
+        color: HighlightColor,
+        addNote: Bool
+    ) {
+        guard let paper else { return }
+        let rectangle = selection.rectangle.standardized
+        let anchor = AreaAnnotationAnchor(
+            pageIndex: selection.pageIndex,
+            rect: AnnotationRect(
+                x: rectangle.minX,
+                y: rectangle.minY,
+                width: rectangle.width,
+                height: rectangle.height
+            )
+        )
+        do {
+            let annotation = try repository.createAreaAnnotation(
+                paperID: paper.id,
+                anchor: anchor,
+                color: color
+            )
+            AnnotationUndo.registerUndoForCreation(
+                annotationIDs: [annotation.id],
+                repository: repository,
+                target: annotationUndoTarget,
+                undoManager: undoManager,
+                onChange: { annotationSession.reload(repository: repository) },
+                onError: { persistenceErrorMessage = $0.localizedDescription }
+            )
+            annotationSession.reload(repository: repository)
+
+            if addNote {
+                inspectorPresented = true
+                focusedAnnotationID = annotation.id
+            }
+        } catch {
+            persistenceErrorMessage = error.localizedDescription
+        }
+    }
 }
 
 struct AnnotationNavigation: Equatable {
@@ -442,9 +633,106 @@ struct AnnotationNavigation: Equatable {
     let annotationID: UUID
 }
 
-private struct PendingReaderSave: Equatable {
+struct PDFReaderTransientState: Equatable {
+    var command: PDFReaderCommand?
+    var findQuery: String
+    var selectedMatchIndex: Int?
+    var isAreaAnnotationMode: Bool
+    var annotationGuidanceMessage: String?
+
+    /// Changing this value tells the PDFKit coordinator to discard any selection or
+    /// pending annotation popover that belonged to the previously selected Paper.
+    private(set) var pdfInteractionResetID: UUID
+
+    init(
+        command: PDFReaderCommand? = nil,
+        findQuery: String = "",
+        selectedMatchIndex: Int? = nil,
+        isAreaAnnotationMode: Bool = false,
+        annotationGuidanceMessage: String? = nil,
+        pdfInteractionResetID: UUID = UUID()
+    ) {
+        self.command = command
+        self.findQuery = findQuery
+        self.selectedMatchIndex = selectedMatchIndex
+        self.isAreaAnnotationMode = isAreaAnnotationMode
+        self.annotationGuidanceMessage = annotationGuidanceMessage
+        self.pdfInteractionResetID = pdfInteractionResetID
+    }
+
+    mutating func resetForPaperTransition() {
+        command = nil
+        findQuery = ""
+        selectedMatchIndex = nil
+        isAreaAnnotationMode = false
+        annotationGuidanceMessage = nil
+        pdfInteractionResetID = UUID()
+    }
+}
+
+struct PDFReaderPendingSave: Equatable {
     let paperID: UUID
     let state: PaperReaderState
+}
+
+struct PDFReaderPaperTransitionOutcome {
+    let outgoingSave: PDFReaderPendingSave?
+    let outgoingSaveError: (any Error)?
+    let restoredState: PaperReaderState?
+    let restoreError: (any Error)?
+
+    var outgoingSaveSucceeded: Bool {
+        outgoingSave != nil && outgoingSaveError == nil
+    }
+
+    var restoreSucceeded: Bool {
+        restoreError == nil
+    }
+}
+
+@MainActor
+enum PDFReaderPaperTransition {
+    static func perform(
+        outgoingSave: PDFReaderPendingSave?,
+        incomingPaperID: UUID?,
+        repository: LibraryRepository,
+        findSession: PDFDocumentFindSession,
+        transientState: inout PDFReaderTransientState,
+        focusedAnnotationID: inout UUID?
+    ) -> PDFReaderPaperTransitionOutcome {
+        var outgoingSaveError: (any Error)?
+        if let outgoingSave {
+            do {
+                try repository.saveReaderState(
+                    paperID: outgoingSave.paperID,
+                    state: outgoingSave.state
+                )
+            } catch {
+                outgoingSaveError = error
+            }
+        }
+
+        findSession.cancel(clearResults: true)
+        transientState.resetForPaperTransition()
+        focusedAnnotationID = nil
+
+        var restoredState: PaperReaderState?
+        var restoreError: (any Error)?
+        if let incomingPaperID {
+            do {
+                restoredState = try repository.readerState(paperID: incomingPaperID)
+            } catch {
+                restoreError = error
+            }
+        }
+
+        return PDFReaderPaperTransitionOutcome(
+            outgoingSave: outgoingSave,
+            outgoingSaveError: outgoingSaveError,
+            restoredState: restoredState,
+            restoreError: restoreError
+        )
+    }
 }
 
 @MainActor

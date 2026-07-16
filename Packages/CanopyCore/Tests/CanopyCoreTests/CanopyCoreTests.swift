@@ -106,6 +106,55 @@ struct CanopyCoreTests {
         #expect(titleOnlyResult.ready.count == 1)
     }
 
+    @Test("each Potential Duplicate comparison keeps only its own sorted trigger reasons")
+    func potentialDuplicateReasonsBelongToEachExistingPaper() throws {
+        let doiMatchID = UUID()
+        let titleAndYearMatchID = UUID()
+        let doiMatch = PaperIdentitySnapshot(
+            id: doiMatchID,
+            fingerprint: Data(repeating: 1, count: 32),
+            title: "A different study",
+            authorFamilyNames: [],
+            publicationYear: 2024,
+            doi: "10.1000/canopy",
+            arxivID: nil,
+            sourceState: .available,
+            rememberedLocation: "/Research/doi-match.pdf"
+        )
+        let titleAndYearMatch = PaperIdentitySnapshot(
+            id: titleAndYearMatchID,
+            fingerprint: Data(repeating: 2, count: 32),
+            title: "A Canopy Study",
+            authorFamilyNames: [],
+            publicationYear: 2026,
+            doi: "10.1000/other",
+            arxivID: nil,
+            sourceState: .available,
+            rememberedLocation: "/Research/title-year-match.pdf"
+        )
+        let fixture = try TemporaryFile(
+            contents: Data("different-source-bytes".utf8),
+            filename: "candidate.pdf"
+        )
+        defer { fixture.remove() }
+        let analyzer = StubDocumentAnalyzer(metadata: .init(
+            title: "A Canopy Study",
+            titleProvenance: .firstPage,
+            publicationYear: 2026,
+            doi: "https://doi.org/10.1000/CANOPY"
+        ))
+
+        let result = try AddBatchPreflight(analyzer: analyzer).run(
+            urls: [fixture.url],
+            existingPapers: [doiMatch, titleAndYearMatch]
+        )
+
+        let duplicate = try #require(result.potentialDuplicates.first)
+        #expect(duplicate.matches.map(\.existingPaper.id) == [doiMatchID, titleAndYearMatchID])
+        #expect(duplicate.matches[0].triggerReasons == ["Matching DOI"])
+        #expect(duplicate.matches[1].triggerReasons == ["Matching title and year"])
+    }
+
     @Test("Preflight detects exact duplicates inside one Add Batch")
     func withinBatchExactDuplicate() throws {
         let first = try TemporaryFile(contents: Data("identical".utf8), filename: "first.pdf")
@@ -140,11 +189,11 @@ struct CanopyCoreTests {
         #expect(result.ready.count == 1)
         #expect(result.potentialDuplicates.count == 1)
         #expect(result.potentialDuplicates.first?.candidate.url == second.url)
-        #expect(result.potentialDuplicates.first?.existingPapers.first?.rememberedLocation == first.url.path)
-        #expect(result.potentialDuplicates.first?.existingPapers.first?.sourceFilename == "first.pdf")
-        #expect(result.potentialDuplicates.first?.existingPapers.first?.sourceFileSize == 13)
-        #expect(result.potentialDuplicates.first?.existingPapers.first?.pageCount == 14)
-        #expect(result.potentialDuplicates.first?.existingPapers.first?.authorDisplayNames == ["Ada Lovelace"])
+        #expect(result.potentialDuplicates.first?.matches.first?.existingPaper.rememberedLocation == first.url.path)
+        #expect(result.potentialDuplicates.first?.matches.first?.existingPaper.sourceFilename == "first.pdf")
+        #expect(result.potentialDuplicates.first?.matches.first?.existingPaper.sourceFileSize == 13)
+        #expect(result.potentialDuplicates.first?.matches.first?.existingPaper.pageCount == 14)
+        #expect(result.potentialDuplicates.first?.matches.first?.existingPaper.authorDisplayNames == ["Ada Lovelace"])
     }
 
     @Test("Preflight byte progress is monotonic and completes")

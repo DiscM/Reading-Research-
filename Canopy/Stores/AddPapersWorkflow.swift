@@ -21,6 +21,13 @@ enum PotentialDuplicateDecision: String {
     case keepExisting
 }
 
+enum AddBatchProgressPhase: String {
+    case checkingPapers = "Checking Papers"
+    case addingPapers = "Adding Papers"
+
+    var title: String { rawValue }
+}
+
 struct AddBatchSummaryItem: Identifiable {
     enum Kind { case duplicate, skipped, failure }
     enum Action {
@@ -49,6 +56,8 @@ struct AddBatchSummaryItem: Identifiable {
 @Observable
 @MainActor
 final class AddPapersWorkflow {
+    static let progressPresentationDelay = Duration.milliseconds(300)
+
     var pendingURLs: [URL] = []
     var storageChoice: AddBatchStorageChoice = .referenced
     var isStorageChoicePresented = false
@@ -56,7 +65,7 @@ final class AddPapersWorkflow {
     var isPotentialReviewPresented = false
     var isSummaryPresented = false
     var progressFraction = 0.0
-    var progressPhase = "Checking Papers"
+    var progressPhase: AddBatchProgressPhase = .checkingPapers
     var progressFilename = ""
     var progressCount = ""
     var potentialDuplicates: [PotentialDuplicate] = []
@@ -65,6 +74,10 @@ final class AddPapersWorkflow {
 
     private var preflightResult: AddBatchPreflightResult?
     private var securityScopedURLs: [URL] = []
+    @ObservationIgnored private var checkingTask: Task<AddBatchPreflightResult, Error>?
+    @ObservationIgnored private var checkingGeneration: UUID?
+    @ObservationIgnored private var progressPresentationTask: Task<Void, Never>?
+    @ObservationIgnored private var progressPresentationGeneration: UUID?
 
     var totalFileSize: Int64 {
         pendingURLs.reduce(0) { total, url in
@@ -78,6 +91,10 @@ final class AddPapersWorkflow {
         potentialDuplicates.allSatisfy { potentialDecisions[$0.candidate.id] != nil }
     }
 
+    var canCancelCheckingPapers: Bool {
+        progressPhase == .checkingPapers && checkingTask != nil
+    }
+
     func prepare(urls: [URL]) {
         let pdfs = urls.filter { $0.pathExtension.caseInsensitiveCompare("pdf") == .orderedSame }
         guard !pdfs.isEmpty else { return }
@@ -88,8 +105,8 @@ final class AddPapersWorkflow {
 
     func start(repository: LibraryRepository) {
         isStorageChoicePresented = false
-        isProgressPresented = true
-        progressPhase = "Checking Papers"
+        isProgressPresented = false
+        progressPhase = .checkingPapers
         progressFraction = 0
         summaryItems = []
 
@@ -103,31 +120,106 @@ final class AddPapersWorkflow {
             return
         }
 
-        Task {
-            let workflow = self
-            let result = await Task.detached(priority: .userInitiated) {
-                AddBatchPreflight(analyzer: PDFDocumentAnalyzer()).run(
-                    urls: urls,
-                    existingPapers: existing,
-                    progress: { update in
-                        Task { @MainActor in
-                            workflow.progressFraction = update.fractionCompleted * 0.8
-                            workflow.progressFilename = update.filename
-                            workflow.progressCount = "Processing \(update.fileIndex) of \(update.fileCount)"
-                        }
+        let generation = UUID()
+        checkingGeneration = generation
+        let workflow = self
+        let task = Task.detached(priority: .userInitiated) {
+            try AddBatchPreflight(analyzer: PDFDocumentAnalyzer()).run(
+                urls: urls,
+                existingPapers: existing,
+                progress: { update in
+                    Task { @MainActor in
+                        workflow.receiveCheckingProgress(update, generation: generation)
                     }
+                }
+            )
+        }
+        checkingTask = task
+        scheduleProgressPresentation()
+
+        Task { @MainActor [weak self] in
+            do {
+                let result = try await task.value
+                guard let self else { return }
+                await self.finishChecking(
+                    result,
+                    generation: generation,
+                    repository: repository
                 )
-            }.value
-            preflightResult = result
-            potentialDuplicates = result.potentialDuplicates
-            potentialDecisions = [:]
-            if result.potentialDuplicates.isEmpty {
-                await commitApprovedCandidates(repository: repository)
-            } else {
-                isProgressPresented = false
-                isPotentialReviewPresented = true
+            } catch is CancellationError {
+                self?.finishCancelledChecking(generation: generation)
+            } catch {
+                self?.finishFailedChecking(error, generation: generation)
             }
         }
+    }
+
+    func cancelCheckingPapers() {
+        guard canCancelCheckingPapers else { return }
+        isProgressPresented = false
+        reset()
+    }
+
+    private func receiveCheckingProgress(_ update: AddBatchPreflightProgress, generation: UUID) {
+        guard checkingGeneration == generation else { return }
+        progressFraction = update.fractionCompleted * 0.8
+        progressFilename = update.filename
+        progressCount = "Processing \(update.fileIndex) of \(update.fileCount)"
+    }
+
+    private func finishChecking(
+        _ result: AddBatchPreflightResult,
+        generation: UUID,
+        repository: LibraryRepository
+    ) async {
+        guard checkingGeneration == generation else { return }
+        checkingTask = nil
+        checkingGeneration = nil
+        preflightResult = result
+        potentialDuplicates = result.potentialDuplicates
+        potentialDecisions = [:]
+        if result.potentialDuplicates.isEmpty {
+            await commitApprovedCandidates(repository: repository)
+        } else {
+            stopProgressPresentation()
+            isPotentialReviewPresented = true
+        }
+    }
+
+    private func finishCancelledChecking(generation: UUID) {
+        guard checkingGeneration == generation else { return }
+        isProgressPresented = false
+        reset()
+    }
+
+    private func finishFailedChecking(_ error: Error, generation: UUID) {
+        guard checkingGeneration == generation else { return }
+        checkingTask = nil
+        checkingGeneration = nil
+        finishWithWorkflowFailure(error)
+    }
+
+    private func scheduleProgressPresentation() {
+        stopProgressPresentation()
+        let generation = UUID()
+        progressPresentationGeneration = generation
+        progressPresentationTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(for: Self.progressPresentationDelay)
+            } catch {
+                return
+            }
+            guard let self, progressPresentationGeneration == generation else { return }
+            progressPresentationTask = nil
+            isProgressPresented = true
+        }
+    }
+
+    private func stopProgressPresentation() {
+        progressPresentationGeneration = nil
+        progressPresentationTask?.cancel()
+        progressPresentationTask = nil
+        isProgressPresented = false
     }
 
     func chooseAllPotentialDuplicates(addAsSeparate: Bool) {
@@ -154,7 +246,12 @@ final class AddPapersWorkflow {
         }.joined(separator: "\n")
     }
 
-    func performSummaryAction(_ action: AddBatchSummaryItem.Action, itemID: UUID, repository: LibraryRepository) {
+    func performSummaryAction(
+        _ action: AddBatchSummaryItem.Action,
+        itemID: UUID,
+        repository: LibraryRepository,
+        onOpenPaper: (UUID) -> Void
+    ) {
         do {
             switch action {
             case let .repair(paperID, candidate), let .relocate(paperID, candidate):
@@ -170,7 +267,7 @@ final class AddPapersWorkflow {
                     summaryItems[index].actions = [.openExisting(paperID), .reveal(candidate.url.path)]
                 }
             case let .openExisting(paperID):
-                NotificationCenter.default.post(name: .openPaperRequested, object: paperID)
+                onOpenPaper(paperID)
                 isSummaryPresented = false
                 reset()
             case let .reveal(path):
@@ -184,10 +281,21 @@ final class AddPapersWorkflow {
     }
 
     func reset() {
-        for url in securityScopedURLs {
-            url.stopAccessingSecurityScopedResource()
-        }
+        stopProgressPresentation()
+        let taskToCancel = checkingTask
+        checkingGeneration = nil
+        checkingTask = nil
+        let urlsToRelease = securityScopedURLs
         securityScopedURLs = []
+        if let taskToCancel {
+            taskToCancel.cancel()
+            Task { @MainActor in
+                _ = try? await taskToCancel.value
+                Self.stopAccessingSecurityScopedResources(urlsToRelease)
+            }
+        } else {
+            Self.stopAccessingSecurityScopedResources(urlsToRelease)
+        }
         pendingURLs = []
         preflightResult = nil
         potentialDuplicates = []
@@ -199,7 +307,7 @@ final class AddPapersWorkflow {
 
     private func commitApprovedCandidates(repository: LibraryRepository) async {
         guard let result = preflightResult else { return }
-        progressPhase = "Adding Papers"
+        progressPhase = .addingPapers
         var candidates = result.ready
         candidates.append(contentsOf: result.potentialDuplicates.compactMap {
             potentialDecisions[$0.candidate.id] == .addAsSeparate ? $0.candidate : nil
@@ -243,7 +351,7 @@ final class AddPapersWorkflow {
         }
         appendWithinBatchExactDuplicates(result, repository: repository)
 
-        isProgressPresented = false
+        stopProgressPresentation()
         if summaryItems.isEmpty {
             reset()
         } else {
@@ -311,9 +419,15 @@ final class AddPapersWorkflow {
     }
 
     private func finishWithWorkflowFailure(_ error: Error) {
-        isProgressPresented = false
+        stopProgressPresentation()
         summaryItems = [AddBatchSummaryItem(kind: .failure, filename: "Add Papers", message: error.localizedDescription, path: nil)]
         isSummaryPresented = true
+    }
+
+    nonisolated private static func stopAccessingSecurityScopedResources(_ urls: [URL]) {
+        for url in urls {
+            url.stopAccessingSecurityScopedResource()
+        }
     }
 
     private func abbreviatedPath(_ path: String) -> String {

@@ -130,14 +130,14 @@ Status labels describe the current branch, not release readiness. The release ga
 
 ### 0. Foundation
 
-**Status: Functional foundation implemented; v1 refinement pending.** The app and persistence boundaries exist. Before release, replace multi-window `WindowGroup` behavior with one primary Canopy window, route commands to that window, and replace the database-open crash with a non-destructive startup recovery screen offering Retry, Reveal Library Data, and Quit. A managed-copy reconciliation failure must allow the library to open while showing a persistent retryable warning.
+**Status: Implemented.** Canopy uses one primary window with focused window-owned commands. The finalized unreleased v1 schema, non-destructive database recovery, and non-blocking managed-copy reconciliation warning are in place.
 
 Remaining:
 
-- [ ] Enforce one primary Canopy window and window-targeted commands.
-- [ ] Finalize the unreleased v1 schema: remove embedded PDF dates and annotation context fields; add annotation kind/area geometry and the selectable-text capability needed by the reader.
-- [ ] Add the non-destructive database-open recovery screen.
-- [ ] Surface managed-copy reconciliation failures without blocking the library.
+- [x] Enforce one primary Canopy window and window-targeted commands.
+- [x] Finalize the unreleased v1 schema: remove embedded PDF dates and annotation context fields; add annotation kind/area geometry and the selectable-text capability needed by the reader.
+- [x] Add the non-destructive database-open recovery screen.
+- [x] Surface managed-copy reconciliation failures without blocking the library.
 
 - Generate the Xcode project and establish App Store sandbox entitlements.
 - Discard the unshipped scaffold's development SwiftData container; replace its draft schema rather than migrating it. No real user library data exists yet.
@@ -147,15 +147,15 @@ Remaining:
 
 ### 1. Import and document identity
 
-**Status: Functional foundation implemented; v1 refinement pending.** Identity checks, duplicate review, storage choices, progress, summaries, exact-match repair or relocation, in-reader and library recovery actions, managed-copy restoration, confirmed referenced/managed removal, and lightweight background availability checks are available. Remaining work narrows Potential Duplicate Review, makes Checking Papers cancellable, removes full-document text extraction from Preflight, routes a known changed file directly back through Add Papers, and adds Locate Source as an exact-match fallback for Source Unavailable.
+**Status: Implemented.** Checking Papers is delayed, responsive, cancellable, and generation-gated while Adding Papers remains deterministic. Preflight performs bounded metadata/capability analysis, Potential Duplicate evidence is scoped to each comparison, and changed or unavailable referenced sources follow the specified Add Papers and exact-match recovery paths.
 
 Remaining:
 
-- [ ] Make Checking Papers cancellable and keep Adding Papers commit completion deterministic.
-- [ ] Replace full-document text extraction with first-page metadata, direct page count, and a lightweight selectable-text signal.
-- [ ] Narrow and align the Potential Duplicate comparison fields.
-- [ ] Route a known changed file directly through Add Papers.
-- [ ] Add exact-match Locate Source fallback for Source Unavailable.
+- [x] Make Checking Papers cancellable and keep Adding Papers commit completion deterministic.
+- [x] Replace full-document text extraction with first-page metadata, direct page count, and a lightweight selectable-text signal.
+- [x] Narrow and align the Potential Duplicate comparison fields.
+- [x] Route a known changed file directly through Add Papers.
+- [x] Add exact-match Locate Source fallback for Source Unavailable.
 
 - Implement open-panel and drag-and-drop Add Batches.
 - Route the sidebar toolbar button, File → Add Papers (`⌘O`), and library drag-and-drop through one shared Add Batch workflow. After selection or drop, show the same compact sheet with file count, total size, **Reference Originals** selected by default, **Keep Copies in Canopy**, Add Papers, and Cancel.
@@ -196,13 +196,13 @@ Remaining:
 
 ### 3. Reader and resume
 
-**Status: Functional foundation implemented; v1 refinement pending.** Source identity is verified before the current session applies reading state or loads annotations. Reader-state persistence failures are surfaced with retry behavior. Remaining work makes Find asynchronous and cancellable, communicates PDFs without selectable text, and verifies outgoing-save/incoming-restore behavior when swapping Papers in the single reader surface.
+**Status: Implemented.** Source identity is verified before reading state or annotations apply. Find is asynchronous, progressive, and cancellable; scanned/no-text PDFs explain and disable text-dependent controls; and the Paper transition path saves outgoing state before restoring incoming state while clearing transient interactions.
 
 Remaining:
 
-- [ ] Make document Find asynchronous, progressively counted, and cancellable.
-- [ ] Explain and disable text-dependent controls for PDFs without selectable text.
-- [ ] Verify outgoing-save/incoming-restore and transient-state reset across Paper swaps.
+- [x] Make document Find asynchronous, progressively counted, and cancellable.
+- [x] Explain and disable text-dependent controls for PDFs without selectable text.
+- [x] Verify outgoing-save/incoming-restore and transient-state reset across Paper swaps.
 
 - Wrap PDFKit with continuous scrolling and navigation controls.
 - Implement asynchronous document-local Find that cancels prior work when the query changes or the user switches Papers and updates its result count progressively.
@@ -211,13 +211,13 @@ Remaining:
 
 ### 4. Annotations and notes
 
-**Status: Text-highlight foundation implemented; v1 refinement and Area Annotation pending.** Text highlights are stored separately from PDF bytes and rendered as temporary PDFKit overlays. A window-scoped annotation session prevents stale annotations from appearing before current-source verification and exposes retryable verification or load failures. Create, delete, and note-edit operations support native Undo and Redo. Remaining work adds Area Annotation, color editing with Undo/Redo, and a clear rejection of cross-page text selections.
+**Status: Implemented.** Text highlights and single-page Area Annotations are stored separately from PDF bytes, rendered as temporary PDFKit overlays, and shown in a page-ordered inspector. Area previews render from the verified Source PDF, both kinds support named color editing and notes with Undo/Redo, and cross-page text selections are rejected with guidance.
 
 Remaining:
 
-- [ ] Implement Area Annotation capture, persistence, rendering, thumbnails, navigation, notes, Undo, and accessibility behavior.
-- [ ] Add inspector color editing with explicit save and Undo/Redo for both annotation kinds.
-- [ ] Reject cross-page text selections with clear guidance.
+- [x] Implement Area Annotation capture, persistence, rendering, thumbnails, navigation, notes, Undo, and accessibility behavior.
+- [x] Add inspector color editing with explicit save and Undo/Redo for both annotation kinds.
+- [x] Reject cross-page text selections with clear guidance.
 
 - Capture composite selection anchors and render PDFKit overlays.
 - Restrict a text highlight to one page; if a selection crosses a page boundary, ask the user to select text on one page at a time.
@@ -229,12 +229,12 @@ Remaining:
 
 ### 5. Release hardening
 
-**Status: In progress.** The current v1 surfaces expose keyboard-reachable reader commands and explicit VoiceOver labels or values for source status, progress, duplicate decisions, Find results, and inspector state. A persistent Accessibility menu offers Follow System, Light, and Dark appearances plus app-level Increase Contrast and Differentiate Without Color options; macOS accessibility settings remain the baseline and app options can strengthen them. Annotation overlays, fills, borders, and non-color symbols adapt to the effective preferences. Manual cross-mode inspection, Area Annotation accessibility verification, bounded fixture coverage, one end-to-end relaunch UI test, packaging, and App Store work remain.
+**Status: In progress.** The v1 surfaces expose keyboard-reachable commands and explicit VoiceOver labels or values for source status, progress, duplicate decisions, Find results, Area Annotation capture, and inspector state. The bounded generated fixture matrix and isolated terminate/relaunch UI journey are implemented. Manual cross-mode inspection, executing the UI journey on an automation-enabled host, macOS 15 verification, packaging, and App Store work remain; see `Documentation/RELEASE_CHECKLIST.md`.
 
 Remaining:
 
 - [ ] Complete manual cross-mode, keyboard, VoiceOver, and native PDF text inspection.
-- [ ] Add the bounded fixture matrix and one end-to-end terminate/relaunch UI journey.
+- [x] Add the bounded fixture matrix and one end-to-end terminate/relaunch UI journey.
 - [ ] Verify macOS 15 and the current macOS release.
 - [ ] Complete App Store identity, signing, privacy labels, screenshots, and review notes.
 

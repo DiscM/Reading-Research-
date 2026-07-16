@@ -1,5 +1,8 @@
+import AppKit
 import CanopyCore
+import CoreText
 import Foundation
+import PDFKit
 import Testing
 @testable import Canopy
 
@@ -14,6 +17,10 @@ struct CanopyAppTests {
     func paperCommandAvailability() {
         let withoutMatches = PaperCommand.availableReaderCommands(hasFindMatches: false)
         let withMatches = PaperCommand.availableReaderCommands(hasFindMatches: true)
+        let withoutSelectableText = PaperCommand.availableReaderCommands(
+            hasFindMatches: false,
+            hasSelectableText: false
+        )
 
         #expect(withoutMatches.contains(.focusFind))
         #expect(withoutMatches.contains(.zoomIn))
@@ -22,6 +29,9 @@ struct CanopyAppTests {
         #expect(!withoutMatches.contains(.previousFindMatch))
         #expect(withMatches.contains(.nextFindMatch))
         #expect(withMatches.contains(.previousFindMatch))
+        #expect(withoutMatches.contains(.startAreaAnnotation))
+        #expect(!withoutSelectableText.contains(.focusFind))
+        #expect(withoutSelectableText.contains(.startAreaAnnotation))
     }
 
     @Test("highlight appearance strengthens contrast and provides non-color symbols")
@@ -33,10 +43,142 @@ struct CanopyAppTests {
         #expect(increased.inspectorFillOpacity > standard.inspectorFillOpacity)
         #expect(increased.selectedPaletteFillOpacity > standard.selectedPaletteFillOpacity)
         #expect(increased.unselectedPaletteFillOpacity > standard.unselectedPaletteFillOpacity)
+        #expect(increased.areaFillOpacity > standard.areaFillOpacity)
+        #expect(increased.areaBorderWidth > standard.areaBorderWidth)
         #expect(increased.swatchBorderWidth > standard.swatchBorderWidth)
         #expect(increased.selectedBorderWidth > standard.selectedBorderWidth)
         let nonColorSymbols = HighlightColor.allCases.map(\.differentiateWithoutColorSymbol)
         #expect(Set(nonColorSymbols).count == HighlightColor.allCases.count)
+        let nonColorGlyphs = HighlightColor.allCases.map(\.differentiateWithoutColorGlyph)
+        #expect(Set(nonColorGlyphs).count == HighlightColor.allCases.count)
+    }
+
+    @Test("annotation color labels expose a named checked selection with a visible border")
+    func annotationColorLabelPresentation() {
+        let selected = HighlightColorLabelPresentation(
+            color: .purple,
+            selected: true,
+            increasedContrast: false
+        )
+        let unselected = HighlightColorLabelPresentation(
+            color: .green,
+            selected: false,
+            increasedContrast: false
+        )
+
+        #expect(selected.name == "Purple")
+        #expect(selected.checkmarkSystemImage == "checkmark")
+        #expect(selected.borderWidth == 2)
+        #expect(unselected.name == "Green")
+        #expect(unselected.checkmarkSystemImage == nil)
+        #expect(unselected.borderWidth == 0)
+    }
+
+    @MainActor
+    @Test("document Find reports matches progressively and rejects stale-query results")
+    func progressiveCancellableDocumentFind() throws {
+        let document = try #require(ControlledFindPDFDocument(
+            data: selectablePDFData(text: "old query and new query")
+        ))
+        let session = PDFDocumentFindSession()
+
+        session.start(query: "old", in: document)
+        #expect(session.isFinding)
+        document.emitMatch(for: "old")
+        #expect(session.matches.count == 1)
+        #expect(session.isFinding)
+
+        session.start(query: "new", in: document)
+        #expect(document.cancelCount == 1)
+        #expect(session.matches.isEmpty)
+        document.emitMatch(for: "old")
+        #expect(session.matches.isEmpty)
+        document.emitMatch(for: "new")
+        #expect(session.matches.count == 1)
+
+        document.finishFinding()
+        #expect(!session.isFinding)
+        #expect(session.matches.count == 1)
+    }
+
+    @MainActor
+    @Test("switching Papers saves outgoing state before restoring incoming state and clears reader interactions")
+    func paperTransitionSavesRestoresAndClearsTransientState() throws {
+        let repository = LibraryRepository(container: try CanopyModelContainer.make(inMemory: true))
+        let outgoingPaper = Paper(
+            fingerprint: Data(repeating: 31, count: 32),
+            title: "Outgoing Paper",
+            storageMode: .managedCopy,
+            sourceFilename: "outgoing.pdf",
+            sourceFileSize: 100
+        )
+        let incomingPaper = Paper(
+            fingerprint: Data(repeating: 32, count: 32),
+            title: "Incoming Paper",
+            storageMode: .managedCopy,
+            sourceFilename: "incoming.pdf",
+            sourceFileSize: 200
+        )
+        try repository.insert(outgoingPaper)
+        try repository.insert(incomingPaper)
+
+        let incomingState = PaperReaderState(
+            pageIndex: 7,
+            viewport: PaperViewport(x: 15, y: 25, width: 300, height: 440),
+            zoomScale: 1.4,
+            isInspectorPresented: false
+        )
+        try repository.saveReaderState(paperID: incomingPaper.id, state: incomingState)
+        let outgoingState = PaperReaderState(
+            pageIndex: 3,
+            viewport: PaperViewport(x: 5, y: 10, width: 260, height: 380),
+            zoomScale: 1.2,
+            isInspectorPresented: true
+        )
+
+        let findDocument = try #require(ControlledFindPDFDocument(
+            data: selectablePDFData(text: "canopy transition query")
+        ))
+        let findSession = PDFDocumentFindSession()
+        findSession.start(query: "transition", in: findDocument)
+        findDocument.emitMatch(for: "transition")
+        #expect(findSession.matches.count == 1)
+
+        var transientState = PDFReaderTransientState(
+            command: PDFReaderCommand(action: .zoomIn),
+            findQuery: "transition",
+            selectedMatchIndex: 0,
+            isAreaAnnotationMode: true,
+            annotationGuidanceMessage: "Select text on one page."
+        )
+        let previousPDFInteractionResetID = transientState.pdfInteractionResetID
+        var focusedAnnotationID: UUID? = UUID()
+
+        let outcome = PDFReaderPaperTransition.perform(
+            outgoingSave: PDFReaderPendingSave(
+                paperID: outgoingPaper.id,
+                state: outgoingState
+            ),
+            incomingPaperID: incomingPaper.id,
+            repository: repository,
+            findSession: findSession,
+            transientState: &transientState,
+            focusedAnnotationID: &focusedAnnotationID
+        )
+
+        #expect(outcome.outgoingSaveSucceeded)
+        #expect(try repository.readerState(paperID: outgoingPaper.id) == outgoingState)
+        #expect(outcome.restoredState == incomingState)
+        #expect(outcome.restoreSucceeded)
+        #expect(findSession.matches.isEmpty)
+        #expect(!findSession.isFinding)
+        #expect(transientState.findQuery.isEmpty)
+        #expect(transientState.selectedMatchIndex == nil)
+        #expect(transientState.command == nil)
+        #expect(!transientState.isAreaAnnotationMode)
+        #expect(transientState.annotationGuidanceMessage == nil)
+        #expect(focusedAnnotationID == nil)
+        #expect(transientState.pdfInteractionResetID != previousPDFInteractionResetID)
     }
 
     @Test("Accessibility menu preferences preserve system choices and expose appearance modes")
@@ -83,11 +225,123 @@ struct CanopyAppTests {
         #expect(workflow.isStorageChoicePresented)
     }
 
+    @MainActor
+    @Test("cancelling Checking Papers invalidates the batch before any commit")
+    func cancellingCheckingPapersPreventsCommits() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pdf = directory.appendingPathComponent("large.pdf")
+        try Data(repeating: 7, count: 8 * 1_024 * 1_024).write(to: pdf)
+        let repository = LibraryRepository(container: try CanopyModelContainer.make(inMemory: true))
+        let workflow = AddPapersWorkflow()
+        workflow.prepare(urls: [pdf])
+
+        workflow.start(repository: repository)
+        #expect(workflow.canCancelCheckingPapers)
+        #expect(!workflow.isProgressPresented)
+        workflow.cancelCheckingPapers()
+        try await Task.sleep(for: .milliseconds(100))
+
+        #expect(try repository.paperIdentitySnapshots().isEmpty)
+        #expect(workflow.pendingURLs.isEmpty)
+        #expect(!workflow.isProgressPresented)
+        #expect(!workflow.isPotentialReviewPresented)
+        #expect(!workflow.isSummaryPresented)
+    }
+
+    @Test("Potential Duplicate fields compare full names and only the v1 evidence set")
+    func potentialDuplicateComparisonFields() {
+        let candidate = PreflightCandidate(
+            url: URL(fileURLWithPath: "/tmp/Candidate.pdf"),
+            fingerprint: Data(repeating: 1, count: 32),
+            fileSize: 1_536,
+            modificationDate: nil,
+            metadata: ParsedPaperMetadata(
+                title: "Candidate Title",
+                titleProvenance: .firstPage,
+                authors: [
+                    ParsedAuthorCredit(
+                        displayName: "Ada Lovelace",
+                        familyName: "Lovelace",
+                        provenance: .firstPage
+                    )
+                ],
+                publicationYear: 2026,
+                doi: "10.1000/candidate",
+                arxivID: "2601.12345",
+                pageCount: 12,
+                hasSelectableText: true
+            )
+        )
+        let existing = PaperIdentitySnapshot(
+            id: UUID(),
+            fingerprint: Data(repeating: 2, count: 32),
+            title: "Existing Title",
+            authorFamilyNames: ["Not a display name"],
+            publicationYear: 2025,
+            doi: "10.1000/existing",
+            arxivID: "2501.54321",
+            sourceState: .available,
+            rememberedLocation: "/Papers/Existing.pdf",
+            sourceFilename: "Existing.pdf",
+            sourceFileSize: 3_072,
+            pageCount: 24,
+            authorDisplayNames: ["Grace Hopper"]
+        )
+
+        let candidateFields = PotentialDuplicateComparisonFields(candidate: candidate)
+        let existingFields = PotentialDuplicateComparisonFields(existingPaper: existing)
+
+        #expect(candidateFields.title == "Candidate Title")
+        #expect(candidateFields.authors == "Ada Lovelace")
+        #expect(candidateFields.year == "2026")
+        #expect(candidateFields.doi == "10.1000/candidate")
+        #expect(candidateFields.arxivID == "2601.12345")
+        #expect(candidateFields.sourceLabel == "Filename")
+        #expect(candidateFields.source == "Candidate.pdf")
+        #expect(candidateFields.pageCount == "12")
+        #expect(!candidateFields.fileSize.isEmpty)
+        #expect(existingFields.authors == "Grace Hopper")
+        #expect(existingFields.sourceLabel == "Remembered Location")
+        #expect(existingFields.source == "/Papers/Existing.pdf")
+        #expect(existingFields.pageCount == "24")
+        #expect(!existingFields.fileSize.isEmpty)
+    }
+
+    @MainActor
+    @Test("opening an existing duplicate uses the owning window callback")
+    func openingExistingDuplicateUsesCallback() throws {
+        let workflow = AddPapersWorkflow()
+        let paperID = UUID()
+        let item = AddBatchSummaryItem(
+            kind: .duplicate,
+            filename: "duplicate.pdf",
+            message: "Exact duplicate",
+            path: nil,
+            actions: [.openExisting(paperID)]
+        )
+        workflow.summaryItems = [item]
+        workflow.isSummaryPresented = true
+        var openedPaperID: UUID?
+
+        workflow.performSummaryAction(
+            .openExisting(paperID),
+            itemID: item.id,
+            repository: LibraryRepository(container: try CanopyModelContainer.make(inMemory: true)),
+            onOpenPaper: { openedPaperID = $0 }
+        )
+
+        #expect(openedPaperID == paperID)
+        #expect(!workflow.isSummaryPresented)
+    }
+
     @Test("source recovery actions match each library source state")
     func sourceRecoveryActionsMatchState() {
         #expect(SourceRecoveryAction.actions(for: .available) == [])
-        #expect(SourceRecoveryAction.actions(for: .sourceUnavailable) == [.retry])
-        #expect(SourceRecoveryAction.actions(for: .brokenReference) == [.repairReference, .removeFromLibrary])
+        #expect(SourceRecoveryAction.actions(for: .sourceUnavailable) == [.retry, .locateSource])
+        #expect(SourceRecoveryAction.actions(for: .brokenReference) == [.locateSource, .removeFromLibrary])
         #expect(SourceRecoveryAction.actions(for: .sourceChanged) == [
             .locateOriginal,
             .addChangedAsSeparate,
@@ -97,6 +351,36 @@ struct CanopyAppTests {
             .restoreLibraryCopy,
             .removeFromLibrary
         ])
+    }
+
+    @MainActor
+    @Test("Source Changed resolves its known readable bookmark for ordinary Add Papers")
+    func sourceChangedResolvesKnownBookmark() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let sourceURL = directory.appendingPathComponent("changed.pdf")
+        try Data("changed source".utf8).write(to: sourceURL)
+        let bookmark = try SecurityScopedBookmarkService().makeBookmark(for: sourceURL)
+        let paper = Paper(
+            fingerprint: Data(repeating: 9, count: 32),
+            title: "Changed",
+            storageMode: .referenced,
+            sourceState: .sourceChanged,
+            bookmarkData: bookmark,
+            sourceFilename: sourceURL.lastPathComponent,
+            rememberedLocation: sourceURL.path,
+            sourceFileSize: 1
+        )
+        let workflow = SourceRecoveryWorkflow()
+
+        let resolvedURL = workflow.resolveKnownChangedSourceURL(for: paper)
+
+        #expect(resolvedURL?.lastPathComponent == sourceURL.lastPathComponent)
+        #expect(resolvedURL.map { FileManager.default.isReadableFile(atPath: $0.path) } == true)
+        paper.sourceState = .sourceUnavailable
+        #expect(workflow.resolveKnownChangedSourceURL(for: paper) == nil)
     }
 
     @MainActor
@@ -185,7 +469,9 @@ struct CanopyAppTests {
 
     @MainActor
     @Test("search ranks title before author or year, then note, preserving the selected sort within a tier")
-    func rankedLibrarySearch() {
+    func rankedLibrarySearch() throws {
+        let container = try CanopyModelContainer.make(inMemory: true)
+        let repository = LibraryRepository(container: container)
         let olderTitleMatch = makePaper(
             title: "2026 Overview",
             dateAdded: Date(timeIntervalSince1970: 10)
@@ -206,19 +492,45 @@ struct CanopyAppTests {
         )
         let noteMatch = makePaper(
             title: "Gamma",
-            dateAdded: Date(timeIntervalSince1970: 60),
-            note: "Questions for 2026"
+            dateAdded: Date(timeIntervalSince1970: 60)
         )
         let noMatch = makePaper(
             title: "Delta",
             dateAdded: Date(timeIntervalSince1970: 70),
             author: "Other Author",
-            publicationYear: 2025,
+            publicationYear: 2025
+        )
+        let papers = [olderTitleMatch, authorMatch, noteMatch, noMatch, yearMatch, newerTitleMatch]
+        for paper in papers {
+            try repository.insert(paper)
+        }
+        let anchor = TextAnnotationAnchor(
+            pageIndex: 0,
+            quadrilaterals: [
+                AnnotationQuadrilateral(
+                    upperLeft: AnnotationPoint(x: 0, y: 10),
+                    upperRight: AnnotationPoint(x: 10, y: 10),
+                    lowerLeft: AnnotationPoint(x: 0, y: 0),
+                    lowerRight: AnnotationPoint(x: 10, y: 0)
+                )
+            ],
+            selectedText: "Selection"
+        )
+        _ = try repository.createTextAnnotation(
+            paperID: noteMatch.id,
+            anchor: anchor,
+            color: .yellow,
+            note: "Questions for 2026"
+        )
+        _ = try repository.createTextAnnotation(
+            paperID: noMatch.id,
+            anchor: anchor,
+            color: .yellow,
             note: "Nothing relevant"
         )
 
         let contents = LibraryContents(
-            papers: [olderTitleMatch, authorMatch, noteMatch, noMatch, yearMatch, newerTitleMatch],
+            papers: papers,
             searchText: "2026",
             sortOrder: .dateAdded
         )
@@ -1054,7 +1366,7 @@ struct CanopyAppTests {
         )
         try repository.insert(paper)
         let anchors = [0, 1].map { pageIndex in
-            AnnotationAnchor(
+            TextAnnotationAnchor(
                 pageIndex: pageIndex,
                 quadrilaterals: [
                     AnnotationQuadrilateral(
@@ -1067,16 +1379,24 @@ struct CanopyAppTests {
                 selectedText: "Page \(pageIndex + 1) selection"
             )
         }
-        let created = try repository.createAnnotations(
+        let created = try repository.createTextAnnotations(
             paperID: paper.id,
             anchors: anchors,
             color: .blue
+        )
+        let area = try repository.createAreaAnnotation(
+            paperID: paper.id,
+            anchor: AreaAnnotationAnchor(
+                pageIndex: 1,
+                rect: AnnotationRect(x: 20, y: 25, width: 100, height: 75)
+            ),
+            color: .green
         )
         let undoManager = UndoManager()
         let undoTarget = AnnotationUndoTarget()
         var errors: [Error] = []
         AnnotationUndo.registerUndoForCreation(
-            annotationIDs: created.map(\.id),
+            annotationIDs: created.map(\.id) + [area.id],
             repository: repository,
             target: undoTarget,
             undoManager: undoManager,
@@ -1088,10 +1408,56 @@ struct CanopyAppTests {
         #expect(try repository.annotations(paperID: paper.id).isEmpty)
 
         undoManager.redo()
-        #expect(try repository.annotations(paperID: paper.id).map(\.selectedText) == [
+        #expect(try repository.annotations(paperID: paper.id).compactMap { $0.textAnchor?.selectedText } == [
             "Page 1 selection",
             "Page 2 selection"
         ])
+        #expect(try repository.annotations(paperID: paper.id).contains { $0.areaAnchor != nil })
+        #expect(errors.isEmpty)
+    }
+
+    @MainActor
+    @Test("annotation color changes participate in native Undo and Redo")
+    func annotationColorUndoRedo() throws {
+        let repository = LibraryRepository(container: try CanopyModelContainer.make(inMemory: true))
+        let paper = Paper(
+            fingerprint: Data(repeating: 25, count: 32),
+            title: "Color Undo",
+            storageMode: .managedCopy,
+            sourceFilename: "color.pdf",
+            sourceFileSize: 100,
+            pageCount: 1
+        )
+        try repository.insert(paper)
+        let annotation = try repository.createAreaAnnotation(
+            paperID: paper.id,
+            anchor: AreaAnnotationAnchor(
+                pageIndex: 0,
+                rect: AnnotationRect(x: 10, y: 20, width: 80, height: 60)
+            ),
+            color: .yellow
+        )
+        try repository.updateAnnotationColor(annotationID: annotation.id, color: .purple)
+
+        let undoManager = UndoManager()
+        let undoTarget = AnnotationUndoTarget()
+        var errors: [Error] = []
+        AnnotationUndo.registerUndoForColorChange(
+            annotationID: annotation.id,
+            previousColor: .yellow,
+            currentColor: .purple,
+            repository: repository,
+            target: undoTarget,
+            undoManager: undoManager,
+            onChange: {},
+            onError: { errors.append($0) }
+        )
+
+        undoManager.undo()
+        #expect(try repository.annotations(paperID: paper.id).first?.color == .yellow)
+
+        undoManager.redo()
+        #expect(try repository.annotations(paperID: paper.id).first?.color == .purple)
         #expect(errors.isEmpty)
     }
 
@@ -1101,8 +1467,7 @@ struct CanopyAppTests {
         dateAdded: Date,
         lastOpenedAt: Date? = nil,
         author: String? = nil,
-        publicationYear: Int? = nil,
-        note: String? = nil
+        publicationYear: Int? = nil
     ) -> Paper {
         let credits = author.map {
             [AuthorCredit(position: 0, displayName: $0, familyName: $0, provenance: .userEntry)]
@@ -1118,18 +1483,6 @@ struct CanopyAppTests {
             authorCredits: credits
         )
         paper.lastOpenedAt = lastOpenedAt
-        if let note {
-            paper.annotations = [
-                Annotation(
-                    pageIndex: 0,
-                    quadrilaterals: Data(),
-                    selectedText: "Selection",
-                    color: .yellow,
-                    note: note,
-                    paper: paper
-                )
-            ]
-        }
         return paper
     }
 }
@@ -1191,4 +1544,58 @@ private final class CancellationProbe: @unchecked Sendable {
     func markCancellationObserved() {
         lock.withLock { cancellationObserved = true }
     }
+}
+
+private final class ControlledFindPDFDocument: PDFDocument {
+    private(set) var cancelCount = 0
+
+    override func beginFindString(_ string: String, withOptions options: String.CompareOptions) {
+        // Tests emit PDFKit's public progress notifications explicitly.
+    }
+
+    override func cancelFindString() {
+        cancelCount += 1
+    }
+
+    func emitMatch(for query: String) {
+        guard let page = page(at: 0),
+              let text = page.string else {
+            return
+        }
+        let pageText = text as NSString
+        guard pageText.range(of: query, options: .caseInsensitive).location != NSNotFound else { return }
+        let range = pageText.range(of: query, options: .caseInsensitive)
+        guard let selection = page.selection(for: range) else { return }
+        NotificationCenter.default.post(
+            name: .PDFDocumentDidFindMatch,
+            object: self,
+            userInfo: [PDFDocumentFoundSelectionKey: selection]
+        )
+    }
+
+    func finishFinding() {
+        NotificationCenter.default.post(name: .PDFDocumentDidEndFind, object: self)
+    }
+}
+
+private func selectablePDFData(text: String) throws -> Data {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let url = directory.appendingPathComponent("find.pdf")
+    var mediaBox = CGRect(x: 0, y: 0, width: 612, height: 792)
+    guard let context = CGContext(url as CFURL, mediaBox: &mediaBox, nil) else {
+        throw CocoaError(.fileWriteUnknown)
+    }
+    context.beginPDFPage(nil)
+    context.textPosition = CGPoint(x: 72, y: 700)
+    let line = CTLineCreateWithAttributedString(NSAttributedString(
+        string: text,
+        attributes: [.font: NSFont.systemFont(ofSize: 14)]
+    ))
+    CTLineDraw(line, context)
+    context.endPDFPage()
+    context.closePDF()
+    return try Data(contentsOf: url)
 }
