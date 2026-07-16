@@ -87,3 +87,7 @@ _Avoid_: Author Identity, global author
 **Author Identity**:
 A future user-confirmed person that may link multiple Author Credits and their name variants across Papers.
 _Avoid_: Automatically inferred author, Author Credit
+
+**Area Annotation**:
+A user-drawn rectangular annotation on one Source PDF page, intended for figures, tables, equations, diagrams, scanned passages, or other regions without relying on selectable text. Canopy stores page geometry and renders previews from the verified Source PDF; it does not persist a separate cropped image.
+_Avoid_: Image file, screenshot, OCR region, automatically detected figure

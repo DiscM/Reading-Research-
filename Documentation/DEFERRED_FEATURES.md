@@ -2,7 +2,7 @@
 
 This catalog preserves product ideas from the Research Paper Reader prototype without allowing their implementation to shape Canopy v1. Prototype code remains available only on `codex/archive-research-paper-reader-prototype` at tag `archive/research-paper-reader-prototype-2026-07-10`.
 
-Items are deliberately unprioritized until the v1 reading loop is stable and observed in real use.
+Items are deliberately unprioritized until the v1 reading loop is stable and observed in real use. This catalog is idea inventory, not a committed roadmap; inclusion does not protect an item from later pruning.
 
 ## Search and document understanding
 
@@ -22,7 +22,9 @@ Items are deliberately unprioritized until the v1 reading loop is stable and obs
 ## Annotation and knowledge work
 
 - Semantic annotation categories such as claim, evidence, method, limitation, and question.
-- Area/image notes for figures, tables, and equations.
+- Move or resize an existing Area Annotation; v1 uses Undo/delete and redraw.
+- Multi-page logical text annotations; v1 text highlights are single-page.
+- Copy or export an Area Annotation's rendered region as an image.
 - Annotation re-anchoring when a source PDF changes.
 - Storage-mode conversion after import.
 - Knowledge cards, active recall, and spaced repetition.
@@ -44,6 +46,8 @@ Items are deliberately unprioritized until the v1 reading loop is stable and obs
 
 ## Writing and export
 
+**Review status:** Deferred as a branch and marked for extensive pruning before prioritization. Future review must define one coherent citation/interoperability model rather than preserve every listed output or integration.
+
 - Context-rich research export containing source metadata, quotations, page anchors, notes, and citations.
 - Literature-review outlines and citation-aware writing.
 - Unsupported-prose warnings linked to evidence.
@@ -51,6 +55,8 @@ Items are deliberately unprioritized until the v1 reading loop is stable and obs
 - Obsidian, Notion, Anki, Readwise, Zotero, and local automation integrations.
 
 ## Platform and document reach
+
+**Review status:** Deferred as a branch and marked for extensive integration review. PDF accessibility, OCR, visual controls, reflow, focus tools, and Read Aloud must be designed together where their behaviors overlap. V1 still verifies the native PDF text experience with VoiceOver; a Canopy-controlled Read Aloud system remains deferred.
 
 - Password-protected PDF support with Keychain storage.
 - EPUB, HTML, DOCX, slides, datasets, and supplementary files.
@@ -62,6 +68,8 @@ Items are deliberately unprioritized until the v1 reading loop is stable and obs
 - Web companion and extension API.
 
 ## AI and hosted services
+
+**Review status:** Uncommitted research material. Any future promotion requires an explicit change to Canopy's offline product boundary and a separate consent/data-governance design.
 
 - Optional on-device summarization and extraction.
 - Secure BYOK or hosted model routing.

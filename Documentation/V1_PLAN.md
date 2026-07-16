@@ -10,7 +10,7 @@ The complete v1 journey is:
 2. Reference the originals by default or explicitly copy the import batch into Canopy.
 3. Browse recent and alphabetical library sections and search title, authors, year, and notes.
 4. Open a PDF in a continuous vertical reader.
-5. Select text, choose one of five colors, and optionally attach a note.
+5. Select text or draw a single-page area, choose one of five colors, and optionally attach a note.
 6. Close and relaunch Canopy, then recover the library, annotations, and exact reading position.
 
 Everything outside that journey belongs in the deferred-feature catalog.
@@ -22,9 +22,9 @@ Everything outside that journey belongs in the deferred-feature catalog.
 - PDF bytes never live in SwiftData.
 - Referenced sources are read-only; Canopy never modifies them.
 - Managed PDFs are immutable app-owned copies.
-- Highlights and notes are separate database records, not PDF mutations.
+- Annotations are database records separate from the Source PDF, never PDF mutations.
 - SwiftData is accessed through repositories rather than directly throughout the UI.
-- Critical discrete actions save explicitly and participate in native Undo.
+- Paper removal, Paper Info edits, annotation creation/deletion, annotation color changes, and note edits save explicitly and participate in native Undo.
 - Every persisted schema is versioned from its first release.
 - Research content, filenames, highlights, and notes never enter telemetry.
 
@@ -34,7 +34,7 @@ Everything outside that journey belongs in the deferred-feature catalog.
 
 Canopy stores an app-scoped security-scoped bookmark, source attributes, and a SHA-256 content fingerprint. The bookmark supplies persistent sandbox access; the fingerprint establishes document identity.
 
-On access, Canopy compares file size and modification date. If either changed, it streams the file through SHA-256 again. A digest mismatch blocks annotation display until the user locates the original file or explicitly resolves the change. Missing, offline, permission-denied, modified, and damaged sources must be distinct states.
+On access, Canopy compares file size and modification date. If either changed, it streams the file through SHA-256 again. A digest mismatch blocks annotation display until the user locates the original file or explicitly resolves the change. Persisted source states distinguish Available, Source Unavailable, Broken Reference, Source Changed, and Library Copy Missing. Permission failures map to Source Unavailable; unreadable and password-protected PDFs are specific Add Papers failures rather than persisted Paper states.
 
 ### Managed copies
 
@@ -44,50 +44,50 @@ When explicitly selected during import, Canopy copies the PDF into its Applicati
 
 The versioned SwiftData schema stores:
 
-- Paper identity and editable title, authors, and year
+- Paper identity and editable title, authors, year, DOI, and arXiv ID
 - Storage mode and bookmark or managed relative path
 - SHA-256 fingerprint and cached source attributes
 - Added/opened timestamps and reading state
-- Highlight anchors, colors, optional notes, and timestamps
+- Text-highlight anchors or Area Annotation rectangles, colors, optional notes, and timestamps
 
 The first schema is deliberately small. Future concepts do not get placeholder columns or speculative relationships.
 
-## Annotation anchor
+## Annotations
 
-Each highlight stores:
+Each annotation has one kind: text highlight or area. Both kinds store a zero-based page index, one non-semantic color, an optional plain-text note, and timestamps.
 
-- Zero-based page index
+Each text highlight additionally stores:
+
 - PDF selection quadrilaterals in page coordinates
 - Exact selected text
-- Short text context before and after the selection
-- One non-semantic color: yellow, green, blue, pink, or purple
-- Optional plain-text note
 
-Geometry provides exact rendering. Text and context validate the anchor and reserve a path for future re-anchoring. Externally changed PDFs do not receive automatic re-anchoring in v1.
+Each Area Annotation stores one user-drawn rectangle in page coordinates. Canopy renders its inspector thumbnail from the verified Source PDF rather than persisting a second cropped image. Selecting its inspector thumbnail centers and zooms the reader to the rectangle with enough surrounding page context to preserve orientation. Area Annotations work on scanned PDFs and other pages without selectable text.
 
-Color controls always include names, selection borders, and checkmarks. Annotation rows remain understandable without distinguishing hue, and Canopy respects increased-contrast and differentiate-without-color preferences.
+Geometry provides exact rendering; selected text supplies the text-highlight quotation shown in the inspector. Exact Source PDF fingerprint verification protects both annotation kinds from being applied to changed bytes. Externally changed PDFs do not receive automatic re-anchoring in v1.
+
+Colors are yellow, green, blue, pink, and purple. Color controls always include names, selection borders, and checkmarks, and users can change an existing annotation's color from the inspector with native Undo and Redo. Annotation rows remain understandable without distinguishing hue, and Canopy respects increased-contrast and differentiate-without-color preferences. Area Annotation overlays use a clear border and light translucent fill; increased contrast strengthens the border and Differentiate Without Color adds the color's non-color symbol.
 
 ## Window and state ownership
 
-The primary `WindowGroup` contains a stable sidebar-detail layout with a native inspector:
+Canopy v1 has one primary window containing a stable sidebar-detail layout with a native inspector:
 
 - Sidebar: recent history, full library, basic sorting, and search
 - Detail: PDFKit reader and reader toolbar
-- Inspector: one page-ordered annotation list with quotations and inline note editing
+- Inspector: one page-ordered annotation list with text quotations or Area Annotation previews and inline note editing
 
 Paper metadata is managed in a dedicated **Paper Info** sheet opened from an info button in the reader toolbar, the Paper row's **Get Info** context-menu command, or `⌘I`. The sheet contains editable bibliographic fields and Author Credits, field provenance, source status and location, and Reparse Metadata; it does not occupy another column. All edits and approved reparse replacements remain staged until the user chooses Save; Cancel discards the entire transaction. Author Credits use ordered rows with add, remove, and drag-to-reorder controls; each exposes a display name and permits correction of the derived family name when expanded.
 
-Window selection and expansion are scene-scoped. Window geometry and column widths are app preferences. Each paper stores page, viewport, zoom, and inspector visibility. The reader saves navigation state with a debounce; highlight creation and deletion save transactionally; note typing saves after a short debounce and on focus loss.
+The selected Paper and transient reader interaction state belong to the single window. macOS native restoration owns window geometry and column widths; Canopy supplies sensible default and minimum dimensions without persisting a parallel geometry preference. Each Paper stores page, viewport, zoom, and inspector visibility. Switching Papers flushes the outgoing state before verifying and restoring the incoming Paper. Find queries/results, text selections, annotation popovers, and focused annotations reset on a Paper swap. The reader saves navigation state with a debounce; annotation creation and deletion save transactionally; note typing saves after a short debounce and on focus loss.
 
 ## Library behavior
 
-- Launch with no selected document.
+- Launch with no selected Paper.
 - Show recently opened papers above the remaining alphabetical library.
 - “Clear Recent History” removes only opened timestamps.
 - Full-library sorting supports Title and Date Added.
 - Search ranks title before authors/year and note text.
 - Exact duplicate content, detected by SHA-256, maps to one paper record.
-- Scanned PDFs are readable but have no text highlighting, document find, or title inference when text is unavailable.
+- Scanned PDFs are readable and support Area Annotations, but have no text highlighting, document Find, or title inference when text is unavailable. The reader explains that the PDF has no selectable text and disables text-dependent controls without treating the Paper as an Add Batch exception.
 - Password-protected and damaged PDFs fail import with a specific explanation.
 
 ## Metadata behavior
@@ -101,8 +101,9 @@ Canopy reads embedded PDF metadata locally and validates every field before assi
 - Zoom in/out, Fit Width, and Actual Size
 - Native in-document find with next/previous result and count
 - Selection-adjacent five-color highlight palette
+- One-shot Area Annotation mode from the reader toolbar or Paper menu (`⌘⇧A`): the user draws one rectangle on one page, `Esc` cancels, and completion presents the existing color/note palette
 - Optional “Add Note” path into the inspector
-- No outline, thumbnail rail, OCR, page-area annotation, or semantic annotation categories
+- No outline, thumbnail rail, OCR, or semantic annotation categories
 
 ## Architecture
 
@@ -111,7 +112,7 @@ Canopy reads embedded PDF metadata locally and validates every field before assi
 ```text
 Canopy app target
   App/                 scenes and commands
-  Stores/              scene-scoped workflows, annotation session, and Undo coordination
+  Stores/              window-scoped workflows, annotation session, and Undo coordination
   Views/               library, reader, and inspector composition
   Resources/           entitlements and assets
 
@@ -129,43 +130,59 @@ Status labels describe the current branch, not release readiness. The release ga
 
 ### 0. Foundation
 
-**Status: Implemented.**
+**Status: Functional foundation implemented; v1 refinement pending.** The app and persistence boundaries exist. Before release, replace multi-window `WindowGroup` behavior with one primary Canopy window, route commands to that window, and replace the database-open crash with a non-destructive startup recovery screen offering Retry, Reveal Library Data, and Quit. A managed-copy reconciliation failure must allow the library to open while showing a persistent retryable warning.
+
+Remaining:
+
+- [ ] Enforce one primary Canopy window and window-targeted commands.
+- [ ] Finalize the unreleased v1 schema: remove embedded PDF dates and annotation context fields; add annotation kind/area geometry and the selectable-text capability needed by the reader.
+- [ ] Add the non-destructive database-open recovery screen.
+- [ ] Surface managed-copy reconciliation failures without blocking the library.
 
 - Generate the Xcode project and establish App Store sandbox entitlements.
 - Discard the unshipped scaffold's development SwiftData container; replace its draft schema rather than migrating it. No real user library data exists yet.
 - Define the versioned SwiftData schema and repository boundary.
-- Establish the three-pane window shell and build/run entrypoint.
+- Establish the sidebar-reader-inspector window shell and build/run entrypoint.
 - Add temporary and on-disk persistence test helpers.
 
 ### 1. Import and document identity
 
-**Status: Implemented.** The functional Add Papers foundation, identity checks, duplicate review, storage choices, progress, summaries, exact-match repair or relocation, in-reader and library recovery actions, managed-copy restoration, confirmed referenced/managed removal, and lightweight background availability checks are available.
+**Status: Functional foundation implemented; v1 refinement pending.** Identity checks, duplicate review, storage choices, progress, summaries, exact-match repair or relocation, in-reader and library recovery actions, managed-copy restoration, confirmed referenced/managed removal, and lightweight background availability checks are available. Remaining work narrows Potential Duplicate Review, makes Checking Papers cancellable, removes full-document text extraction from Preflight, routes a known changed file directly back through Add Papers, and adds Locate Source as an exact-match fallback for Source Unavailable.
+
+Remaining:
+
+- [ ] Make Checking Papers cancellable and keep Adding Papers commit completion deterministic.
+- [ ] Replace full-document text extraction with first-page metadata, direct page count, and a lightweight selectable-text signal.
+- [ ] Narrow and align the Potential Duplicate comparison fields.
+- [ ] Route a known changed file directly through Add Papers.
+- [ ] Add exact-match Locate Source fallback for Source Unavailable.
 
 - Implement open-panel and drag-and-drop Add Batches.
 - Route the sidebar toolbar button, File → Add Papers (`⌘O`), and library drag-and-drop through one shared Add Batch workflow. After selection or drop, show the same compact sheet with file count, total size, **Reference Originals** selected by default, **Keep Copies in Canopy**, Add Papers, and Cancel.
 - Run Preflight silently and show review or summary UI only for duplicates, skipped candidates, invalid files, or failures.
-- If Preflight lasts beyond a short delay, show non-cancellable progress while keeping the app responsive; no library changes occur until Preflight completes. Use a determinate 0–100% bar weighted primarily by total bytes hashed, plus “Processing n of total” and the current filename. Reserve a small final portion for metadata parsing so 100% means Preflight is complete.
+- If Preflight lasts beyond a short delay, show cancellable progress while keeping the app responsive; cancellation makes no library changes. Use a determinate 0–100% bar weighted primarily by total bytes hashed, plus “Processing n of total” and the current filename. Reserve a small final portion for metadata parsing so 100% means Preflight is complete. Once Adding Papers begins, let its short sequence of independent file/database commits finish rather than introducing partial-cancellation semantics.
 - Continue the same progress surface through two labeled phases: **Checking Papers** for Preflight and **Adding Papers** for managed-file copies and database commits.
 - Commit accepted Papers independently during Adding Papers. Preserve successful additions, continue after isolated failures when safe, and identify each failure in the exception-only Add Batch Summary.
 - Do not retain Add Batch Summary history. Keep the exception report available until dismissal and provide Copy Report for troubleshooting.
 - Copy Report includes filenames and filesystem paths with the home directory abbreviated as `~/`, but excludes PDF text, bookmark data, content fingerprints, and metadata beyond fields already visible in the summary.
 - Create and resolve security-scoped bookmarks.
 - Stream SHA-256 fingerprints and collapse exact duplicates.
-- Compare Potential Duplicates without creating version relationships; offer Add as Separate Paper, Keep Existing, or Cancel Remaining Additions.
+- Analyze only first-page text for metadata, obtain page count directly from PDFKit, and use a lightweight early-exit scan to record whether the PDF has any selectable text. Do not extract and retain every page's text during Preflight.
+- Compare Potential Duplicates without creating version relationships; offer Add as Separate Paper, Keep Existing, or Cancel Add Batch.
 - Present Potential Duplicates in one list-and-detail review. Require a decision per candidate, while offering reversible **Add All as Separate** and **Keep All Existing** bulk choices before final confirmation.
-- Compare each triggered candidate with side-by-side metadata and provenance, filename, Remembered Location, file size, page count, embedded dates, normalized extracted-text similarity, and the pages whose extracted text differs. Full paragraph-level and visual PDF diffing is deferred.
-- Trigger Potential Duplicate Review only from deterministic evidence: exact DOI, exact base arXiv identifier, exact normalized title plus matching author surname, or exact normalized title plus matching year. General text similarity may inform an already-triggered comparison but never trigger one.
+- Compare each triggered candidate with side-by-side trigger reason, title, comparable full author names, year, DOI/arXiv ID, filename or Remembered Location, file size, and page count. Do not compute or show metadata provenance, embedded PDF dates, text-similarity scores, or differing-page analysis in v1.
+- Trigger Potential Duplicate Review only from deterministic evidence: exact DOI, exact base arXiv identifier, exact normalized title plus matching author surname, or exact normalized title plus matching year. General text similarity does not participate in v1 duplicate review.
 - Compare Add Batch candidates both against the existing library and against earlier candidates in the same Preflight so a single batch cannot introduce Exact or Potential Duplicates unnoticed.
 - When a referenced Add Batch contains multiple exact-matching candidates, show their paths and let the user choose the source location to retain. For managed-copy batches, retain one exact candidate and skip the others without a location prompt.
-- Validate PDFs and report scanned, encrypted, damaged, missing, offline, and changed states.
+- Validate selected PDFs, record whether selectable text is available, and report specific encrypted, unreadable/damaged, missing, or inaccessible failures. Changed, unavailable, and missing-source outcomes for existing Papers use the compact persisted source-state model defined above.
 - Preserve a referenced Source PDF's Remembered Location. Present Broken References in place with a broken-link symbol and Source Missing label; opening one offers Locate Source, Remove from Library, or Cancel.
 - Require an exact SHA-256 match for Repair Reference.
 - When Add Papers finds an Exact Duplicate of a Paper with a Broken Reference, offer Repair Existing Paper or Keep Broken instead of creating another Paper.
 - When Add Papers finds an Exact Duplicate of a healthy referenced Paper, offer Use New Location, Open Existing Paper, Reveal Current Source, or Dismiss. Relocate Source requires the same SHA-256 fingerprint and only replaces the bookmark and Remembered Location.
 - Repairing an externally referenced Paper preserves referenced storage and creates a new bookmark; the Add Batch storage choice applies only to newly added Papers.
 - If a Canopy-managed Source PDF is absent, mark the Paper Library Copy Missing. An exact SHA-256 match selected by the user is copied back into managed storage; nonmatching content is rejected or routed through Add Papers as separate.
-- If a referenced file remains reachable but its SHA-256 fingerprint changes, mark the Paper Source Changed and block its old annotations and reading state from applying. Offer Locate Original, Add Changed File as Separate Paper, Remove from Library, or Cancel; never silently replace the existing Paper's source.
-- Distinguish Source Unavailable for temporarily unreachable external or cloud locations from Broken Reference. Preserve the bookmark, expose Retry, and return the Paper to healthy automatically after access and identity checks succeed.
+- If a referenced file remains reachable but its SHA-256 fingerprint changes, mark the Paper Source Changed and block its old annotations and reading state from applying. Offer Locate Original, Add Changed File as Separate Paper, Remove from Library, or Cancel; never silently replace the existing Paper's source. Add Changed File uses the known changed location and routes it directly through the ordinary storage-choice, Preflight, and duplicate checks, falling back to a picker only if that location is no longer accessible.
+- Distinguish Source Unavailable for temporarily unreachable external or cloud locations from Broken Reference. Preserve the bookmark, expose Retry as the primary action and exact-match Locate Source as a fallback, and return the Paper to healthy automatically after access and identity checks succeed.
 - When the library opens, perform lightweight background availability checks that do not intentionally materialize File Provider placeholders. Resolve bookmark access, compare attributes, and conditionally hash only when the user opens a Paper or explicitly retries it; Canopy itself makes no network requests.
 
 ### 2. Library
@@ -179,25 +196,47 @@ Status labels describe the current branch, not release readiness. The release ga
 
 ### 3. Reader and resume
 
-**Status: Implemented.** Source identity is verified before the current session applies reading state or loads annotations. Reader-state persistence failures are surfaced with retry behavior.
+**Status: Functional foundation implemented; v1 refinement pending.** Source identity is verified before the current session applies reading state or loads annotations. Reader-state persistence failures are surfaced with retry behavior. Remaining work makes Find asynchronous and cancellable, communicates PDFs without selectable text, and verifies outgoing-save/incoming-restore behavior when swapping Papers in the single reader surface.
+
+Remaining:
+
+- [ ] Make document Find asynchronous, progressively counted, and cancellable.
+- [ ] Explain and disable text-dependent controls for PDFs without selectable text.
+- [ ] Verify outgoing-save/incoming-restore and transient-state reset across Paper swaps.
 
 - Wrap PDFKit with continuous scrolling and navigation controls.
-- Implement document-local find.
+- Implement asynchronous document-local Find that cancels prior work when the query changes or the user switches Papers and updates its result count progressively.
 - Persist and restore page, viewport, zoom, and inspector state.
 - Detect source changes before applying stored state or annotations.
 
-### 4. Highlights and notes
+### 4. Annotations and notes
 
-**Status: Implemented.** Highlights are stored separately from PDF bytes and rendered as temporary PDFKit overlays. A scene-scoped annotation session prevents stale annotations from appearing before current-source verification and exposes retryable verification or load failures. Create, delete, and note-edit operations support native Undo and Redo.
+**Status: Text-highlight foundation implemented; v1 refinement and Area Annotation pending.** Text highlights are stored separately from PDF bytes and rendered as temporary PDFKit overlays. A window-scoped annotation session prevents stale annotations from appearing before current-source verification and exposes retryable verification or load failures. Create, delete, and note-edit operations support native Undo and Redo. Remaining work adds Area Annotation, color editing with Undo/Redo, and a clear rejection of cross-page text selections.
+
+Remaining:
+
+- [ ] Implement Area Annotation capture, persistence, rendering, thumbnails, navigation, notes, Undo, and accessibility behavior.
+- [ ] Add inspector color editing with explicit save and Undo/Redo for both annotation kinds.
+- [ ] Reject cross-page text selections with clear guidance.
 
 - Capture composite selection anchors and render PDFKit overlays.
+- Restrict a text highlight to one page; if a selection crosses a page boundary, ask the user to select text on one page at a time.
 - Add the accessible contextual color palette.
 - Implement the page-ordered inspector and navigation to anchors.
+- Implement one-shot user-drawn Area Annotations with page rectangles, generated inspector thumbnails, region navigation, scanned-PDF support, toolbar and Paper-menu entry points, `⌘⇧A`, and `Esc` cancellation. Drawing remains a user-controlled pointer operation; VoiceOver covers mode instructions and every action before and after capture without attempting automatic region selection or image description.
+- Allow both annotation kinds to change color from the inspector with explicit save and native Undo/Redo.
 - Add debounced notes, explicit critical saves, persistence errors, and Undo.
 
 ### 5. Release hardening
 
-**Status: In progress.** The v1 surfaces expose keyboard-reachable reader commands and explicit VoiceOver labels or values for source status, progress, duplicate decisions, find results, and inspector state. A persistent Accessibility menu offers Follow System, Light, and Dark appearances plus app-level Increase Contrast and Differentiate Without Color options; macOS accessibility settings remain the baseline and app options can strengthen them. Highlight overlays, fills, borders, and non-color symbols adapt to the effective preferences. Manual cross-mode inspection, fixture coverage, packaging, and App Store work remain.
+**Status: In progress.** The current v1 surfaces expose keyboard-reachable reader commands and explicit VoiceOver labels or values for source status, progress, duplicate decisions, Find results, and inspector state. A persistent Accessibility menu offers Follow System, Light, and Dark appearances plus app-level Increase Contrast and Differentiate Without Color options; macOS accessibility settings remain the baseline and app options can strengthen them. Annotation overlays, fills, borders, and non-color symbols adapt to the effective preferences. Manual cross-mode inspection, Area Annotation accessibility verification, bounded fixture coverage, one end-to-end relaunch UI test, packaging, and App Store work remain.
+
+Remaining:
+
+- [ ] Complete manual cross-mode, keyboard, VoiceOver, and native PDF text inspection.
+- [ ] Add the bounded fixture matrix and one end-to-end terminate/relaunch UI journey.
+- [ ] Verify macOS 15 and the current macOS release.
+- [ ] Complete App Store identity, signing, privacy labels, screenshots, and review notes.
 
 - Complete keyboard and VoiceOver coverage.
 - Validate light, dark, increased-contrast, and differentiate-without-color modes.
@@ -208,12 +247,14 @@ Status labels describe the current branch, not release readiness. The release ga
 
 A release candidate must pass:
 
-- Unit tests for metadata validation, fingerprints, duplicates, anchors, and repositories
-- Real-store persistence tests that destroy and recreate containers
-- Multi-process or multi-launch tests covering create, update, delete, undo, recency clearing, and reading state
-- Migration tests opening fixtures from every released schema
+- Unit tests for metadata validation, fingerprints, duplicates, text/area anchors, and repositories
+- Repository-level on-disk tests that save, destroy the container, and reopen it to cover create, update, delete, Undo, recency clearing, annotations, and reading state
+- Initial-schema creation and reopen coverage. Historical migration fixtures begin when a second released schema exists; v1 has no earlier public schema to migrate.
 - File lifecycle integration tests for reference and copy modes
-- UI smoke tests for import → read → highlight → note → terminate → relaunch → resume
-- Manual fixture-library checks and accessibility inspection
+- One automated UI journey for Add Papers → read → highlight → note → terminate → relaunch → reopen → verify annotation and reading position
+- A small fixed fixture matrix covering a representative large PDF, scanned PDF, malformed metadata, missing source, modified source, and damaged/password-protected Add Papers failures. Verify one external-volume disconnect/reconnect manually rather than building removable-drive automation.
+- Manual accessibility inspection in light, dark, increased-contrast, and Differentiate Without Color modes, including native PDF text with VoiceOver and the Area Annotation workflow
+- Verification on macOS 15 and the current macOS release
+- App Store identity, signing, privacy labels, screenshots, and review notes
 
-No feature is complete without its empty, error, offline/unavailable, cancellation, persistence, and relaunch behavior.
+Each workflow must cover the empty, failure, cancellation, persistence, source-availability, and relaunch states that actually apply to it. The release checklist records why a state is not applicable rather than manufacturing behavior that does not exist.
