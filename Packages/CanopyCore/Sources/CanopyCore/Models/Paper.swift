@@ -42,8 +42,7 @@ public final class Paper {
     public var sourceFileSize: Int64
     public var sourceModificationDate: Date?
     public var pageCount: Int
-    public var embeddedCreationDate: Date?
-    public var embeddedModificationDate: Date?
+    public var hasSelectableText: Bool
     public var dateAdded: Date
     public var lastOpenedAt: Date?
     public var lastPageIndex: Int?
@@ -116,8 +115,7 @@ public final class Paper {
         sourceFileSize: Int64,
         sourceModificationDate: Date? = nil,
         pageCount: Int = 0,
-        embeddedCreationDate: Date? = nil,
-        embeddedModificationDate: Date? = nil,
+        hasSelectableText: Bool = false,
         dateAdded: Date = .now,
         authorCredits: [AuthorCredit] = []
     ) {
@@ -140,8 +138,7 @@ public final class Paper {
         self.sourceFileSize = sourceFileSize
         self.sourceModificationDate = sourceModificationDate
         self.pageCount = pageCount
-        self.embeddedCreationDate = embeddedCreationDate
-        self.embeddedModificationDate = embeddedModificationDate
+        self.hasSelectableText = hasSelectableText
         self.dateAdded = dateAdded
         self.lastOpenedAt = nil
         self.lastPageIndex = nil

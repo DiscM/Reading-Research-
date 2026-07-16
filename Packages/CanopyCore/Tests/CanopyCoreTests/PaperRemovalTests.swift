@@ -22,16 +22,15 @@ struct PaperRemovalTests {
         let paperID = UUID()
         let firstAuthorID = UUID()
         let secondAuthorID = UUID()
-        let annotationID = UUID()
+        let textAnnotationID = UUID()
+        let areaAnnotationID = UUID()
         let sourceModifiedAt = Date(timeIntervalSince1970: 1_700_000_000)
-        let embeddedCreatedAt = Date(timeIntervalSince1970: 1_600_000_000)
-        let embeddedModifiedAt = Date(timeIntervalSince1970: 1_650_000_000)
         let addedAt = Date(timeIntervalSince1970: 1_680_000_000)
         let openedAt = Date(timeIntervalSince1970: 1_710_000_000)
         let annotationCreatedAt = Date(timeIntervalSince1970: 1_705_000_000)
         let annotationUpdatedAt = Date(timeIntervalSince1970: 1_706_000_000)
         let viewport = PaperViewport(x: 12, y: 34, width: 560, height: 720)
-        let anchor = AnnotationAnchor(
+        let anchor = TextAnnotationAnchor(
             pageIndex: 3,
             quadrilaterals: [
                 AnnotationQuadrilateral(
@@ -41,9 +40,11 @@ struct PaperRemovalTests {
                     lowerRight: AnnotationPoint(x: 80, y: 20)
                 )
             ],
-            selectedText: "A retained finding",
-            contextBefore: "Before",
-            contextAfter: "After"
+            selectedText: "A retained finding"
+        )
+        let areaAnchor = AreaAnnotationAnchor(
+            pageIndex: 5,
+            rect: AnnotationRect(x: 30, y: 60, width: 180, height: 120)
         )
 
         let container = try CanopyModelContainer.make(inMemory: true)
@@ -66,8 +67,7 @@ struct PaperRemovalTests {
             sourceFileSize: Int64(sourceBytes.count),
             sourceModificationDate: sourceModifiedAt,
             pageCount: 9,
-            embeddedCreationDate: embeddedCreatedAt,
-            embeddedModificationDate: embeddedModifiedAt,
+            hasSelectableText: true,
             dateAdded: addedAt,
             authorCredits: [
                 AuthorCredit(
@@ -97,19 +97,28 @@ struct PaperRemovalTests {
                 isInspectorPresented: false
             )
         )
-        _ = try repository.createAnnotations(
+        _ = try repository.createTextAnnotations(
             paperID: paperID,
             anchors: [anchor],
             color: .purple,
             note: "Original note"
         ).map { annotation in
-            annotation.id = annotationID
+            annotation.id = textAnnotationID
             annotation.createdAt = annotationCreatedAt
             annotation.updatedAt = annotationCreatedAt
         }
+        let areaAnnotation = try repository.createAreaAnnotation(
+            paperID: paperID,
+            anchor: areaAnchor,
+            color: .green,
+            note: "Area note"
+        )
+        areaAnnotation.id = areaAnnotationID
+        areaAnnotation.createdAt = annotationCreatedAt.addingTimeInterval(1)
+        areaAnnotation.updatedAt = annotationCreatedAt.addingTimeInterval(1)
         try repository.save()
         try repository.updateAnnotationNote(
-            annotationID: annotationID,
+            annotationID: textAnnotationID,
             note: "Updated note",
             at: annotationUpdatedAt
         )
@@ -119,7 +128,7 @@ struct PaperRemovalTests {
         #expect(try repository.paper(id: paperID) == nil)
         #expect(!FileManager.default.fileExists(atPath: sourceURL.path))
         #expect(snapshot.authorCredits.map(\.id) == [firstAuthorID, secondAuthorID])
-        #expect(snapshot.annotations.map(\.id) == [annotationID])
+        #expect(Set(snapshot.annotations.map(\.id)) == [textAnnotationID, areaAnnotationID])
 
         try repository.restoreRemovedPaper(snapshot: snapshot, managedStore: managedStore)
 
@@ -143,8 +152,7 @@ struct PaperRemovalTests {
         #expect(restored.sourceFileSize == Int64(sourceBytes.count))
         #expect(restored.sourceModificationDate == sourceModifiedAt)
         #expect(restored.pageCount == 9)
-        #expect(restored.embeddedCreationDate == embeddedCreatedAt)
-        #expect(restored.embeddedModificationDate == embeddedModifiedAt)
+        #expect(restored.hasSelectableText)
         #expect(restored.dateAdded == addedAt)
         #expect(restored.lastOpenedAt == openedAt)
         #expect(try repository.readerState(paperID: paperID) == PaperReaderState(
@@ -154,13 +162,19 @@ struct PaperRemovalTests {
             isInspectorPresented: false
         ))
         #expect(restored.authorCredits.sorted { $0.position < $1.position }.map(\.id) == [firstAuthorID, secondAuthorID])
-        let restoredAnnotation = try #require(try repository.annotations(paperID: paperID).first)
-        #expect(restoredAnnotation.id == annotationID)
-        #expect(restoredAnnotation.anchor == anchor)
-        #expect(restoredAnnotation.color == .purple)
-        #expect(restoredAnnotation.note == "Updated note")
-        #expect(restoredAnnotation.createdAt == annotationCreatedAt)
-        #expect(restoredAnnotation.updatedAt == annotationUpdatedAt)
+        let restoredAnnotations = Dictionary(
+            uniqueKeysWithValues: try repository.annotations(paperID: paperID).map { ($0.id, $0) }
+        )
+        let restoredTextAnnotation = try #require(restoredAnnotations[textAnnotationID])
+        #expect(restoredTextAnnotation.textAnchor == anchor)
+        #expect(restoredTextAnnotation.color == .purple)
+        #expect(restoredTextAnnotation.note == "Updated note")
+        #expect(restoredTextAnnotation.createdAt == annotationCreatedAt)
+        #expect(restoredTextAnnotation.updatedAt == annotationUpdatedAt)
+        let restoredAreaAnnotation = try #require(restoredAnnotations[areaAnnotationID])
+        #expect(restoredAreaAnnotation.areaAnchor == areaAnchor)
+        #expect(restoredAreaAnnotation.color == .green)
+        #expect(restoredAreaAnnotation.note == "Area note")
         #expect(try regularFiles(in: directory) == [relativePath])
 
         let redoSnapshot = try repository.removePaper(paperID: paperID, managedStore: managedStore)

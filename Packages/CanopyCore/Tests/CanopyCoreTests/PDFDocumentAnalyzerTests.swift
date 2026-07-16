@@ -7,6 +7,40 @@ import Testing
 
 @Suite("Source PDF metadata parsing")
 struct PDFDocumentAnalyzerTests {
+    @Test("page count and selectable-text capability do not retain later-page text as metadata")
+    func recordsDocumentCapabilitiesWithoutUsingLaterPagesForMetadata() throws {
+        let fixture = try MultiPagePDFFixture(
+            filename: "Filename Fallback.pdf",
+            pages: [
+                [],
+                ["A Later Page Must Not Become the Paper Title"],
+                ["Additional selectable body text"]
+            ]
+        )
+        defer { fixture.remove() }
+
+        let metadata = try PDFDocumentAnalyzer().analyze(fixture.url)
+
+        #expect(metadata.title == "Filename Fallback")
+        #expect(metadata.titleProvenance == .filenameFallback)
+        #expect(metadata.pageCount == 3)
+        #expect(metadata.hasSelectableText)
+    }
+
+    @Test("a PDF without a text layer records that text is not selectable")
+    func recordsMissingSelectableText() throws {
+        let fixture = try MultiPagePDFFixture(
+            filename: "Scanned Research.pdf",
+            pages: [[], []]
+        )
+        defer { fixture.remove() }
+
+        let metadata = try PDFDocumentAnalyzer().analyze(fixture.url)
+
+        #expect(metadata.pageCount == 2)
+        #expect(!metadata.hasSelectableText)
+    }
+
     @Test("prominent multiline first-page title is preferred over a running header")
     func extractsProminentMultilineTitleAndAuthors() throws {
         let fixture = try MetadataPDFFixture(lines: [
@@ -262,6 +296,38 @@ struct PDFDocumentAnalyzerTests {
 
         #expect(metadata.title == "Heal the Planet")
         #expect(metadata.authors.isEmpty)
+    }
+}
+
+private struct MultiPagePDFFixture {
+    let directory: URL
+    let url: URL
+
+    init(filename: String, pages: [[String]]) throws {
+        directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        url = directory.appendingPathComponent(filename)
+
+        var mediaBox = CGRect(x: 0, y: 0, width: 612, height: 792)
+        guard let context = CGContext(url as CFURL, mediaBox: &mediaBox, nil) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        for lines in pages {
+            context.beginPDFPage(nil)
+            for (index, text) in lines.enumerated() {
+                let font = NSFont(name: "Times New Roman", size: 18) ?? .systemFont(ofSize: 18)
+                let value = NSAttributedString(string: text, attributes: [.font: font])
+                context.textPosition = CGPoint(x: 72, y: 700 - CGFloat(index * 28))
+                CTLineDraw(CTLineCreateWithAttributedString(value), context)
+            }
+            context.endPDFPage()
+        }
+        context.closePDF()
+    }
+
+    func remove() {
+        try? FileManager.default.removeItem(at: directory)
     }
 }
 

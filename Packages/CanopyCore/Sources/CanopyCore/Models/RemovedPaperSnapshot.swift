@@ -52,8 +52,7 @@ public struct RemovedPaperSnapshot: Equatable, Sendable {
     public let sourceFileSize: Int64
     public let sourceModificationDate: Date?
     public let pageCount: Int
-    public let embeddedCreationDate: Date?
-    public let embeddedModificationDate: Date?
+    public let hasSelectableText: Bool
     public let dateAdded: Date
     public let lastOpenedAt: Date?
     public let lastPageIndex: Int?
@@ -84,8 +83,7 @@ public struct RemovedPaperSnapshot: Equatable, Sendable {
         sourceFileSize = paper.sourceFileSize
         sourceModificationDate = paper.sourceModificationDate
         pageCount = paper.pageCount
-        embeddedCreationDate = paper.embeddedCreationDate
-        embeddedModificationDate = paper.embeddedModificationDate
+        hasSelectableText = paper.hasSelectableText
         dateAdded = paper.dateAdded
         lastOpenedAt = paper.lastOpenedAt
         lastPageIndex = paper.lastPageIndex

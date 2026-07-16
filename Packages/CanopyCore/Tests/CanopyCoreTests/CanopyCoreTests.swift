@@ -40,7 +40,7 @@ struct CanopyCoreTests {
         )
         let analyzer = StubDocumentAnalyzer(metadata: .init(title: "Candidate", titleProvenance: .firstPage))
 
-        let result = AddBatchPreflight(analyzer: analyzer).run(urls: [fixture.url], existingPapers: [existing])
+        let result = try AddBatchPreflight(analyzer: analyzer).run(urls: [fixture.url], existingPapers: [existing])
 
         #expect(result.ready.isEmpty)
         #expect(result.exactDuplicates.count == 1)
@@ -56,31 +56,51 @@ struct CanopyCoreTests {
             authorFamilyNames: ["Smith"],
             publicationYear: 2025,
             doi: "10.1000/canopy",
-            arxivID: nil,
+            arxivID: "2401.12345v1",
             sourceState: .available,
             rememberedLocation: nil
         )
         let doiFile = try TemporaryFile(contents: Data("doi-candidate".utf8), filename: "doi.pdf")
+        let arxivFile = try TemporaryFile(contents: Data("arxiv-candidate".utf8), filename: "arxiv.pdf")
+        let titleAuthorFile = try TemporaryFile(contents: Data("title-author-candidate".utf8), filename: "title-author.pdf")
         let titleYearFile = try TemporaryFile(contents: Data("title-year-candidate".utf8), filename: "title-year.pdf")
         let titleOnlyFile = try TemporaryFile(contents: Data("title-only-candidate".utf8), filename: "title-only.pdf")
-        defer { doiFile.remove(); titleYearFile.remove(); titleOnlyFile.remove() }
+        defer {
+            doiFile.remove()
+            arxivFile.remove()
+            titleAuthorFile.remove()
+            titleYearFile.remove()
+            titleOnlyFile.remove()
+        }
 
-        let doiResult = AddBatchPreflight(analyzer: StubDocumentAnalyzer(metadata: .init(
+        let doiResult = try AddBatchPreflight(analyzer: StubDocumentAnalyzer(metadata: .init(
             title: "Different title",
             titleProvenance: .firstPage,
             doi: "https://doi.org/10.1000/CANOPY"
         ))).run(urls: [doiFile.url], existingPapers: [existing])
-        let titleYearResult = AddBatchPreflight(analyzer: StubDocumentAnalyzer(metadata: .init(
+        let arxivResult = try AddBatchPreflight(analyzer: StubDocumentAnalyzer(metadata: .init(
+            title: "Different title",
+            titleProvenance: .firstPage,
+            arxivID: "arXiv:2401.12345v9"
+        ))).run(urls: [arxivFile.url], existingPapers: [existing])
+        let titleAuthorResult = try AddBatchPreflight(analyzer: StubDocumentAnalyzer(metadata: .init(
+            title: "A canopy study results",
+            titleProvenance: .firstPage,
+            authors: [.init(displayName: "Jamie Smith", familyName: "Smith", provenance: .firstPage)]
+        ))).run(urls: [titleAuthorFile.url], existingPapers: [existing])
+        let titleYearResult = try AddBatchPreflight(analyzer: StubDocumentAnalyzer(metadata: .init(
             title: "A canopy study results",
             titleProvenance: .firstPage,
             publicationYear: 2025
         ))).run(urls: [titleYearFile.url], existingPapers: [existing])
-        let titleOnlyResult = AddBatchPreflight(analyzer: StubDocumentAnalyzer(metadata: .init(
+        let titleOnlyResult = try AddBatchPreflight(analyzer: StubDocumentAnalyzer(metadata: .init(
             title: "A canopy study results",
             titleProvenance: .firstPage
         ))).run(urls: [titleOnlyFile.url], existingPapers: [existing])
 
         #expect(doiResult.potentialDuplicates.count == 1)
+        #expect(arxivResult.potentialDuplicates.count == 1)
+        #expect(titleAuthorResult.potentialDuplicates.count == 1)
         #expect(titleYearResult.potentialDuplicates.count == 1)
         #expect(titleOnlyResult.potentialDuplicates.isEmpty)
         #expect(titleOnlyResult.ready.count == 1)
@@ -93,7 +113,7 @@ struct CanopyCoreTests {
         defer { first.remove(); second.remove() }
         let analyzer = StubDocumentAnalyzer(metadata: .init(title: "Same Paper", titleProvenance: .firstPage))
 
-        let result = AddBatchPreflight(analyzer: analyzer).run(urls: [first.url, second.url], existingPapers: [])
+        let result = try AddBatchPreflight(analyzer: analyzer).run(urls: [first.url, second.url], existingPapers: [])
 
         #expect(result.ready.count == 1)
         #expect(result.withinBatchExactDuplicates.count == 1)
@@ -109,15 +129,22 @@ struct CanopyCoreTests {
         let analyzer = StubDocumentAnalyzer(metadata: .init(
             title: "Shared Research Title",
             titleProvenance: .firstPage,
-            publicationYear: 2026
+            authors: [.init(displayName: "Ada Lovelace", familyName: "Lovelace", provenance: .firstPage)],
+            publicationYear: 2026,
+            pageCount: 14,
+            hasSelectableText: true
         ))
 
-        let result = AddBatchPreflight(analyzer: analyzer).run(urls: [first.url, second.url], existingPapers: [])
+        let result = try AddBatchPreflight(analyzer: analyzer).run(urls: [first.url, second.url], existingPapers: [])
 
         #expect(result.ready.count == 1)
         #expect(result.potentialDuplicates.count == 1)
         #expect(result.potentialDuplicates.first?.candidate.url == second.url)
         #expect(result.potentialDuplicates.first?.existingPapers.first?.rememberedLocation == first.url.path)
+        #expect(result.potentialDuplicates.first?.existingPapers.first?.sourceFilename == "first.pdf")
+        #expect(result.potentialDuplicates.first?.existingPapers.first?.sourceFileSize == 13)
+        #expect(result.potentialDuplicates.first?.existingPapers.first?.pageCount == 14)
+        #expect(result.potentialDuplicates.first?.existingPapers.first?.authorDisplayNames == ["Ada Lovelace"])
     }
 
     @Test("Preflight byte progress is monotonic and completes")
@@ -127,7 +154,7 @@ struct CanopyCoreTests {
         let analyzer = StubDocumentAnalyzer(metadata: .init(title: "Large Paper", titleProvenance: .firstPage))
         let recorder = ProgressRecorder()
 
-        _ = AddBatchPreflight(analyzer: analyzer).run(urls: [fixture.url], existingPapers: []) { update in
+        _ = try AddBatchPreflight(analyzer: analyzer).run(urls: [fixture.url], existingPapers: []) { update in
             recorder.append(update.fractionCompleted)
         }
 
@@ -149,7 +176,9 @@ struct CanopyCoreTests {
             publicationYear: 2026,
             publicationYearProvenance: .firstPage,
             doi: "10.1000/approved",
-            doiProvenance: .firstPage
+            doiProvenance: .firstPage,
+            pageCount: 12,
+            hasSelectableText: true
         )
         let candidate = PreflightCandidate(
             url: URL(fileURLWithPath: "/Research/approved.pdf"),
@@ -168,6 +197,8 @@ struct CanopyCoreTests {
         #expect(paper.storageMode == .referenced)
         #expect(paper.bookmarkData == Data([1, 2, 3]))
         #expect(paper.authorCredits.map(\.displayName) == ["Jane Smith"])
+        #expect(paper.pageCount == 12)
+        #expect(paper.hasSelectableText)
         #expect(try repository.paperIdentitySnapshots().map(\.id) == [paper.id])
     }
 
@@ -988,7 +1019,7 @@ struct CanopyCoreTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let paperID = UUID()
         let annotationID: UUID
-        let anchor = AnnotationAnchor(
+        let anchor = TextAnnotationAnchor(
             pageIndex: 2,
             quadrilaterals: [
                 AnnotationQuadrilateral(
@@ -1004,9 +1035,7 @@ struct CanopyCoreTests {
                     lowerRight: AnnotationPoint(x: 140, y: 44)
                 )
             ],
-            selectedText: "A composite selection",
-            contextBefore: "before ",
-            contextAfter: " after"
+            selectedText: "A composite selection"
         )
 
         do {
@@ -1027,7 +1056,7 @@ struct CanopyCoreTests {
                 pageCount: 5
             )
             try repository.insert(paper)
-            let annotations = try repository.createAnnotations(
+            let annotations = try repository.createTextAnnotations(
                 paperID: paperID,
                 anchors: [anchor],
                 color: .purple,
@@ -1045,7 +1074,7 @@ struct CanopyCoreTests {
         let repository = LibraryRepository(container: reopened)
         let annotation = try #require(try repository.annotations(paperID: paperID).first)
         #expect(annotation.id == annotationID)
-        #expect(annotation.anchor == anchor)
+        #expect(annotation.textAnchor == anchor)
         #expect(annotation.color == .purple)
         #expect(annotation.note == "Initial note")
 
@@ -1055,7 +1084,7 @@ struct CanopyCoreTests {
 
         let restored = try repository.restoreAnnotation(snapshot)
         #expect(restored.note == "Edited note")
-        #expect(restored.anchor == anchor)
+        #expect(restored.textAnchor == anchor)
         #expect(try repository.annotations(paperID: paperID).map(\.id) == [annotationID])
     }
 
@@ -1074,7 +1103,7 @@ struct CanopyCoreTests {
             pageCount: 1
         )
         try repository.insert(paper)
-        let anchor = AnnotationAnchor(
+        let anchor = TextAnnotationAnchor(
             pageIndex: 0,
             quadrilaterals: [
                 AnnotationQuadrilateral(
@@ -1091,7 +1120,7 @@ struct CanopyCoreTests {
             _ = try repository.annotations(paperID: paper.id)
         }
         #expect(throws: LibraryRepositoryError.annotationsUnavailable) {
-            _ = try repository.createAnnotations(paperID: paper.id, anchors: [anchor], color: .yellow)
+            _ = try repository.createTextAnnotations(paperID: paper.id, anchors: [anchor], color: .yellow)
         }
     }
 

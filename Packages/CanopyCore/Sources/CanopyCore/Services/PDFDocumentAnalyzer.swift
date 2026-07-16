@@ -24,15 +24,21 @@ public struct PDFDocumentAnalyzer: DocumentAnalyzing {
         guard !document.isLocked else { throw PDFAnalysisError.encrypted }
 
         let attributes = document.documentAttributes ?? [:]
-        var pageTexts: [String] = []
-        pageTexts.reserveCapacity(document.pageCount)
-        for pageIndex in 0..<document.pageCount {
-            try Task.checkCancellation()
-            pageTexts.append(document.page(at: pageIndex)?.string ?? "")
+        let pageCount = document.pageCount
+        let firstPageObject = pageCount > 0 ? document.page(at: 0) : nil
+        let firstPage = firstPageObject?.string ?? ""
+        var hasSelectableText = containsSelectableText(firstPage)
+        if !hasSelectableText, pageCount > 1 {
+            for pageIndex in 1..<pageCount {
+                try Task.checkCancellation()
+                if containsSelectableText(document.page(at: pageIndex)?.string) {
+                    hasSelectableText = true
+                    break
+                }
+            }
         }
         try Task.checkCancellation()
-        let firstPage = pageTexts.first ?? ""
-        let firstPageMetadata = document.page(at: 0).map(inferFirstPageMetadata)
+        let firstPageMetadata = firstPageObject.map(inferFirstPageMetadata)
         let embeddedTitle = attributes[PDFDocumentAttribute.titleAttribute] as? String
         let validEmbeddedTitle = MetadataValidator.usableTitle(normalizedWhitespace(embeddedTitle))
         let inferredTitle = firstPageMetadata?.title
@@ -58,10 +64,14 @@ public struct PDFDocumentAnalyzer: DocumentAnalyzing {
             doiProvenance: doi == nil ? nil : .firstPage,
             arxivID: arxiv,
             arxivIDProvenance: arxiv == nil ? nil : .firstPage,
-            pageTexts: pageTexts,
-            embeddedCreationDate: attributes[PDFDocumentAttribute.creationDateAttribute] as? Date,
-            embeddedModificationDate: attributes[PDFDocumentAttribute.modificationDateAttribute] as? Date
+            pageCount: pageCount,
+            hasSelectableText: hasSelectableText
         )
+    }
+
+    private func containsSelectableText(_ value: String?) -> Bool {
+        guard let value else { return false }
+        return !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private func inferFirstPageMetadata(from page: PDFPage) -> FirstPageMetadata {

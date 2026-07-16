@@ -25,7 +25,7 @@ public enum LibraryRepositoryError: LocalizedError, Equatable {
         case .paperNotFound: "The Paper is no longer in the library."
         case .annotationNotFound: "The annotation is no longer attached to this Paper."
         case .annotationsUnavailable: "Canopy must verify the Paper's original Source PDF before changing its annotations."
-        case .invalidAnnotationAnchor: "The selected text could not be anchored in this PDF."
+        case .invalidAnnotationAnchor: "The annotation could not be anchored on this PDF page."
         case .invalidTitle: "Enter a valid title for this Paper."
         case .invalidPublicationYear: "Enter a publication year from 1000 through next year, or leave it blank."
         case .invalidDOI: "Enter a valid DOI, or leave it blank."
@@ -105,9 +105,8 @@ public final class LibraryRepository {
             rememberedLocation: rememberedLocation,
             sourceFileSize: candidate.fileSize,
             sourceModificationDate: candidate.modificationDate,
-            pageCount: candidate.metadata.pageTexts.count,
-            embeddedCreationDate: candidate.metadata.embeddedCreationDate,
-            embeddedModificationDate: candidate.metadata.embeddedModificationDate,
+            pageCount: candidate.metadata.pageCount,
+            hasSelectableText: candidate.metadata.hasSelectableText,
             authorCredits: credits
         )
         try insert(paper)
@@ -130,10 +129,7 @@ public final class LibraryRepository {
                 sourceFilename: paper.sourceFilename,
                 sourceFileSize: paper.sourceFileSize,
                 pageCount: paper.pageCount,
-                authorDisplayNames: paper.authorCredits.sorted { $0.position < $1.position }.map(\.displayName),
-                titleProvenance: paper.titleProvenance,
-                embeddedCreationDate: paper.embeddedCreationDate,
-                embeddedModificationDate: paper.embeddedModificationDate
+                authorDisplayNames: paper.authorCredits.sorted { $0.position < $1.position }.map(\.displayName)
             )
         }
     }
@@ -352,9 +348,27 @@ public final class LibraryRepository {
     }
 
     @discardableResult
-    public func createAnnotations(
+    public func createTextAnnotation(
         paperID: UUID,
-        anchors: [AnnotationAnchor],
+        anchor: TextAnnotationAnchor,
+        color: HighlightColor,
+        note: String = ""
+    ) throws -> Annotation {
+        guard let annotation = try createTextAnnotations(
+            paperID: paperID,
+            anchors: [anchor],
+            color: color,
+            note: note
+        ).first else {
+            throw LibraryRepositoryError.invalidAnnotationAnchor
+        }
+        return annotation
+    }
+
+    @discardableResult
+    public func createTextAnnotations(
+        paperID: UUID,
+        anchors: [TextAnnotationAnchor],
         color: HighlightColor,
         note: String = ""
     ) throws -> [Annotation] {
@@ -376,12 +390,42 @@ public final class LibraryRepository {
 
         do {
             let annotations = try anchors.map { anchor in
-                let annotation = try Annotation(anchor: anchor, color: color, note: note, paper: paper)
+                let annotation = try Annotation(textAnchor: anchor, color: color, note: note, paper: paper)
                 context.insert(annotation)
                 return annotation
             }
             try context.save()
             return Annotation.sortedInPageOrder(annotations)
+        } catch {
+            context.rollback()
+            throw error
+        }
+    }
+
+    @discardableResult
+    public func createAreaAnnotation(
+        paperID: UUID,
+        anchor: AreaAnnotationAnchor,
+        color: HighlightColor,
+        note: String = ""
+    ) throws -> Annotation {
+        guard let paper = try paper(id: paperID) else {
+            throw LibraryRepositoryError.paperNotFound
+        }
+        guard paper.sourceState == .available else {
+            throw LibraryRepositoryError.annotationsUnavailable
+        }
+        guard anchor.pageIndex >= 0,
+              anchor.pageIndex < max(paper.pageCount, 1),
+              anchor.rect.isValid else {
+            throw LibraryRepositoryError.invalidAnnotationAnchor
+        }
+
+        do {
+            let annotation = try Annotation(areaAnchor: anchor, color: color, note: note, paper: paper)
+            context.insert(annotation)
+            try context.save()
+            return annotation
         } catch {
             context.rollback()
             throw error
@@ -397,6 +441,28 @@ public final class LibraryRepository {
         }
         guard annotation.note != note else { return }
         annotation.note = note
+        annotation.updatedAt = date
+        do {
+            try context.save()
+        } catch {
+            context.rollback()
+            throw error
+        }
+    }
+
+    public func updateAnnotationColor(
+        annotationID: UUID,
+        color: HighlightColor,
+        at date: Date = .now
+    ) throws {
+        guard let annotation = try annotation(id: annotationID) else {
+            throw LibraryRepositoryError.annotationNotFound
+        }
+        guard annotation.paper?.sourceState == .available else {
+            throw LibraryRepositoryError.annotationsUnavailable
+        }
+        guard annotation.color != color else { return }
+        annotation.color = color
         annotation.updatedAt = date
         do {
             try context.save()
@@ -468,19 +534,8 @@ public final class LibraryRepository {
                 }
                 return (snapshot, paper)
             }
-            let annotations = snapshotPapers.map { snapshot, paper in
-                let annotation = Annotation(
-                    id: snapshot.id,
-                    pageIndex: snapshot.pageIndex,
-                    quadrilaterals: snapshot.quadrilaterals,
-                    selectedText: snapshot.selectedText,
-                    contextBefore: snapshot.contextBefore,
-                    contextAfter: snapshot.contextAfter,
-                    color: snapshot.color,
-                    note: snapshot.note,
-                    createdAt: snapshot.createdAt,
-                    paper: paper
-                )
+            let annotations = try snapshotPapers.map { snapshot, paper in
+                let annotation = try annotation(from: snapshot, paper: paper)
                 annotation.updatedAt = snapshot.updatedAt
                 context.insert(annotation)
                 return annotation
@@ -724,8 +779,7 @@ public final class LibraryRepository {
             sourceFileSize: snapshot.sourceFileSize,
             sourceModificationDate: snapshot.sourceModificationDate,
             pageCount: snapshot.pageCount,
-            embeddedCreationDate: snapshot.embeddedCreationDate,
-            embeddedModificationDate: snapshot.embeddedModificationDate,
+            hasSelectableText: snapshot.hasSelectableText,
             dateAdded: snapshot.dateAdded,
             authorCredits: authorCredits
         )
@@ -737,18 +791,7 @@ public final class LibraryRepository {
 
         context.insert(paper)
         for annotationSnapshot in snapshot.annotations {
-            let annotation = Annotation(
-                id: annotationSnapshot.id,
-                pageIndex: annotationSnapshot.pageIndex,
-                quadrilaterals: annotationSnapshot.quadrilaterals,
-                selectedText: annotationSnapshot.selectedText,
-                contextBefore: annotationSnapshot.contextBefore,
-                contextAfter: annotationSnapshot.contextAfter,
-                color: annotationSnapshot.color,
-                note: annotationSnapshot.note,
-                createdAt: annotationSnapshot.createdAt,
-                paper: paper
-            )
+            let annotation = try annotation(from: annotationSnapshot, paper: paper)
             annotation.updatedAt = annotationSnapshot.updatedAt
             context.insert(annotation)
         }
@@ -799,6 +842,42 @@ public final class LibraryRepository {
         var descriptor = FetchDescriptor<Annotation>(predicate: #Predicate { $0.id == id })
         descriptor.fetchLimit = 1
         return try context.fetch(descriptor).first
+    }
+
+    private func annotation(from snapshot: AnnotationSnapshot, paper: Paper) throws -> Annotation {
+        switch snapshot.kind {
+        case .textHighlight:
+            guard let anchor = snapshot.textAnchor,
+                  anchor.pageIndex >= 0,
+                  anchor.pageIndex < max(paper.pageCount, 1),
+                  !anchor.quadrilaterals.isEmpty,
+                  !anchor.selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw LibraryRepositoryError.invalidAnnotationAnchor
+            }
+            return try Annotation(
+                id: snapshot.id,
+                textAnchor: anchor,
+                color: snapshot.color,
+                note: snapshot.note,
+                createdAt: snapshot.createdAt,
+                paper: paper
+            )
+        case .area:
+            guard let anchor = snapshot.areaAnchor,
+                  anchor.pageIndex >= 0,
+                  anchor.pageIndex < max(paper.pageCount, 1),
+                  anchor.rect.isValid else {
+                throw LibraryRepositoryError.invalidAnnotationAnchor
+            }
+            return try Annotation(
+                id: snapshot.id,
+                areaAnchor: anchor,
+                color: snapshot.color,
+                note: snapshot.note,
+                createdAt: snapshot.createdAt,
+                paper: paper
+            )
+        }
     }
 
     private func paperInfoSnapshot(for paper: Paper) -> PaperInfoSnapshot {
@@ -980,11 +1059,11 @@ private func authorCreditSnapshotOrder(_ lhs: AuthorCreditSnapshot, _ rhs: Autho
 public struct AnnotationSnapshot: Equatable, Sendable {
     public let id: UUID
     public let paperID: UUID
+    public let kind: AnnotationKind
     public let pageIndex: Int
-    public let quadrilaterals: Data
-    public let selectedText: String
-    public let contextBefore: String
-    public let contextAfter: String
+    public let quadrilaterals: Data?
+    public let selectedText: String?
+    public let areaRect: Data?
     public let color: HighlightColor
     public let note: String
     public let createdAt: Date
@@ -993,14 +1072,49 @@ public struct AnnotationSnapshot: Equatable, Sendable {
     public init(annotation: Annotation, paperID: UUID) {
         id = annotation.id
         self.paperID = paperID
+        kind = annotation.kind
         pageIndex = annotation.pageIndex
         quadrilaterals = annotation.quadrilaterals
         selectedText = annotation.selectedText
-        contextBefore = annotation.contextBefore
-        contextAfter = annotation.contextAfter
+        areaRect = annotation.areaRect
         color = annotation.color
         note = annotation.note
         createdAt = annotation.createdAt
         updatedAt = annotation.updatedAt
+    }
+
+    public var textAnchor: TextAnnotationAnchor? {
+        guard kind == .textHighlight,
+              let quadrilaterals,
+              let selectedText,
+              let decoded = try? AnnotationQuadrilateralCoding.decode(quadrilaterals) else {
+            return nil
+        }
+        return TextAnnotationAnchor(
+            pageIndex: pageIndex,
+            quadrilaterals: decoded,
+            selectedText: selectedText
+        )
+    }
+
+    public var areaAnchor: AreaAnnotationAnchor? {
+        guard kind == .area,
+              let areaRect,
+              let decoded = try? AnnotationRectCoding.decode(areaRect) else {
+            return nil
+        }
+        return AreaAnnotationAnchor(pageIndex: pageIndex, rect: decoded)
+    }
+
+    public static func == (lhs: AnnotationSnapshot, rhs: AnnotationSnapshot) -> Bool {
+        lhs.id == rhs.id
+            && lhs.paperID == rhs.paperID
+            && lhs.kind == rhs.kind
+            && lhs.textAnchor == rhs.textAnchor
+            && lhs.areaAnchor == rhs.areaAnchor
+            && lhs.color == rhs.color
+            && lhs.note == rhs.note
+            && lhs.createdAt == rhs.createdAt
+            && lhs.updatedAt == rhs.updatedAt
     }
 }

@@ -22,9 +22,8 @@ public struct ParsedPaperMetadata: Equatable, Sendable {
     public let doiProvenance: MetadataProvenance?
     public let arxivID: String?
     public let arxivIDProvenance: MetadataProvenance?
-    public let pageTexts: [String]
-    public let embeddedCreationDate: Date?
-    public let embeddedModificationDate: Date?
+    public let pageCount: Int
+    public let hasSelectableText: Bool
 
     public init(
         title: String,
@@ -36,9 +35,8 @@ public struct ParsedPaperMetadata: Equatable, Sendable {
         doiProvenance: MetadataProvenance? = nil,
         arxivID: String? = nil,
         arxivIDProvenance: MetadataProvenance? = nil,
-        pageTexts: [String] = [],
-        embeddedCreationDate: Date? = nil,
-        embeddedModificationDate: Date? = nil
+        pageCount: Int = 0,
+        hasSelectableText: Bool = false
     ) {
         self.title = title
         self.titleProvenance = titleProvenance
@@ -49,14 +47,25 @@ public struct ParsedPaperMetadata: Equatable, Sendable {
         self.doiProvenance = doiProvenance
         self.arxivID = arxivID
         self.arxivIDProvenance = arxivIDProvenance
-        self.pageTexts = pageTexts
-        self.embeddedCreationDate = embeddedCreationDate
-        self.embeddedModificationDate = embeddedModificationDate
+        self.pageCount = pageCount
+        self.hasSelectableText = hasSelectableText
     }
 }
 
 public protocol DocumentAnalyzing: Sendable {
     func analyze(_ url: URL) throws -> ParsedPaperMetadata
+}
+
+public enum AddBatchPreflightInputError: LocalizedError, Equatable, Sendable {
+    case missing
+    case inaccessible
+
+    public var errorDescription: String? {
+        switch self {
+        case .missing: "The selected PDF could not be found."
+        case .inaccessible: "The selected PDF could not be accessed."
+        }
+    }
 }
 
 public struct PaperIdentitySnapshot: Identifiable, Equatable, Sendable {
@@ -74,9 +83,6 @@ public struct PaperIdentitySnapshot: Identifiable, Equatable, Sendable {
     public let sourceFileSize: Int64
     public let pageCount: Int
     public let authorDisplayNames: [String]
-    public let titleProvenance: MetadataProvenance
-    public let embeddedCreationDate: Date?
-    public let embeddedModificationDate: Date?
 
     public init(
         id: UUID,
@@ -92,10 +98,7 @@ public struct PaperIdentitySnapshot: Identifiable, Equatable, Sendable {
         sourceFilename: String = "",
         sourceFileSize: Int64 = 0,
         pageCount: Int = 0,
-        authorDisplayNames: [String] = [],
-        titleProvenance: MetadataProvenance = .filenameFallback,
-        embeddedCreationDate: Date? = nil,
-        embeddedModificationDate: Date? = nil
+        authorDisplayNames: [String] = []
     ) {
         self.id = id
         self.fingerprint = fingerprint
@@ -111,9 +114,6 @@ public struct PaperIdentitySnapshot: Identifiable, Equatable, Sendable {
         self.sourceFileSize = sourceFileSize
         self.pageCount = pageCount
         self.authorDisplayNames = authorDisplayNames
-        self.titleProvenance = titleProvenance
-        self.embeddedCreationDate = embeddedCreationDate
-        self.embeddedModificationDate = embeddedModificationDate
     }
 }
 
@@ -204,7 +204,8 @@ public struct AddBatchPreflight<Analyzer: DocumentAnalyzing>: Sendable {
         urls: [URL],
         existingPapers: [PaperIdentitySnapshot],
         progress: (@Sendable (AddBatchPreflightProgress) -> Void)? = nil
-    ) -> AddBatchPreflightResult {
+    ) throws -> AddBatchPreflightResult {
+        try Task.checkCancellation()
         var result = AddBatchPreflightResult()
         var processedCandidates: [PreflightCandidate] = []
         let fileSizes = urls.map { url in
@@ -213,6 +214,7 @@ public struct AddBatchPreflight<Analyzer: DocumentAnalyzing>: Sendable {
         let totalBytes = max(fileSizes.reduce(0, +), 1)
         var completedBytes: Int64 = 0
         for (index, url) in urls.enumerated() {
+            try Task.checkCancellation()
             do {
                 let bytesBeforeCurrentFile = completedBytes
                 let candidate = try makeCandidate(url: url) { bytesRead in
@@ -253,20 +255,43 @@ public struct AddBatchPreflight<Analyzer: DocumentAnalyzing>: Sendable {
                     fileCount: urls.count,
                     filename: url.lastPathComponent
                 ))
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
+                try Task.checkCancellation()
                 result.failures.append(PreflightFailure(url: url, message: error.localizedDescription))
             }
         }
+        try Task.checkCancellation()
         return result
     }
 
     private func makeCandidate(url: URL, progress: ((Int) -> Void)? = nil) throws -> PreflightCandidate {
-        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+            throw AddBatchPreflightInputError.missing
+        }
+        guard !isDirectory.boolValue, FileManager.default.isReadableFile(atPath: url.path) else {
+            throw AddBatchPreflightInputError.inaccessible
+        }
+        let attributes: [FileAttributeKey: Any]
+        let fingerprint: Data
+        do {
+            attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+            fingerprint = try DocumentFingerprint.sha256(of: url, didReadBytes: progress)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            if !FileManager.default.fileExists(atPath: url.path) {
+                throw AddBatchPreflightInputError.missing
+            }
+            throw AddBatchPreflightInputError.inaccessible
+        }
         let size = (attributes[.size] as? NSNumber)?.int64Value ?? 0
         let modificationDate = attributes[.modificationDate] as? Date
         return try PreflightCandidate(
             url: url,
-            fingerprint: DocumentFingerprint.sha256(of: url, didReadBytes: progress),
+            fingerprint: fingerprint,
             fileSize: size,
             modificationDate: modificationDate,
             metadata: analyzer.analyze(url)
@@ -314,11 +339,8 @@ public struct AddBatchPreflight<Analyzer: DocumentAnalyzing>: Sendable {
             rememberedLocation: candidate.url.path,
             sourceFilename: candidate.url.lastPathComponent,
             sourceFileSize: candidate.fileSize,
-            pageCount: candidate.metadata.pageTexts.count,
-            authorDisplayNames: candidate.metadata.authors.map(\.displayName),
-            titleProvenance: candidate.metadata.titleProvenance,
-            embeddedCreationDate: candidate.metadata.embeddedCreationDate,
-            embeddedModificationDate: candidate.metadata.embeddedModificationDate
+            pageCount: candidate.metadata.pageCount,
+            authorDisplayNames: candidate.metadata.authors.map(\.displayName)
         )
     }
 
@@ -332,7 +354,10 @@ public struct AddBatchPreflight<Analyzer: DocumentAnalyzing>: Sendable {
     }
 
     private func normalizedTitle(_ value: String) -> String {
-        let flattened = value.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        let flattened = value.folding(
+            options: [.caseInsensitive, .diacriticInsensitive],
+            locale: Locale(identifier: "en_US_POSIX")
+        )
             .unicodeScalars
             .map { CharacterSet.alphanumerics.contains($0) ? String($0) : " " }
             .joined()
@@ -340,7 +365,10 @@ public struct AddBatchPreflight<Analyzer: DocumentAnalyzing>: Sendable {
     }
 
     private func normalizedName(_ value: String) -> String {
-        value.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        value.folding(
+            options: [.caseInsensitive, .diacriticInsensitive],
+            locale: Locale(identifier: "en_US_POSIX")
+        )
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

@@ -9,64 +9,85 @@ public enum HighlightColor: String, CaseIterable, Codable, Sendable {
     case purple
 }
 
+public enum AnnotationKind: String, CaseIterable, Codable, Sendable {
+    case textHighlight
+    case area
+}
+
 @Model
 public final class Annotation {
     @Attribute(.unique) public var id: UUID
-    public var pageIndex: Int
-    public var quadrilaterals: Data
-    public var selectedText: String
-    public var contextBefore: String
-    public var contextAfter: String
-    public var colorRawValue: String
+    public private(set) var kindRawValue: String
+    public private(set) var pageIndex: Int
+    public private(set) var quadrilaterals: Data?
+    public private(set) var selectedText: String?
+    public private(set) var areaRect: Data?
+    public private(set) var colorRawValue: String
     public var note: String
     public var createdAt: Date
     public var updatedAt: Date
     public var paper: Paper?
 
-    public var color: HighlightColor {
+    public internal(set) var color: HighlightColor {
         get { HighlightColor(rawValue: colorRawValue) ?? .yellow }
         set { colorRawValue = newValue.rawValue }
     }
 
-    public var anchor: AnnotationAnchor? {
-        guard let decoded = try? AnnotationAnchorCoding.decode(quadrilaterals) else { return nil }
-        return AnnotationAnchor(
+    public var kind: AnnotationKind {
+        get { AnnotationKind(rawValue: kindRawValue) ?? .textHighlight }
+    }
+
+    public var textAnchor: TextAnnotationAnchor? {
+        guard kind == .textHighlight,
+              let quadrilaterals,
+              let selectedText,
+              let decoded = try? AnnotationQuadrilateralCoding.decode(quadrilaterals) else {
+            return nil
+        }
+        return TextAnnotationAnchor(
             pageIndex: pageIndex,
             quadrilaterals: decoded,
-            selectedText: selectedText,
-            contextBefore: contextBefore,
-            contextAfter: contextAfter
+            selectedText: selectedText
         )
+    }
+
+    public var areaAnchor: AreaAnnotationAnchor? {
+        guard kind == .area,
+              let areaRect,
+              let decoded = try? AnnotationRectCoding.decode(areaRect) else {
+            return nil
+        }
+        return AreaAnnotationAnchor(pageIndex: pageIndex, rect: decoded)
     }
 
     public static func sortedInPageOrder(_ annotations: [Annotation]) -> [Annotation] {
         annotations.sorted { lhs, rhs in
             if lhs.pageIndex != rhs.pageIndex { return lhs.pageIndex < rhs.pageIndex }
-            let lhsTop = lhs.anchor?.quadrilaterals.first?.top ?? 0
-            let rhsTop = rhs.anchor?.quadrilaterals.first?.top ?? 0
+            let lhsTop = lhs.textAnchor?.quadrilaterals.first?.top ?? lhs.areaAnchor?.rect.top ?? 0
+            let rhsTop = rhs.textAnchor?.quadrilaterals.first?.top ?? rhs.areaAnchor?.rect.top ?? 0
             if lhsTop != rhsTop { return lhsTop > rhsTop }
             return lhs.createdAt < rhs.createdAt
         }
     }
 
-    public init(
+    private init(
         id: UUID = UUID(),
+        kind: AnnotationKind,
         pageIndex: Int,
-        quadrilaterals: Data,
-        selectedText: String,
-        contextBefore: String = "",
-        contextAfter: String = "",
+        quadrilaterals: Data? = nil,
+        selectedText: String? = nil,
+        areaRect: Data? = nil,
         color: HighlightColor,
         note: String = "",
         createdAt: Date = .now,
         paper: Paper? = nil
     ) {
         self.id = id
+        self.kindRawValue = kind.rawValue
         self.pageIndex = pageIndex
         self.quadrilaterals = quadrilaterals
         self.selectedText = selectedText
-        self.contextBefore = contextBefore
-        self.contextAfter = contextAfter
+        self.areaRect = areaRect
         self.colorRawValue = color.rawValue
         self.note = note
         self.createdAt = createdAt
@@ -74,9 +95,9 @@ public final class Annotation {
         self.paper = paper
     }
 
-    public convenience init(
+    convenience init(
         id: UUID = UUID(),
-        anchor: AnnotationAnchor,
+        textAnchor: TextAnnotationAnchor,
         color: HighlightColor,
         note: String = "",
         createdAt: Date = .now,
@@ -84,11 +105,30 @@ public final class Annotation {
     ) throws {
         try self.init(
             id: id,
-            pageIndex: anchor.pageIndex,
-            quadrilaterals: AnnotationAnchorCoding.encode(anchor.quadrilaterals),
-            selectedText: anchor.selectedText,
-            contextBefore: anchor.contextBefore,
-            contextAfter: anchor.contextAfter,
+            kind: .textHighlight,
+            pageIndex: textAnchor.pageIndex,
+            quadrilaterals: AnnotationQuadrilateralCoding.encode(textAnchor.quadrilaterals),
+            selectedText: textAnchor.selectedText,
+            color: color,
+            note: note,
+            createdAt: createdAt,
+            paper: paper
+        )
+    }
+
+    convenience init(
+        id: UUID = UUID(),
+        areaAnchor: AreaAnnotationAnchor,
+        color: HighlightColor,
+        note: String = "",
+        createdAt: Date = .now,
+        paper: Paper? = nil
+    ) throws {
+        try self.init(
+            id: id,
+            kind: .area,
+            pageIndex: areaAnchor.pageIndex,
+            areaRect: AnnotationRectCoding.encode(areaAnchor.rect),
             color: color,
             note: note,
             createdAt: createdAt,
