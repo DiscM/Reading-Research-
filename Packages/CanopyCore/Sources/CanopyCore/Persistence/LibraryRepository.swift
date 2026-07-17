@@ -445,8 +445,7 @@ public final class LibraryRepository {
 
     public func updateAnnotationColor(
         annotationID: UUID,
-        color: HighlightColor,
-        at date: Date = .now
+        color: HighlightColor
     ) throws {
         guard let annotation = try annotation(id: annotationID) else {
             throw LibraryRepositoryError.annotationNotFound
@@ -456,8 +455,54 @@ public final class LibraryRepository {
         }
         guard annotation.color != color else { return }
         annotation.color = color
-        annotation.updatedAt = date
         do {
+            try context.save()
+        } catch {
+            context.rollback()
+            throw error
+        }
+    }
+
+    public func updateTextAnnotationAnchor(
+        annotationID: UUID,
+        anchor: TextAnnotationAnchor
+    ) throws {
+        try updateAnnotationAnchor(annotationID: annotationID, kind: .textHighlight) { annotation, paper in
+            guard anchor.isValid(pageCount: paper.pageCount) else {
+                throw LibraryRepositoryError.invalidAnnotationAnchor
+            }
+            try annotation.replaceTextAnchor(anchor)
+        }
+    }
+
+    public func updateAreaAnnotationAnchor(
+        annotationID: UUID,
+        anchor: AreaAnnotationAnchor
+    ) throws {
+        try updateAnnotationAnchor(annotationID: annotationID, kind: .area) { annotation, paper in
+            guard anchor.isValid(pageCount: paper.pageCount) else {
+                throw LibraryRepositoryError.invalidAnnotationAnchor
+            }
+            try annotation.replaceAreaAnchor(anchor)
+        }
+    }
+
+    private func updateAnnotationAnchor(
+        annotationID: UUID,
+        kind: AnnotationKind,
+        apply: (Annotation, Paper) throws -> Void
+    ) throws {
+        guard let annotation = try annotation(id: annotationID) else {
+            throw LibraryRepositoryError.annotationNotFound
+        }
+        guard let paper = annotation.paper, paper.sourceState == .available else {
+            throw LibraryRepositoryError.annotationsUnavailable
+        }
+        guard annotation.kind == kind else {
+            throw LibraryRepositoryError.invalidAnnotationAnchor
+        }
+        do {
+            try apply(annotation, paper)
             try context.save()
         } catch {
             context.rollback()
@@ -570,6 +615,84 @@ public final class LibraryRepository {
                 paper.sourceState = .libraryCopyMissing
             }
             try save()
+            throw error
+        }
+    }
+
+    public func convertReferencedPaperToManagedCopy(
+        paperID: UUID,
+        expectedFingerprint: Data,
+        managedRelativePath: String,
+        fileSize: Int64,
+        modificationDate: Date?
+    ) throws {
+        guard let paper = try paper(id: paperID) else {
+            throw LibraryRepositoryError.paperNotFound
+        }
+        guard paper.storageMode == .referenced, paper.sourceState == .available else {
+            throw LibraryRepositoryError.incompatibleStorageMode
+        }
+        guard paper.fingerprint == expectedFingerprint else {
+            throw LibraryRepositoryError.contentIdentityMismatch
+        }
+        guard !managedRelativePath.isEmpty,
+              URL(fileURLWithPath: managedRelativePath).lastPathComponent == managedRelativePath else {
+            throw LibraryRepositoryError.incompatibleStorageMode
+        }
+        let previousStorage = PaperStorageSnapshot(paper: paper)
+        paper.storageMode = .managedCopy
+        paper.bookmarkData = nil
+        paper.managedRelativePath = managedRelativePath
+        paper.rememberedLocation = nil
+        paper.sourceFileSize = fileSize
+        paper.sourceModificationDate = modificationDate
+        paper.sourceState = .available
+        do {
+            try save()
+        } catch {
+            context.rollback()
+            previousStorage.restore(on: paper)
+            throw error
+        }
+    }
+
+    public func convertManagedPaperToReferenced(
+        paperID: UUID,
+        expectedFingerprint: Data,
+        bookmarkData: Data,
+        rememberedLocation: String,
+        sourceFilename: String,
+        fileSize: Int64,
+        modificationDate: Date?
+    ) throws {
+        guard let paper = try paper(id: paperID) else {
+            throw LibraryRepositoryError.paperNotFound
+        }
+        guard paper.storageMode == .managedCopy, paper.sourceState == .available else {
+            throw LibraryRepositoryError.incompatibleStorageMode
+        }
+        guard paper.fingerprint == expectedFingerprint else {
+            throw LibraryRepositoryError.contentIdentityMismatch
+        }
+        guard !bookmarkData.isEmpty,
+              !rememberedLocation.isEmpty,
+              !sourceFilename.isEmpty else {
+            throw LibraryRepositoryError.incompatibleStorageMode
+        }
+        let previousStorage = PaperStorageSnapshot(paper: paper)
+        paper.storageMode = .referenced
+        paper.bookmarkData = bookmarkData
+        paper.managedRelativePath = nil
+        paper.rememberedLocation = rememberedLocation
+        paper.sourceFilename = sourceFilename
+        paper.sourceFileSize = fileSize
+        paper.sourceModificationDate = modificationDate
+        paper.sourceState = .available
+        do {
+            try save()
+        } catch {
+            context.rollback()
+            previousStorage.restore(on: paper)
             throw error
         }
     }
@@ -1029,6 +1152,39 @@ public final class LibraryRepository {
         }
     }
 
+}
+
+private struct PaperStorageSnapshot {
+    let storageMode: PaperStorageMode
+    let bookmarkData: Data?
+    let managedRelativePath: String?
+    let rememberedLocation: String?
+    let sourceFilename: String
+    let sourceFileSize: Int64
+    let sourceModificationDate: Date?
+    let sourceState: PaperSourceState
+
+    init(paper: Paper) {
+        storageMode = paper.storageMode
+        bookmarkData = paper.bookmarkData
+        managedRelativePath = paper.managedRelativePath
+        rememberedLocation = paper.rememberedLocation
+        sourceFilename = paper.sourceFilename
+        sourceFileSize = paper.sourceFileSize
+        sourceModificationDate = paper.sourceModificationDate
+        sourceState = paper.sourceState
+    }
+
+    func restore(on paper: Paper) {
+        paper.storageMode = storageMode
+        paper.bookmarkData = bookmarkData
+        paper.managedRelativePath = managedRelativePath
+        paper.rememberedLocation = rememberedLocation
+        paper.sourceFilename = sourceFilename
+        paper.sourceFileSize = sourceFileSize
+        paper.sourceModificationDate = sourceModificationDate
+        paper.sourceState = sourceState
+    }
 }
 
 private struct PaperInfoValues {

@@ -92,6 +92,29 @@ enum AnnotationUndo {
         )
     }
 
+    static func registerUndoForAnchorChange(
+        annotationID: UUID,
+        previousAnchor: AnnotationAnchorValue,
+        currentAnchor: AnnotationAnchorValue,
+        repository: LibraryRepository,
+        target: AnnotationUndoTarget,
+        undoManager: UndoManager?,
+        onChange: @escaping () -> Void,
+        onError: @escaping (Error) -> Void
+    ) {
+        guard let undoManager else { return }
+        registerAnchorChange(
+            annotationID: annotationID,
+            anchorToApply: previousAnchor,
+            inverseAnchor: currentAnchor,
+            repository: repository,
+            target: target,
+            undoManager: undoManager,
+            onChange: onChange,
+            onError: onError
+        )
+    }
+
     private static func registerDelete(
         annotationIDs: [UUID],
         repository: LibraryRepository,
@@ -210,5 +233,39 @@ enum AnnotationUndo {
             }
         }
         undoManager.setActionName("Change Annotation Color")
+    }
+
+    private static func registerAnchorChange(
+        annotationID: UUID,
+        anchorToApply: AnnotationAnchorValue,
+        inverseAnchor: AnnotationAnchorValue,
+        repository: LibraryRepository,
+        target: AnnotationUndoTarget,
+        undoManager: UndoManager,
+        onChange: @escaping () -> Void,
+        onError: @escaping (Error) -> Void
+    ) {
+        undoManager.registerUndo(withTarget: target) { target in
+            do {
+                try repository.updateAnnotationAnchor(
+                    annotationID: annotationID,
+                    anchor: anchorToApply
+                )
+                registerAnchorChange(
+                    annotationID: annotationID,
+                    anchorToApply: inverseAnchor,
+                    inverseAnchor: anchorToApply,
+                    repository: repository,
+                    target: target,
+                    undoManager: undoManager,
+                    onChange: onChange,
+                    onError: onError
+                )
+                onChange()
+            } catch {
+                onError(error)
+            }
+        }
+        undoManager.setActionName("Adjust Annotation")
     }
 }

@@ -5,10 +5,13 @@ import UniformTypeIdentifiers
 
 struct PaperInfoView: View {
     @Bindable var workflow: PaperInfoWorkflow
+    @Bindable var storageConversionWorkflow: PaperStorageConversionWorkflow
     let onReparse: () -> Void
+    let onChangeStorage: (PaperStorageMode) -> Void
     let onSave: () -> Void
     @State private var selectedAuthorCreditID: UUID?
     @State private var expandedAuthorCreditIDs: Set<UUID> = []
+    @State private var requestedStorageMode: PaperStorageMode?
     @FocusState private var focusedAuthorCreditID: UUID?
 
     var body: some View {
@@ -122,7 +125,22 @@ struct PaperInfoView: View {
 
                 Section("Source PDF") {
                     LabeledContent("Status", value: workflow.readOnlyDetails?.sourceStatus ?? "Unavailable")
-                    LabeledContent("Storage", value: workflow.readOnlyDetails?.storage ?? "—")
+                    LabeledContent("Source PDF Storage") {
+                        Picker("Source PDF Storage", selection: Binding(
+                            get: { workflow.readOnlyDetails?.storageMode ?? .referenced },
+                            set: { mode in
+                                guard mode != workflow.readOnlyDetails?.storageMode else { return }
+                                requestedStorageMode = mode
+                            }
+                        )) {
+                            Text("Reference Original").tag(PaperStorageMode.referenced)
+                            Text("Keep Copy in Canopy").tag(PaperStorageMode.managedCopy)
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.radioGroup)
+                        .disabled(!canConvertStorage)
+                        .accessibilityIdentifier("paper-source-storage-picker")
+                    }
                     LabeledContent("Filename", value: workflow.readOnlyDetails?.sourceFilename ?? "—")
                     LabeledContent("Location") {
                         Text(workflow.readOnlyDetails?.sourceLocation ?? "—")
@@ -149,9 +167,22 @@ struct PaperInfoView: View {
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     }
+                    if storageConversionWorkflow.isConverting {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Changing Source PDF storage…")
+                                .foregroundStyle(.secondary)
+                        }
+                    } else if workflow.hasChanges {
+                        Text("Save or cancel Paper Info changes before changing Source PDF storage.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .formStyle(.grouped)
+            .disabled(storageConversionWorkflow.isConverting)
 
             Divider()
             HStack {
@@ -160,9 +191,14 @@ struct PaperInfoView: View {
                     workflow.dismiss()
                 }
                 .keyboardShortcut(.cancelAction)
+                .disabled(storageConversionWorkflow.isConverting)
                 Button("Save", action: onSave)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(!workflow.hasChanges || workflow.hasActiveReparse)
+                    .disabled(
+                        !workflow.hasChanges
+                            || workflow.hasActiveReparse
+                            || storageConversionWorkflow.isConverting
+                    )
             }
             .padding(16)
         }
@@ -174,7 +210,29 @@ struct PaperInfoView: View {
         .onChange(of: workflow.draft.authorCredits.map(\.id)) {
             reconcileAuthorCreditViewState()
         }
-        .interactiveDismissDisabled(workflow.hasChanges || workflow.hasActiveReparse)
+        .interactiveDismissDisabled(
+            workflow.hasChanges || workflow.hasActiveReparse || storageConversionWorkflow.isConverting
+        )
+        .confirmationDialog(
+            storageConversionTitle,
+            isPresented: Binding(
+                get: { requestedStorageMode != nil },
+                set: { if !$0 { requestedStorageMode = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let requestedStorageMode {
+                Button(storageConversionActionTitle(for: requestedStorageMode)) {
+                    self.requestedStorageMode = nil
+                    onChangeStorage(requestedStorageMode)
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                requestedStorageMode = nil
+            }
+        } message: {
+            Text(storageConversionMessage)
+        }
         .alert(
             "Couldn’t Save Paper Info",
             isPresented: Binding(
@@ -197,6 +255,43 @@ struct PaperInfoView: View {
         } message: {
             Text(workflow.reparseErrorMessage ?? "Canopy could not read fresh metadata from this Source PDF.")
         }
+        .alert(
+            "Couldn’t Change Source PDF Storage",
+            isPresented: Binding(
+                get: { storageConversionWorkflow.errorMessage != nil },
+                set: { if !$0 { storageConversionWorkflow.errorMessage = nil } }
+            )
+        ) {
+            Button("Dismiss", role: .cancel) {}
+        } message: {
+            Text(storageConversionWorkflow.errorMessage ?? "Canopy could not change Source PDF storage.")
+        }
+    }
+
+    private var canConvertStorage: Bool {
+        workflow.readOnlyDetails?.sourceState == .available
+            && !workflow.hasChanges
+            && !workflow.hasActiveReparse
+            && !storageConversionWorkflow.isConverting
+    }
+
+    private var storageConversionTitle: String {
+        requestedStorageMode == .managedCopy ? "Keep Copy in Canopy?" : "Reference Source PDF Outside Canopy?"
+    }
+
+    private var storageConversionMessage: String {
+        switch requestedStorageMode {
+        case .managedCopy:
+            "Canopy will verify and keep its own copy. The original Source PDF will remain untouched."
+        case .referenced:
+            "Choose where to place the Source PDF. Canopy will verify the new file before removing its managed copy."
+        case nil:
+            ""
+        }
+    }
+
+    private func storageConversionActionTitle(for mode: PaperStorageMode) -> String {
+        mode == .managedCopy ? "Keep Copy in Canopy" : "Choose Location…"
     }
 
     private func metadataField(

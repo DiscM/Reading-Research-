@@ -7,14 +7,20 @@ struct AnnotationInspectorView: View {
     let paper: Paper?
     let repository: LibraryRepository
     @Binding var focusedAnnotationID: UUID?
+    let adjustingAnnotationID: UUID?
     let annotationUndoTarget: AnnotationUndoTarget
     let annotationSession: AnnotationSession
     let onRetrySource: () -> Void
     let onNavigate: (UUID) -> Void
+    let onAdjust: (UUID) -> Void
 
     @Environment(\.undoManager) private var undoManager
+    @AppStorage(CanopyPreferenceKeys.annotationSortOrder)
+    private var sortOrderRawValue = AnnotationInspectorSortOrder.recentActivity.rawValue
     @State private var persistenceErrorMessage: String?
     @State private var previewDocumentSession: AnnotationPreviewDocumentSession?
+    @State private var selectedColors: Set<HighlightColor> = []
+    @State private var frozenRecentOrder: [UUID]?
 
     var body: some View {
         Group {
@@ -59,19 +65,32 @@ struct AnnotationInspectorView: View {
                         systemImage: "highlighter",
                         description: Text("Select text for a highlight, or draw an Area Annotation for a figure, table, equation, or scanned passage.")
                     )
+                } else if visibleAnnotations.isEmpty {
+                    ContentUnavailableView {
+                        Label("No Matching Annotations", systemImage: "line.3.horizontal.decrease.circle")
+                    } description: {
+                        Text("No annotations use the selected colors.")
+                    } actions: {
+                        Button("Show All Colors") {
+                            selectedColors.removeAll()
+                        }
+                    }
                 } else {
                     ScrollViewReader { proxy in
                         List {
-                            ForEach(annotationSession.annotations) { annotation in
+                            ForEach(visibleAnnotations) { annotation in
                                 AnnotationRow(
                                     annotation: annotation,
                                     repository: repository,
                                     annotationUndoTarget: annotationUndoTarget,
                                     previewDocument: previewDocumentSession?.document,
                                     focusRequested: focusedAnnotationID == annotation.id,
+                                    adjustmentDisabled: adjustingAnnotationID != nil,
                                     onNavigate: { onNavigate(annotation.id) },
+                                    onAdjust: { onAdjust(annotation.id) },
                                     onDelete: { delete(annotation) },
                                     onDidChange: reloadAnnotations,
+                                    onNoteFocusChanged: noteFocusChanged,
                                     onSaveError: showPersistenceError
                                 )
                                 .id(annotation.id)
@@ -89,8 +108,18 @@ struct AnnotationInspectorView: View {
             }
         }
         .navigationTitle("Annotations")
+        .toolbar {
+            ToolbarItemGroup(placement: .automatic) {
+                sortMenu
+                colorFilterMenu
+            }
+        }
         .task(id: previewTaskID) {
             loadPreviewDocument()
+        }
+        .onChange(of: paper?.id) {
+            selectedColors.removeAll()
+            frozenRecentOrder = nil
         }
         .alert(
             "Couldn’t Save Annotation",
@@ -102,6 +131,88 @@ struct AnnotationInspectorView: View {
             Button("Dismiss", role: .cancel) {}
         } message: {
             Text(persistenceErrorMessage ?? "Canopy could not save this annotation.")
+        }
+    }
+
+    private var sortOrder: AnnotationInspectorSortOrder {
+        AnnotationInspectorSortOrder(rawValue: sortOrderRawValue) ?? .recentActivity
+    }
+
+    private var visibleAnnotations: [Annotation] {
+        let annotations = AnnotationInspectorContents.visibleAnnotations(
+            from: annotationSession.annotations,
+            selectedColors: selectedColors,
+            sortOrder: sortOrder
+        )
+        guard sortOrder == .recentActivity, let frozenRecentOrder else { return annotations }
+        let positions = Dictionary(uniqueKeysWithValues: frozenRecentOrder.enumerated().map { ($1, $0) })
+        return annotations.sorted { lhs, rhs in
+            switch (positions[lhs.id], positions[rhs.id]) {
+            case let (lhsIndex?, rhsIndex?): lhsIndex < rhsIndex
+            case (.some, .none): true
+            case (.none, .some): false
+            case (.none, .none): lhs.id.uuidString < rhs.id.uuidString
+            }
+        }
+    }
+
+    private var sortMenu: some View {
+        Menu {
+            Picker("Sort By", selection: Binding(
+                get: { sortOrder },
+                set: { sortOrderRawValue = $0.rawValue }
+            )) {
+                ForEach(AnnotationInspectorSortOrder.allCases) { order in
+                    Text(order.title).tag(order)
+                }
+            }
+        } label: {
+            Label("Sort Annotations", systemImage: "arrow.up.arrow.down")
+        }
+        .help("Sort Annotations")
+        .accessibilityIdentifier("annotation-sort-menu")
+        .accessibilityValue(sortOrder.title)
+    }
+
+    private var colorFilterMenu: some View {
+        Menu {
+            Button("All Colors") {
+                selectedColors.removeAll()
+            }
+            Divider()
+            ForEach(HighlightColor.allCases, id: \.self) { color in
+                Toggle(
+                    color.displayName,
+                    isOn: Binding(
+                        get: { selectedColors.contains(color) },
+                        set: { selected in
+                            if selected {
+                                selectedColors.insert(color)
+                            } else {
+                                selectedColors.remove(color)
+                            }
+                        }
+                    )
+                )
+            }
+        } label: {
+            Label(
+                "Filter by Color",
+                systemImage: selectedColors.isEmpty
+                    ? "line.3.horizontal.decrease.circle"
+                    : "line.3.horizontal.decrease.circle.fill"
+            )
+        }
+        .help("Filter by Color")
+        .accessibilityIdentifier("annotation-color-filter-menu")
+        .accessibilityValue(selectedColors.isEmpty ? "All Colors" : "\(selectedColors.count) selected")
+    }
+
+    private func noteFocusChanged(_ annotationID: UUID, focused: Bool) {
+        if focused {
+            frozenRecentOrder = visibleAnnotations.map(\.id)
+        } else {
+            frozenRecentOrder = nil
         }
     }
 
@@ -166,9 +277,12 @@ private struct AnnotationRow: View {
     let annotationUndoTarget: AnnotationUndoTarget
     let previewDocument: PDFDocument?
     let focusRequested: Bool
+    let adjustmentDisabled: Bool
     let onNavigate: () -> Void
+    let onAdjust: () -> Void
     let onDelete: () -> Void
     let onDidChange: () -> Void
+    let onNoteFocusChanged: (UUID, Bool) -> Void
     let onSaveError: (Error) -> Void
 
     @Environment(\.undoManager) private var undoManager
@@ -184,9 +298,12 @@ private struct AnnotationRow: View {
         annotationUndoTarget: AnnotationUndoTarget,
         previewDocument: PDFDocument?,
         focusRequested: Bool,
+        adjustmentDisabled: Bool,
         onNavigate: @escaping () -> Void,
+        onAdjust: @escaping () -> Void,
         onDelete: @escaping () -> Void,
         onDidChange: @escaping () -> Void,
+        onNoteFocusChanged: @escaping (UUID, Bool) -> Void,
         onSaveError: @escaping (Error) -> Void
     ) {
         self.annotation = annotation
@@ -194,9 +311,12 @@ private struct AnnotationRow: View {
         self.annotationUndoTarget = annotationUndoTarget
         self.previewDocument = previewDocument
         self.focusRequested = focusRequested
+        self.adjustmentDisabled = adjustmentDisabled
         self.onNavigate = onNavigate
+        self.onAdjust = onAdjust
         self.onDelete = onDelete
         self.onDidChange = onDidChange
+        self.onNoteFocusChanged = onNoteFocusChanged
         self.onSaveError = onSaveError
         _draftNote = State(initialValue: annotation.note)
         _savedNote = State(initialValue: annotation.note)
@@ -226,12 +346,21 @@ private struct AnnotationRow: View {
                 .fixedSize()
                 .accessibilityLabel("Annotation color")
                 .accessibilityValue(annotation.color.displayName)
-                Button(role: .destructive, action: onDelete) {
-                    Label("Delete Annotation", systemImage: "trash")
+                Menu {
+                    Button(action: onAdjust) {
+                        Label("Adjust Annotation", systemImage: "move.3d")
+                    }
+                    .disabled(adjustmentDisabled)
+                    Button(role: .destructive, action: onDelete) {
+                        Label("Delete Annotation", systemImage: "trash")
+                    }
+                } label: {
+                    Label("Annotation Actions", systemImage: "ellipsis.circle")
                         .labelStyle(.iconOnly)
                 }
-                .buttonStyle(.borderless)
-                .help("Delete Annotation")
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Annotation Actions")
             }
 
             annotationContent
@@ -243,6 +372,13 @@ private struct AnnotationRow: View {
                 .accessibilityIdentifier("annotation-note-field")
                 .accessibilityLabel("Note for \(annotationKindName.lowercased()) on page \(annotation.pageIndex + 1)")
                 .onSubmit { saveNote() }
+
+            HStack(spacing: 4) {
+                Text(annotation.updatedAt == annotation.createdAt ? "Created" : "Note edited")
+                Text(annotation.updatedAt, style: .relative)
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
         }
         .padding(.vertical, 6)
         .task(id: draftNote) {
@@ -253,6 +389,7 @@ private struct AnnotationRow: View {
         }
         .onChange(of: noteFocused) { _, focused in
             if !focused { saveNote() }
+            onNoteFocusChanged(annotation.id, focused)
         }
         .onChange(of: focusRequested) { _, requested in
             if requested { noteFocused = true }
@@ -301,7 +438,6 @@ private struct AnnotationRow: View {
             Button(action: onNavigate) {
                 if let previewDocument, let anchor = annotation.areaAnchor {
                     AreaAnnotationPreview(
-                        annotationID: annotation.id,
                         document: previewDocument,
                         anchor: anchor,
                         color: annotation.color
@@ -385,7 +521,6 @@ private final class AnnotationPreviewDocumentSession {
 }
 
 private struct AreaAnnotationPreview: View {
-    let annotationID: UUID
     let document: PDFDocument
     let anchor: AreaAnnotationAnchor
     let color: HighlightColor
@@ -426,7 +561,7 @@ private struct AreaAnnotationPreview: View {
                     .padding(6)
             }
         }
-        .task(id: annotationID) {
+        .task(id: anchor) {
             image = AreaAnnotationPreviewRenderer.render(document: document, anchor: anchor)
         }
         .accessibilityHidden(true)
@@ -446,21 +581,20 @@ private struct AreaAnnotationPreview: View {
 }
 
 @MainActor
-private enum AreaAnnotationPreviewRenderer {
-    static func render(document: PDFDocument, anchor: AreaAnnotationAnchor) -> NSImage? {
-        guard let page = document.page(at: anchor.pageIndex) else { return nil }
-        let pageBounds = page.bounds(for: .cropBox)
-        let rectangle = CGRect(
+enum AreaAnnotationPreviewRenderer {
+    static func sourceRectangle(anchor: AreaAnnotationAnchor, pageBounds: CGRect) -> CGRect {
+        CGRect(
             x: anchor.rect.x,
             y: anchor.rect.y,
             width: anchor.rect.width,
             height: anchor.rect.height
-        )
-        let contextX = max(rectangle.width * 0.22, 18)
-        let contextY = max(rectangle.height * 0.22, 18)
-        let sourceRectangle = rectangle
-            .insetBy(dx: -contextX, dy: -contextY)
-            .intersection(pageBounds)
+        ).intersection(pageBounds)
+    }
+
+    static func render(document: PDFDocument, anchor: AreaAnnotationAnchor) -> NSImage? {
+        guard let page = document.page(at: anchor.pageIndex) else { return nil }
+        let pageBounds = page.bounds(for: .cropBox)
+        let sourceRectangle = sourceRectangle(anchor: anchor, pageBounds: pageBounds)
         guard !sourceRectangle.isNull, !sourceRectangle.isEmpty else { return nil }
 
         let targetSize = NSSize(width: 480, height: 150)

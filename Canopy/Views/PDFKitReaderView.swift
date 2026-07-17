@@ -43,8 +43,14 @@ struct PDFKitReaderView: NSViewRepresentable {
     let pdfInteractionResetID: UUID
     let annotations: [Annotation]
     let annotationNavigation: AnnotationNavigation?
+    let adjustmentRequest: AnnotationAdjustmentRequest?
+    let adjustmentCommand: AnnotationAdjustmentCommand?
     let onCreateAnnotations: ([TextAnnotationAnchor], HighlightColor, Bool) -> Void
     let onCreateAreaAnnotation: (PDFPageAreaSelection, HighlightColor, Bool) -> Void
+    let onRequestAnnotationAdjustment: (UUID) -> Void
+    let onDeleteAnnotation: (UUID) -> Void
+    let onCommitAnnotationAdjustment: (UUID, AnnotationAnchorValue) -> Bool
+    let onCancelAnnotationAdjustment: () -> Void
     let onAreaAnnotationModeEnded: () -> Void
     let onTextSelectionRejected: (String) -> Void
     let onSnapshotChange: (PDFReaderSnapshot) -> Void
@@ -80,15 +86,25 @@ struct PDFKitReaderView: NSViewRepresentable {
         context.coordinator.perform(command, in: pdfView)
         context.coordinator.updateAreaAnnotationMode(isAreaAnnotationMode, in: pdfView)
         context.coordinator.showMatches(matches, selectedIndex: selectedMatchIndex, in: pdfView)
+        let displayedAnnotations = annotations.filter {
+            $0.id != adjustmentRequest?.annotationID
+        }
         context.coordinator.showAnnotations(
-            annotations,
+            displayedAnnotations,
             appearance: appearance,
             differentiatesWithoutColor: accessibilityOverrides.differentiatesWithoutColor(
                 system: differentiateWithoutColor
             ),
             in: pdfView
         )
+        context.coordinator.configureAnnotationContextMenu(annotations, in: pdfView)
         context.coordinator.navigate(to: annotationNavigation, annotations: annotations, in: pdfView)
+        context.coordinator.updateAdjustment(
+            request: adjustmentRequest,
+            command: adjustmentCommand,
+            annotations: annotations,
+            in: pdfView
+        )
     }
 
     static func dismantleNSView(_ nsView: PDFView, coordinator: Coordinator) {
@@ -118,6 +134,8 @@ struct PDFKitReaderView: NSViewRepresentable {
         private var lastAnnotationAppearance: HighlightAppearancePreferences?
         private var lastDifferentiatesWithoutColor: Bool?
         private var lastAnnotationNavigationID: UUID?
+        private var lastAdjustmentRequestID: UUID?
+        private var lastAdjustmentCommandID: UUID?
         private var overlayAnnotations: [(page: PDFPage, annotation: PDFAnnotation)] = []
         private var highlightPopover: NSPopover?
         private var pendingHighlightPresentation: Task<Void, Never>?
@@ -139,6 +157,12 @@ struct PDFKitReaderView: NSViewRepresentable {
                 }
                 areaSelectionView.onAreaSelectionCancelled = { [weak self] in
                     self?.parent.onAreaAnnotationModeEnded()
+                }
+                areaSelectionView.onAdjustmentCommitted = { [weak self] annotationID, anchor in
+                    self?.parent.onCommitAnnotationAdjustment(annotationID, anchor) ?? false
+                }
+                areaSelectionView.onAdjustmentCancelled = { [weak self] in
+                    self?.parent.onCancelAnnotationAdjustment()
                 }
             }
             let center = NotificationCenter.default
@@ -186,7 +210,10 @@ struct PDFKitReaderView: NSViewRepresentable {
             if let areaSelectionView = pdfView as? AreaSelectionPDFView {
                 areaSelectionView.onAreaSelectionCompleted = nil
                 areaSelectionView.onAreaSelectionCancelled = nil
+                areaSelectionView.onAdjustmentCommitted = nil
+                areaSelectionView.onAdjustmentCancelled = nil
                 areaSelectionView.setAreaSelectionEnabled(false)
+                areaSelectionView.endAdjustmentSilently()
             }
             pdfView = nil
         }
@@ -335,6 +362,15 @@ struct PDFKitReaderView: NSViewRepresentable {
             }
         }
 
+        func configureAnnotationContextMenu(_ annotations: [Annotation], in pdfView: PDFView) {
+            guard let areaSelectionView = pdfView as? AreaSelectionPDFView else { return }
+            areaSelectionView.configureAnnotationContextMenu(
+                annotations: annotations,
+                onAdjust: parent.onRequestAnnotationAdjustment,
+                onDelete: parent.onDeleteAnnotation
+            )
+        }
+
         func navigate(
             to navigation: AnnotationNavigation?,
             annotations: [Annotation],
@@ -353,6 +389,47 @@ struct PDFKitReaderView: NSViewRepresentable {
             case .area:
                 guard let anchor = annotation.areaAnchor else { return }
                 navigate(to: cgRect(anchor.rect), on: page, in: pdfView)
+            }
+        }
+
+        func updateAdjustment(
+            request: AnnotationAdjustmentRequest?,
+            command: AnnotationAdjustmentCommand?,
+            annotations: [Annotation],
+            in pdfView: PDFView
+        ) {
+            guard let adjustmentView = pdfView as? AreaSelectionPDFView else { return }
+
+            if request?.requestID != lastAdjustmentRequestID {
+                lastAdjustmentRequestID = request?.requestID
+                lastAdjustmentCommandID = nil
+                adjustmentView.endAdjustmentSilently()
+                if let request,
+                   let annotation = annotations.first(where: { $0.id == request.annotationID }),
+                   let page = pdfView.document?.page(at: annotation.pageIndex),
+                   let anchor = AnnotationAnchorValue(annotation: annotation) {
+                    closeHighlightPopover()
+                    isUpdatingSearchSelection = true
+                    pdfView.setCurrentSelection(nil, animate: false)
+                    isUpdatingSearchSelection = false
+                    pdfView.go(to: page)
+                    if !adjustmentView.beginAdjustment(
+                        annotationID: annotation.id,
+                        anchor: anchor,
+                        page: page
+                    ) {
+                        parent.onCancelAnnotationAdjustment()
+                    }
+                }
+            }
+
+            guard let command, command.id != lastAdjustmentCommandID else { return }
+            lastAdjustmentCommandID = command.id
+            switch command.action {
+            case .commit:
+                adjustmentView.commitAdjustment()
+            case .cancel:
+                adjustmentView.cancelAdjustment()
             }
         }
 
@@ -634,6 +711,7 @@ struct PDFKitReaderView: NSViewRepresentable {
         }
 
         private func publishSnapshot() {
+            (pdfView as? AreaSelectionPDFView)?.refreshAdjustmentOverlay()
             guard !isRestoring,
                   let pdfView,
                   let document = pdfView.document,
@@ -671,11 +749,18 @@ struct PDFKitReaderView: NSViewRepresentable {
 private final class AreaSelectionPDFView: PDFView {
     var onAreaSelectionCompleted: ((PDFPageAreaSelection, CGRect) -> Void)?
     var onAreaSelectionCancelled: (() -> Void)?
+    var onAdjustmentCommitted: ((UUID, AnnotationAnchorValue) -> Bool)?
+    var onAdjustmentCancelled: (() -> Void)?
 
     private var areaSelectionEnabled = false
     private weak var dragPage: PDFPage?
     private var dragStart: CGPoint?
     private let selectionOverlay = AreaSelectionOverlayView(frame: .zero)
+    private var adjustmentSession: PDFAnnotationAdjustmentSession?
+    private var annotationContextTargets: [PDFAnnotationContextTarget] = []
+    private var onContextAdjust: ((UUID) -> Void)?
+    private var onContextDelete: ((UUID) -> Void)?
+    private var activeContextMenuActionTarget: AnnotationContextMenuActionTarget?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -692,6 +777,75 @@ private final class AreaSelectionPDFView: PDFView {
     override func layout() {
         super.layout()
         selectionOverlay.frame = bounds
+        refreshAdjustmentOverlay()
+    }
+
+    func configureAnnotationContextMenu(
+        annotations: [Annotation],
+        onAdjust: @escaping (UUID) -> Void,
+        onDelete: @escaping (UUID) -> Void
+    ) {
+        annotationContextTargets = annotations.compactMap { annotation in
+            switch annotation.kind {
+            case .textHighlight:
+                guard let anchor = annotation.textAnchor else { return nil }
+                return PDFAnnotationContextTarget(
+                    annotationID: annotation.id,
+                    pageIndex: anchor.pageIndex,
+                    regions: anchor.quadrilaterals.map(quadrilateralRect)
+                )
+            case .area:
+                guard let anchor = annotation.areaAnchor else { return nil }
+                return PDFAnnotationContextTarget(
+                    annotationID: annotation.id,
+                    pageIndex: anchor.pageIndex,
+                    regions: [cgRect(anchor.rect)]
+                )
+            }
+        }
+        onContextAdjust = onAdjust
+        onContextDelete = onDelete
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard adjustmentSession == nil,
+              let document,
+              let page = page(for: convert(event.locationInWindow, from: nil), nearest: false) else {
+            return super.menu(for: event)
+        }
+        let pageIndex = document.index(for: page)
+        guard pageIndex != NSNotFound else { return super.menu(for: event) }
+        let pagePoint = convert(convert(event.locationInWindow, from: nil), to: page)
+        guard let target = annotationContextTargets.last(where: { target in
+            target.pageIndex == pageIndex && target.regions.contains { region in
+                region.insetBy(dx: -3, dy: -3).contains(pagePoint)
+            }
+        }) else {
+            return super.menu(for: event)
+        }
+
+        let actions = AnnotationContextMenuActionTarget(
+            onAdjust: { [weak self] in self?.onContextAdjust?(target.annotationID) },
+            onDelete: { [weak self] in self?.onContextDelete?(target.annotationID) }
+        )
+        activeContextMenuActionTarget = actions
+        let menu = NSMenu()
+        let adjustItem = NSMenuItem(
+            title: "Adjust Annotation",
+            action: #selector(AnnotationContextMenuActionTarget.adjustAnnotation(_:)),
+            keyEquivalent: ""
+        )
+        adjustItem.target = actions
+        menu.addItem(adjustItem)
+        menu.addItem(.separator())
+        let deleteItem = NSMenuItem(
+            title: "Delete Annotation",
+            action: #selector(AnnotationContextMenuActionTarget.deleteAnnotation(_:)),
+            keyEquivalent: ""
+        )
+        deleteItem.target = actions
+        menu.addItem(deleteItem)
+        return menu
     }
 
     func setAreaSelectionEnabled(_ enabled: Bool) {
@@ -708,14 +862,108 @@ private final class AreaSelectionPDFView: PDFView {
         }
     }
 
+    @discardableResult
+    func beginAdjustment(
+        annotationID: UUID,
+        anchor: AnnotationAnchorValue,
+        page: PDFPage
+    ) -> Bool {
+        guard let document else { return false }
+        let pageIndex = document.index(for: page)
+        guard pageIndex != NSNotFound else { return false }
+
+        let textRange: NSRange?
+        switch anchor {
+        case let .text(textAnchor):
+            guard textAnchor.pageIndex == pageIndex,
+                  let range = locateTextRange(for: textAnchor, on: page) else { return false }
+            textRange = range
+        case let .area(areaAnchor):
+            guard areaAnchor.pageIndex == pageIndex else { return false }
+            textRange = nil
+        }
+
+        areaSelectionEnabled = false
+        cancelCurrentDrag()
+        adjustmentSession = PDFAnnotationAdjustmentSession(
+            annotationID: annotationID,
+            pageIndex: pageIndex,
+            page: page,
+            anchor: anchor,
+            textRange: textRange
+        )
+        refreshAdjustmentOverlay()
+        window?.makeFirstResponder(self)
+        window?.invalidateCursorRects(for: self)
+        setAccessibilityHelp("Adjust Annotation mode. Drag a handle or use the arrow keys. Press Return to save or Escape to cancel.")
+        announce("Adjust Annotation mode. Press Return to save or Escape to cancel.")
+        return true
+    }
+
+    func commitAdjustment() {
+        guard let adjustmentSession else { return }
+        let annotationID = adjustmentSession.annotationID
+        let anchor = adjustmentSession.anchor
+        guard onAdjustmentCommitted?(annotationID, anchor) == true else {
+            announce("The annotation could not be saved. Adjustment mode remains open.")
+            return
+        }
+        endAdjustmentSilently()
+        announce("Annotation adjusted.")
+    }
+
+    func cancelAdjustment() {
+        guard adjustmentSession != nil else { return }
+        endAdjustmentSilently()
+        announce("Annotation adjustment cancelled.")
+        onAdjustmentCancelled?()
+    }
+
+    func endAdjustmentSilently() {
+        adjustmentSession = nil
+        selectionOverlay.adjustmentRegions = []
+        selectionOverlay.adjustmentHandles = []
+        selectionOverlay.selectedAdjustmentHandleIndex = nil
+        setAccessibilityHelp(areaSelectionEnabled
+            ? "Area Annotation mode. Drag a rectangle on one page. Press Escape to cancel."
+            : nil)
+        window?.invalidateCursorRects(for: self)
+    }
+
+    func refreshAdjustmentOverlay() {
+        guard let session = adjustmentSession, let page = session.page else {
+            selectionOverlay.adjustmentRegions = []
+            selectionOverlay.adjustmentHandles = []
+            return
+        }
+        switch session.anchor {
+        case let .text(anchor):
+            selectionOverlay.adjustmentRegions = anchor.quadrilaterals.map { quadrilateral in
+                convert(quadrilateralRect(quadrilateral), from: page).standardized
+            }
+            selectionOverlay.adjustmentHandles = textHandleRects(anchor: anchor, page: page).map(\.rect)
+        case let .area(anchor):
+            let viewRect = convert(cgRect(anchor.rect), from: page).standardized
+            selectionOverlay.adjustmentRegions = [viewRect]
+            selectionOverlay.adjustmentHandles = areaHandleRects(viewRect: viewRect).map(\.rect)
+        }
+        selectionOverlay.selectedAdjustmentHandleIndex = selectedHandleIndex()
+    }
+
     override func resetCursorRects() {
         super.resetCursorRects()
         if areaSelectionEnabled {
             addCursorRect(bounds, cursor: .crosshair)
+        } else if adjustmentSession != nil {
+            addCursorRect(bounds, cursor: .openHand)
         }
     }
 
     override func mouseDown(with event: NSEvent) {
+        if adjustmentSession != nil {
+            beginAdjustmentDrag(with: event)
+            return
+        }
         guard areaSelectionEnabled else {
             super.mouseDown(with: event)
             return
@@ -733,6 +981,10 @@ private final class AreaSelectionPDFView: PDFView {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        if adjustmentSession != nil {
+            continueAdjustmentDrag(with: event)
+            return
+        }
         guard areaSelectionEnabled,
               let page = dragPage,
               let dragStart else {
@@ -746,6 +998,12 @@ private final class AreaSelectionPDFView: PDFView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if let session = adjustmentSession {
+            session.dragStartPagePoint = nil
+            session.dragStartAreaRect = nil
+            refreshAdjustmentOverlay()
+            return
+        }
         guard areaSelectionEnabled,
               let document,
               let page = dragPage,
@@ -778,6 +1036,9 @@ private final class AreaSelectionPDFView: PDFView {
     }
 
     override func keyDown(with event: NSEvent) {
+        if adjustmentSession != nil {
+            if handleAdjustmentKey(event) { return }
+        }
         if areaSelectionEnabled,
            event.keyCode == 53 || event.charactersIgnoringModifiers == "\u{1b}" {
             areaSelectionEnabled = false
@@ -800,6 +1061,375 @@ private final class AreaSelectionPDFView: PDFView {
         dragPage = nil
         dragStart = nil
         selectionOverlay.selectionRectangle = nil
+    }
+
+    private func beginAdjustmentDrag(with event: NSEvent) {
+        guard let session = adjustmentSession, let page = session.page else { return }
+        let viewPoint = convert(event.locationInWindow, from: nil)
+        let pagePoint = clipped(convert(viewPoint, to: page), to: page.bounds(for: .cropBox))
+
+        switch session.anchor {
+        case let .area(anchor):
+            let viewRect = convert(cgRect(anchor.rect), from: page).standardized
+            if let hit = areaHandleRects(viewRect: viewRect).first(where: { $0.rect.insetBy(dx: -3, dy: -3).contains(viewPoint) }) {
+                session.selectedHandle = .area(hit.handle)
+            } else if viewRect.contains(viewPoint) {
+                session.selectedHandle = .area(.move)
+            } else {
+                NSSound.beep()
+                return
+            }
+            session.dragStartPagePoint = pagePoint
+            session.dragStartAreaRect = cgRect(anchor.rect)
+        case let .text(anchor):
+            guard let hit = textHandleRects(anchor: anchor, page: page)
+                .first(where: { $0.rect.insetBy(dx: -4, dy: -4).contains(viewPoint) }) else {
+                NSSound.beep()
+                return
+            }
+            session.selectedHandle = hit.handle
+            session.dragStartPagePoint = pagePoint
+        }
+        window?.makeFirstResponder(self)
+        refreshAdjustmentOverlay()
+    }
+
+    private func continueAdjustmentDrag(with event: NSEvent) {
+        guard let session = adjustmentSession,
+              let page = session.page,
+              let selectedHandle = session.selectedHandle else { return }
+        let viewPoint = convert(event.locationInWindow, from: nil)
+        let pagePoint = clipped(convert(viewPoint, to: page), to: page.bounds(for: .cropBox))
+        switch selectedHandle {
+        case let .area(handle):
+            guard let startPoint = session.dragStartPagePoint,
+                  let startRect = session.dragStartAreaRect else { return }
+            let delta = CGPoint(x: pagePoint.x - startPoint.x, y: pagePoint.y - startPoint.y)
+            let rect = adjustedAreaRect(
+                startRect,
+                handle: handle,
+                pagePoint: pagePoint,
+                delta: delta,
+                pageBounds: page.bounds(for: .cropBox)
+            )
+            session.anchor = .area(AreaAnnotationAnchor(
+                pageIndex: session.pageIndex,
+                rect: AnnotationRect(x: rect.minX, y: rect.minY, width: rect.width, height: rect.height)
+            ))
+        case .textStart, .textEnd:
+            updateTextRange(at: pagePoint, boundary: selectedHandle, session: session, page: page)
+        }
+        refreshAdjustmentOverlay()
+    }
+
+    private func handleAdjustmentKey(_ event: NSEvent) -> Bool {
+        guard let session = adjustmentSession else { return false }
+        if event.keyCode == 53 || event.charactersIgnoringModifiers == "\u{1b}" {
+            cancelAdjustment()
+            return true
+        }
+        if event.keyCode == 36 || event.charactersIgnoringModifiers == "\r" {
+            commitAdjustment()
+            return true
+        }
+        if event.keyCode == 48 {
+            selectNextAdjustmentHandle(
+                reverse: event.modifierFlags.contains(.shift),
+                session: session
+            )
+            refreshAdjustmentOverlay()
+            return true
+        }
+        guard [123, 124, 125, 126].contains(event.keyCode) else { return false }
+
+        switch session.anchor {
+        case .area:
+            nudgeAreaAdjustment(event: event, session: session)
+        case .text:
+            nudgeTextAdjustment(event: event, session: session)
+        }
+        refreshAdjustmentOverlay()
+        return true
+    }
+
+    private func selectNextAdjustmentHandle(
+        reverse: Bool,
+        session: PDFAnnotationAdjustmentSession
+    ) {
+        let handles: [AnnotationAdjustmentHandle]
+        switch session.anchor {
+        case .text:
+            handles = [.textStart, .textEnd]
+        case .area:
+            handles = AreaAdjustmentHandle.allCases.map(AnnotationAdjustmentHandle.area)
+        }
+        let currentIndex = session.selectedHandle.flatMap { handles.firstIndex(of: $0) }
+        let nextIndex: Int
+        if let currentIndex {
+            nextIndex = (currentIndex + (reverse ? handles.count - 1 : 1)) % handles.count
+        } else {
+            nextIndex = reverse ? handles.count - 1 : 0
+        }
+        session.selectedHandle = handles[nextIndex]
+        announce("\(handles[nextIndex].accessibilityName) selected. Use the arrow keys to adjust.")
+    }
+
+    private func nudgeAreaAdjustment(event: NSEvent, session: PDFAnnotationAdjustmentSession) {
+        guard case let .area(anchor) = session.anchor, let page = session.page else { return }
+        let amount: CGFloat = event.modifierFlags.contains(.shift) ? 10 : 1
+        let delta = switch event.keyCode {
+        case 123: CGPoint(x: -amount, y: 0)
+        case 124: CGPoint(x: amount, y: 0)
+        case 125: CGPoint(x: 0, y: -amount)
+        default: CGPoint(x: 0, y: amount)
+        }
+        let handle: AreaAdjustmentHandle
+        if case let .area(selected)? = session.selectedHandle {
+            handle = selected
+        } else {
+            handle = .move
+            session.selectedHandle = .area(.move)
+        }
+        let startRect = cgRect(anchor.rect)
+        let referencePoint = CGPoint(
+            x: handle.affectsMaximumX ? startRect.maxX + delta.x : startRect.minX + delta.x,
+            y: handle.affectsMaximumY ? startRect.maxY + delta.y : startRect.minY + delta.y
+        )
+        let rect = adjustedAreaRect(
+            startRect,
+            handle: handle,
+            pagePoint: referencePoint,
+            delta: delta,
+            pageBounds: page.bounds(for: .cropBox)
+        )
+        session.anchor = .area(AreaAnnotationAnchor(
+            pageIndex: session.pageIndex,
+            rect: AnnotationRect(x: rect.minX, y: rect.minY, width: rect.width, height: rect.height)
+        ))
+    }
+
+    private func nudgeTextAdjustment(event: NSEvent, session: PDFAnnotationAdjustmentSession) {
+        guard let page = session.page, let range = session.textRange else { return }
+        guard event.keyCode == 123 || event.keyCode == 124 else {
+            NSSound.beep()
+            return
+        }
+        let direction = event.keyCode == 123 ? -1 : 1
+        let boundary = session.selectedHandle ?? .textEnd
+        session.selectedHandle = boundary
+        let currentIndex = boundary == .textStart ? range.location : NSMaxRange(range) - 1
+        let proposed: Int
+        if event.modifierFlags.contains(.option) {
+            proposed = wordBoundary(from: currentIndex, direction: direction, on: page)
+        } else {
+            proposed = currentIndex + direction
+        }
+        updateTextIndex(proposed, boundary: boundary, session: session, page: page)
+    }
+
+    private func updateTextRange(
+        at pagePoint: CGPoint,
+        boundary: AnnotationAdjustmentHandle,
+        session: PDFAnnotationAdjustmentSession,
+        page: PDFPage
+    ) {
+        let index = page.characterIndex(at: pagePoint)
+        guard index != NSNotFound else { return }
+        updateTextIndex(index, boundary: boundary, session: session, page: page)
+    }
+
+    private func updateTextIndex(
+        _ proposedIndex: Int,
+        boundary: AnnotationAdjustmentHandle,
+        session: PDFAnnotationAdjustmentSession,
+        page: PDFPage
+    ) {
+        guard let range = session.textRange else { return }
+        let lastCharacter = max(Int(page.numberOfCharacters) - 1, 0)
+        let index = min(max(proposedIndex, 0), lastCharacter)
+        let newRange: NSRange
+        switch boundary {
+        case .textStart:
+            let end = NSMaxRange(range)
+            newRange = NSRange(location: min(index, end - 1), length: end - min(index, end - 1))
+        case .textEnd:
+            let end = max(index + 1, range.location + 1)
+            newRange = NSRange(location: range.location, length: end - range.location)
+        case .area:
+            return
+        }
+        guard let selection = page.selection(for: newRange),
+              let anchor = textAnchor(from: selection, page: page, pageIndex: session.pageIndex) else { return }
+        session.textRange = newRange
+        session.anchor = .text(anchor)
+    }
+
+    private func adjustedAreaRect(
+        _ startRect: CGRect,
+        handle: AreaAdjustmentHandle,
+        pagePoint: CGPoint,
+        delta: CGPoint,
+        pageBounds: CGRect
+    ) -> CGRect {
+        let adjusted = AreaAnnotationGeometry.adjustedRect(
+            AnnotationRect(
+                x: startRect.minX,
+                y: startRect.minY,
+                width: startRect.width,
+                height: startRect.height
+            ),
+            handle: handle,
+            pagePoint: AnnotationPoint(x: pagePoint.x, y: pagePoint.y),
+            delta: AnnotationPoint(x: delta.x, y: delta.y),
+            pageBounds: AnnotationRect(
+                x: pageBounds.minX,
+                y: pageBounds.minY,
+                width: pageBounds.width,
+                height: pageBounds.height
+            )
+        )
+        return cgRect(adjusted)
+    }
+
+    private func locateTextRange(for anchor: TextAnnotationAnchor, on page: PDFPage) -> NSRange? {
+        guard let pageText = page.string, !anchor.selectedText.isEmpty else { return nil }
+        let haystack = pageText as NSString
+        let needle = anchor.selectedText as NSString
+        var searchRange = NSRange(location: 0, length: haystack.length)
+        var best: (range: NSRange, distance: CGFloat)?
+        let target = quadrilateralBounds(anchor.quadrilaterals)
+
+        while searchRange.length > 0 {
+            let found = haystack.range(of: needle as String, options: [], range: searchRange)
+            guard found.location != NSNotFound else { break }
+            if let selection = page.selection(for: found) {
+                let bounds = selection.bounds(for: page)
+                let distance = abs(bounds.midX - target.midX) + abs(bounds.midY - target.midY)
+                if best == nil || distance < best!.distance {
+                    best = (found, distance)
+                }
+            }
+            let next = NSMaxRange(found)
+            guard next < haystack.length else { break }
+            searchRange = NSRange(location: next, length: haystack.length - next)
+        }
+        return best?.range
+    }
+
+    private func textAnchor(
+        from selection: PDFSelection,
+        page: PDFPage,
+        pageIndex: Int
+    ) -> TextAnnotationAnchor? {
+        guard let selectedText = selection.string,
+              !selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        let quadrilaterals = selection.selectionsByLine().compactMap { line -> AnnotationQuadrilateral? in
+            guard line.pages.contains(where: { $0 === page }) else { return nil }
+            let rect = line.bounds(for: page)
+            guard !rect.isNull, !rect.isEmpty else { return nil }
+            return AnnotationQuadrilateral(
+                upperLeft: AnnotationPoint(x: rect.minX, y: rect.maxY),
+                upperRight: AnnotationPoint(x: rect.maxX, y: rect.maxY),
+                lowerLeft: AnnotationPoint(x: rect.minX, y: rect.minY),
+                lowerRight: AnnotationPoint(x: rect.maxX, y: rect.minY)
+            )
+        }
+        guard !quadrilaterals.isEmpty else { return nil }
+        return TextAnnotationAnchor(
+            pageIndex: pageIndex,
+            quadrilaterals: quadrilaterals,
+            selectedText: selectedText
+        )
+    }
+
+    private func wordBoundary(from index: Int, direction: Int, on page: PDFPage) -> Int {
+        guard let string = page.string else { return index }
+        let text = string as NSString
+        guard text.length > 0 else { return index }
+        var cursor = min(max(index + direction, 0), text.length - 1)
+        let whitespace = CharacterSet.whitespacesAndNewlines
+        func isWhitespace(_ offset: Int) -> Bool {
+            guard let scalar = UnicodeScalar(text.character(at: offset)) else { return false }
+            return whitespace.contains(scalar)
+        }
+        while cursor > 0, cursor < text.length - 1, isWhitespace(cursor) {
+            cursor += direction
+        }
+        while cursor > 0, cursor < text.length - 1, !isWhitespace(cursor) {
+            cursor += direction
+        }
+        return min(max(cursor, 0), text.length - 1)
+    }
+
+    private func selectedHandleIndex() -> Int? {
+        guard let session = adjustmentSession, let selected = session.selectedHandle else { return nil }
+        switch session.anchor {
+        case .text:
+            return selected == .textStart ? 0 : selected == .textEnd ? 1 : nil
+        case let .area(anchor):
+            guard case let .area(handle) = selected, handle != .move, let page = session.page else { return nil }
+            let viewRect = convert(cgRect(anchor.rect), from: page).standardized
+            return areaHandleRects(viewRect: viewRect).firstIndex(where: { $0.handle == handle })
+        }
+    }
+
+    private func textHandleRects(
+        anchor: TextAnnotationAnchor,
+        page: PDFPage
+    ) -> [(handle: AnnotationAdjustmentHandle, rect: CGRect)] {
+        guard let first = anchor.quadrilaterals.first,
+              let last = anchor.quadrilaterals.last else { return [] }
+        let start = convert(CGPoint(x: first.lowerLeft.x, y: first.lowerLeft.y), from: page)
+        let end = convert(CGPoint(x: last.lowerRight.x, y: last.lowerRight.y), from: page)
+        return [
+            (.textStart, handleRect(center: start, size: 12)),
+            (.textEnd, handleRect(center: end, size: 12))
+        ]
+    }
+
+    private func areaHandleRects(
+        viewRect: CGRect
+    ) -> [(handle: AreaAdjustmentHandle, rect: CGRect)] {
+        let centers: [(AreaAdjustmentHandle, CGPoint)] = [
+            (.bottomLeft, CGPoint(x: viewRect.minX, y: viewRect.minY)),
+            (.bottom, CGPoint(x: viewRect.midX, y: viewRect.minY)),
+            (.bottomRight, CGPoint(x: viewRect.maxX, y: viewRect.minY)),
+            (.right, CGPoint(x: viewRect.maxX, y: viewRect.midY)),
+            (.topRight, CGPoint(x: viewRect.maxX, y: viewRect.maxY)),
+            (.top, CGPoint(x: viewRect.midX, y: viewRect.maxY)),
+            (.topLeft, CGPoint(x: viewRect.minX, y: viewRect.maxY)),
+            (.left, CGPoint(x: viewRect.minX, y: viewRect.midY))
+        ]
+        return centers.map { ($0.0, handleRect(center: $0.1, size: 10)) }
+    }
+
+    private func handleRect(center: CGPoint, size: CGFloat) -> CGRect {
+        CGRect(x: center.x - size / 2, y: center.y - size / 2, width: size, height: size)
+    }
+
+    private func cgRect(_ rectangle: AnnotationRect) -> CGRect {
+        CGRect(x: rectangle.x, y: rectangle.y, width: rectangle.width, height: rectangle.height)
+    }
+
+    private func quadrilateralRect(_ quadrilateral: AnnotationQuadrilateral) -> CGRect {
+        let points = [
+            quadrilateral.upperLeft,
+            quadrilateral.upperRight,
+            quadrilateral.lowerLeft,
+            quadrilateral.lowerRight
+        ]
+        let xs = points.map(\.x)
+        let ys = points.map(\.y)
+        return CGRect(
+            x: xs.min() ?? 0,
+            y: ys.min() ?? 0,
+            width: (xs.max() ?? 0) - (xs.min() ?? 0),
+            height: (ys.max() ?? 0) - (ys.min() ?? 0)
+        )
+    }
+
+    private func quadrilateralBounds(_ quadrilaterals: [AnnotationQuadrilateral]) -> CGRect {
+        quadrilaterals.map(quadrilateralRect).reduce(.null) { $0.union($1) }
     }
 
     private func clipped(_ point: CGPoint, to bounds: CGRect) -> CGPoint {
@@ -834,6 +1464,15 @@ private final class AreaSelectionOverlayView: NSView {
     var selectionRectangle: CGRect? {
         didSet { needsDisplay = true }
     }
+    var adjustmentRegions: [CGRect] = [] {
+        didSet { needsDisplay = true }
+    }
+    var adjustmentHandles: [CGRect] = [] {
+        didSet { needsDisplay = true }
+    }
+    var selectedAdjustmentHandleIndex: Int? {
+        didSet { needsDisplay = true }
+    }
 
     override var isOpaque: Bool { false }
 
@@ -841,8 +1480,19 @@ private final class AreaSelectionOverlayView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        guard let selectionRectangle, !selectionRectangle.isEmpty else { return }
-        let path = NSBezierPath(rect: selectionRectangle)
+        if let selectionRectangle, !selectionRectangle.isEmpty {
+            drawRegion(selectionRectangle)
+        }
+        drawAdjustments()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        needsDisplay = true
+    }
+
+    private func drawRegion(_ rectangle: CGRect) {
+        let path = NSBezierPath(rect: rectangle)
         NSColor.controlAccentColor.withAlphaComponent(0.16).setFill()
         path.fill()
         NSColor.controlAccentColor.setStroke()
@@ -850,6 +1500,106 @@ private final class AreaSelectionOverlayView: NSView {
         path.setLineDash([6, 3], count: 2, phase: 0)
         path.stroke()
     }
+
+    private func drawAdjustments() {
+        for region in adjustmentRegions where !region.isEmpty {
+            drawRegion(region)
+        }
+        for (index, handle) in adjustmentHandles.enumerated() {
+            let path = NSBezierPath(roundedRect: handle, xRadius: 2, yRadius: 2)
+            if selectedAdjustmentHandleIndex == index {
+                NSColor.controlAccentColor.setFill()
+            } else {
+                NSColor.controlBackgroundColor.setFill()
+            }
+            path.fill()
+            NSColor.controlAccentColor.setStroke()
+            path.lineWidth = 2
+            path.stroke()
+        }
+    }
+}
+
+private final class PDFAnnotationAdjustmentSession {
+    let annotationID: UUID
+    let pageIndex: Int
+    weak var page: PDFPage?
+    var anchor: AnnotationAnchorValue
+    var textRange: NSRange?
+    var selectedHandle: AnnotationAdjustmentHandle?
+    var dragStartPagePoint: CGPoint?
+    var dragStartAreaRect: CGRect?
+
+    init(
+        annotationID: UUID,
+        pageIndex: Int,
+        page: PDFPage,
+        anchor: AnnotationAnchorValue,
+        textRange: NSRange?
+    ) {
+        self.annotationID = annotationID
+        self.pageIndex = pageIndex
+        self.page = page
+        self.anchor = anchor
+        self.textRange = textRange
+    }
+}
+
+private struct PDFAnnotationContextTarget {
+    let annotationID: UUID
+    let pageIndex: Int
+    let regions: [CGRect]
+}
+
+private final class AnnotationContextMenuActionTarget: NSObject {
+    private let onAdjust: () -> Void
+    private let onDelete: () -> Void
+
+    init(onAdjust: @escaping () -> Void, onDelete: @escaping () -> Void) {
+        self.onAdjust = onAdjust
+        self.onDelete = onDelete
+    }
+
+    @objc func adjustAnnotation(_ sender: Any?) {
+        onAdjust()
+    }
+
+    @objc func deleteAnnotation(_ sender: Any?) {
+        onDelete()
+    }
+}
+
+private enum AnnotationAdjustmentHandle: Equatable {
+    case textStart
+    case textEnd
+    case area(AreaAdjustmentHandle)
+
+    var accessibilityName: String {
+        switch self {
+        case .textStart: "Start boundary"
+        case .textEnd: "End boundary"
+        case let .area(handle): handle.accessibilityName
+        }
+    }
+}
+
+private typealias AreaAdjustmentHandle = AreaAnnotationAdjustmentHandle
+
+private extension AreaAnnotationAdjustmentHandle {
+    var accessibilityName: String {
+        switch self {
+        case .move: "Move"
+        case .bottomLeft: "Bottom-left resize handle"
+        case .bottom: "Bottom resize handle"
+        case .bottomRight: "Bottom-right resize handle"
+        case .right: "Right resize handle"
+        case .topRight: "Top-right resize handle"
+        case .top: "Top resize handle"
+        case .topLeft: "Top-left resize handle"
+        case .left: "Left resize handle"
+        }
+    }
+
 }
 
 private struct PDFSelectionSignature: Equatable {

@@ -38,7 +38,7 @@ On access, Canopy compares file size and modification date. If either changed, i
 
 ### Managed copies
 
-When explicitly selected during import, Canopy copies the PDF into its Application Support container. The import choice applies to the batch and cannot be changed afterward in v1. Removing the paper also removes its managed copy after confirmation.
+When explicitly selected during import, Canopy copies the PDF into its Application Support container. The import choice applies to the batch. Afterward, Paper Info can transactionally change an Available Paper between referenced and managed storage. Referenced-to-managed conversion leaves the external file untouched. Managed-to-referenced conversion requires a user-selected destination and removes Canopy's managed copy only after the destination copy is fully hashed and verified. Removing the paper also removes its managed copy after confirmation.
 
 ### SwiftData
 
@@ -65,7 +65,7 @@ Each Area Annotation stores one user-drawn rectangle in page coordinates. Canopy
 
 Geometry provides exact rendering; selected text supplies the text-highlight quotation shown in the inspector. Exact Source PDF fingerprint verification protects both annotation kinds from being applied to changed bytes. Externally changed PDFs do not receive automatic re-anchoring in v1.
 
-Colors are yellow, green, blue, pink, and purple. Color controls always include names, selection borders, and checkmarks, and users can change an existing annotation's color from the inspector with native Undo and Redo. Annotation rows remain understandable without distinguishing hue, and Canopy respects increased-contrast and differentiate-without-color preferences. Area Annotation overlays use a clear border and light translucent fill; increased contrast strengthens the border and Differentiate Without Color adds the color's non-color symbol.
+Colors are yellow, green, blue, pink, and purple. Color controls always include names, selection borders, and checkmarks, and users can change an existing annotation's color from the inspector with native Undo and Redo. Text-highlight boundaries and Area Annotation rectangles can be adjusted on their original page through staged Done/Cancel controls, pointer handles, and keyboard nudging; one completed adjustment is one native Undo step. Annotation rows remain understandable without distinguishing hue, and Canopy respects increased-contrast and differentiate-without-color preferences. Area Annotation overlays use a clear border and light translucent fill; increased contrast strengthens the border and Differentiate Without Color adds the color's non-color symbol.
 
 ## Window and state ownership
 
@@ -73,7 +73,7 @@ Canopy v1 has one primary window containing a stable sidebar-detail layout with 
 
 - Sidebar: recent history, full library, basic sorting, and search
 - Detail: PDFKit reader and reader toolbar
-- Inspector: one page-ordered annotation list with text quotations or Area Annotation previews and inline note editing
+- Inspector: one current-Paper annotation list with app-persistent Recent Activity or Page Order sorting, Paper-scoped multi-color filtering, text quotations or Area Annotation previews, and inline note editing
 
 Paper metadata is managed in a dedicated **Paper Info** sheet opened from an info button in the reader toolbar, the Paper row's **Get Info** context-menu command, or `⌘I`. The sheet contains editable bibliographic fields and Author Credits, field provenance, source status and location, and Reparse Metadata; it does not occupy another column. All edits and approved reparse replacements remain staged until the user chooses Save; Cancel discards the entire transaction. Author Credits use ordered rows with add, remove, and drag-to-reorder controls; each exposes a display name and permits correction of the derived family name when expanded.
 
@@ -187,7 +187,7 @@ Remaining:
 
 ### 2. Library
 
-**Status: Implemented.** Validated local metadata extraction and deterministic title inference are available. The library presents Recent and remaining sections, supports Title and Date Added sorting, ranks title matches before author/year and note matches, clears recent history without deleting Papers, and applies distinct referenced/managed removal semantics with native Undo. Paper Info stages atomic title, year, DOI, arXiv, and ordered Author Credit edits from all three entry points while showing provenance and source details. Author Credits support add, remove, display-name editing, expanded family-name correction, drag reordering, and native Undo. Reparse Metadata verifies and rereads the current Source PDF, presents each different usable value for approval, and preserves inferred or manual provenance through the staged Save, Cancel, Undo, and Redo transaction.
+**Status: Implemented.** Validated local metadata extraction and deterministic title inference are available. The library presents Recent and remaining sections, supports Title and Date Added sorting, ranks title matches before author/year and note matches, clears recent history without deleting Papers, and applies distinct referenced/managed removal semantics with native Undo. Paper Info stages atomic title, year, DOI, arXiv, and ordered Author Credit edits from all three entry points while showing provenance and source details. Author Credits support add, remove, display-name editing, expanded family-name correction, drag reordering, and native Undo. Reparse Metadata verifies and rereads the current Source PDF, presents each different usable value for approval, and preserves inferred or manual provenance through the staged Save, Cancel, Undo, and Redo transaction. Paper Info also converts an Available Source PDF between referenced and managed storage through a fully verified, transactional copy without changing the Paper identity or its work.
 
 - Implement validated metadata extraction and editable fields.
 - Add deterministic first-page title inference.
@@ -211,18 +211,20 @@ Remaining:
 
 ### 4. Annotations and notes
 
-**Status: Implemented.** Text highlights and single-page Area Annotations are stored separately from PDF bytes, rendered as temporary PDFKit overlays, and shown in a page-ordered inspector. Area previews render from the verified Source PDF, both kinds support named color editing and notes with Undo/Redo, and cross-page text selections are rejected with guidance.
+**Status: Implemented.** Text highlights and single-page Area Annotations are stored separately from PDF bytes and rendered as temporary PDFKit overlays. The current-Paper inspector defaults to newest note/create activity, offers Page Order and multi-color filtering, and defers activity reordering while a note is focused. Area previews render from the verified Source PDF; both kinds support named color editing, staged single-page anchor adjustment, and notes with Undo/Redo; and cross-page text selections are rejected with guidance. Color and anchor-only changes do not alter an annotation's activity timestamp.
 
 Remaining:
 
 - [x] Implement Area Annotation capture, persistence, rendering, thumbnails, navigation, notes, Undo, and accessibility behavior.
 - [x] Add inspector color editing with explicit save and Undo/Redo for both annotation kinds.
 - [x] Reject cross-page text selections with clear guidance.
+- [x] Add current-Paper Recent Activity/Page Order sorting and multi-color filtering.
+- [x] Add staged pointer and keyboard adjustment for text and Area Annotation anchors with one-step Undo.
 
 - Capture composite selection anchors and render PDFKit overlays.
 - Restrict a text highlight to one page; if a selection crosses a page boundary, ask the user to select text on one page at a time.
 - Add the accessible contextual color palette.
-- Implement the page-ordered inspector and navigation to anchors.
+- Implement the current-Paper inspector with Recent Activity/Page Order sorting, color filtering, and navigation to anchors.
 - Implement one-shot user-drawn Area Annotations with page rectangles, generated inspector thumbnails, region navigation, scanned-PDF support, toolbar and Paper-menu entry points, `⌘⇧A`, and `Esc` cancellation. Drawing remains a user-controlled pointer operation; VoiceOver covers mode instructions and every action before and after capture without attempting automatic region selection or image description.
 - Allow both annotation kinds to change color from the inspector with explicit save and native Undo/Redo.
 - Add debounced notes, explicit critical saves, persistence errors, and Undo.

@@ -3,6 +3,7 @@ import CanopyCore
 import CoreText
 import Foundation
 import PDFKit
+import SwiftData
 import Testing
 @testable import Canopy
 
@@ -72,6 +73,65 @@ struct CanopyAppTests {
         #expect(unselected.name == "Green")
         #expect(unselected.checkmarkSystemImage == nil)
         #expect(unselected.borderWidth == 0)
+    }
+
+    @MainActor
+    @Test("annotation inspector filters by selected colors and applies its chosen sort")
+    func annotationInspectorContents() throws {
+        let repository = LibraryRepository(container: try CanopyModelContainer.make(inMemory: true))
+        let paper = Paper(
+            fingerprint: Data(repeating: 61, count: 32),
+            title: "Inspector Ordering",
+            storageMode: .managedCopy,
+            sourceFilename: "inspector.pdf",
+            sourceFileSize: 100,
+            pageCount: 3
+        )
+        try repository.insert(paper)
+        let yellow = try repository.createAreaAnnotation(
+            paperID: paper.id,
+            anchor: AreaAnnotationAnchor(
+                pageIndex: 2,
+                rect: AnnotationRect(x: 10, y: 10, width: 30, height: 30)
+            ),
+            color: .yellow
+        )
+        let blue = try repository.createAreaAnnotation(
+            paperID: paper.id,
+            anchor: AreaAnnotationAnchor(
+                pageIndex: 0,
+                rect: AnnotationRect(x: 10, y: 10, width: 30, height: 30)
+            ),
+            color: .blue
+        )
+        yellow.updatedAt = Date(timeIntervalSince1970: 400)
+        blue.updatedAt = Date(timeIntervalSince1970: 200)
+
+        #expect(AnnotationInspectorContents.visibleAnnotations(
+            from: [blue, yellow],
+            selectedColors: [],
+            sortOrder: .recentActivity
+        ).map(\.id) == [yellow.id, blue.id])
+        #expect(AnnotationInspectorContents.visibleAnnotations(
+            from: [yellow, blue],
+            selectedColors: [.blue],
+            sortOrder: .pageOrder
+        ).map(\.id) == [blue.id])
+    }
+
+    @MainActor
+    @Test("area annotation previews crop to exactly the selected page region")
+    func areaAnnotationPreviewUsesExactSelection() {
+        let pageBounds = CGRect(x: 0, y: 0, width: 600, height: 800)
+        let anchor = AreaAnnotationAnchor(
+            pageIndex: 0,
+            rect: AnnotationRect(x: -10, y: 40, width: 110, height: 80)
+        )
+
+        #expect(AreaAnnotationPreviewRenderer.sourceRectangle(
+            anchor: anchor,
+            pageBounds: pageBounds
+        ) == CGRect(x: 0, y: 40, width: 100, height: 80))
     }
 
     @MainActor
@@ -1462,6 +1522,200 @@ struct CanopyAppTests {
     }
 
     @MainActor
+    @Test("annotation anchor adjustments participate in native Undo and Redo")
+    func annotationAnchorUndoRedo() throws {
+        let repository = LibraryRepository(container: try CanopyModelContainer.make(inMemory: true))
+        let paper = Paper(
+            fingerprint: Data(repeating: 62, count: 32),
+            title: "Anchor Undo",
+            storageMode: .managedCopy,
+            sourceFilename: "anchor.pdf",
+            sourceFileSize: 100,
+            pageCount: 1
+        )
+        try repository.insert(paper)
+        let original = AreaAnnotationAnchor(
+            pageIndex: 0,
+            rect: AnnotationRect(x: 10, y: 20, width: 80, height: 60)
+        )
+        let adjusted = AreaAnnotationAnchor(
+            pageIndex: 0,
+            rect: AnnotationRect(x: 30, y: 40, width: 120, height: 90)
+        )
+        let annotation = try repository.createAreaAnnotation(
+            paperID: paper.id,
+            anchor: original,
+            color: .yellow
+        )
+        try repository.updateAreaAnnotationAnchor(annotationID: annotation.id, anchor: adjusted)
+
+        let undoManager = UndoManager()
+        let undoTarget = AnnotationUndoTarget()
+        var errors: [Error] = []
+        AnnotationUndo.registerUndoForAnchorChange(
+            annotationID: annotation.id,
+            previousAnchor: .area(original),
+            currentAnchor: .area(adjusted),
+            repository: repository,
+            target: undoTarget,
+            undoManager: undoManager,
+            onChange: {},
+            onError: { errors.append($0) }
+        )
+
+        undoManager.undo()
+        #expect(try repository.annotations(paperID: paper.id).first?.areaAnchor == original)
+        undoManager.redo()
+        #expect(try repository.annotations(paperID: paper.id).first?.areaAnchor == adjusted)
+        #expect(errors.isEmpty)
+    }
+
+    @MainActor
+    @Test("storage conversion copies and verifies both directions")
+    func storageConversionWorkflowRoundTrip() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let managedRoot = directory.appendingPathComponent("Managed", isDirectory: true)
+        let sourceURL = directory.appendingPathComponent("source.pdf")
+        let referencedDestination = directory.appendingPathComponent("exported.pdf")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data("storage-conversion-source".utf8).write(to: sourceURL)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let attributes = try FileManager.default.attributesOfItem(atPath: sourceURL.path)
+        let fingerprint = try DocumentFingerprint.sha256(of: sourceURL)
+        let bookmark = try SecurityScopedBookmarkService().makeBookmark(for: sourceURL)
+        let repository = LibraryRepository(container: try CanopyModelContainer.make(inMemory: true))
+        let paper = Paper(
+            fingerprint: fingerprint,
+            title: "Storage Round Trip",
+            storageMode: .referenced,
+            bookmarkData: bookmark,
+            sourceFilename: sourceURL.lastPathComponent,
+            rememberedLocation: sourceURL.path,
+            sourceFileSize: (attributes[.size] as? NSNumber)?.int64Value ?? 0,
+            sourceModificationDate: attributes[.modificationDate] as? Date,
+            pageCount: 1
+        )
+        try repository.insert(paper)
+        let managedStore = ManagedPaperStore(rootURL: managedRoot)
+        let workflow = PaperStorageConversionWorkflow()
+
+        #expect(await workflow.convertToManagedCopy(
+            paperID: paper.id,
+            repository: repository,
+            managedStore: managedStore
+        ))
+        #expect(paper.storageMode == .managedCopy)
+        #expect(paper.managedRelativePath.map {
+            FileManager.default.fileExists(atPath: managedRoot.appendingPathComponent($0).path)
+        } == true)
+
+        #expect(await workflow.convertToReferenced(
+            paperID: paper.id,
+            destinationURL: referencedDestination,
+            repository: repository,
+            managedStore: managedStore
+        ))
+        #expect(paper.storageMode == .referenced)
+        #expect(paper.rememberedLocation == referencedDestination.path)
+        #expect(try DocumentFingerprint.sha256(of: referencedDestination) == fingerprint)
+        #expect(workflow.errorMessage == nil)
+    }
+
+    @MainActor
+    @Test("managed storage conversion rejects destinations inside the managed store")
+    func storageConversionRejectsManagedDestination() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let managedRoot = directory.appendingPathComponent("Managed", isDirectory: true)
+        let managedRelativePath = "paper.pdf"
+        let managedURL = managedRoot.appendingPathComponent(managedRelativePath)
+        try FileManager.default.createDirectory(at: managedRoot, withIntermediateDirectories: true)
+        try Data("managed-storage-source".utf8).write(to: managedURL)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let attributes = try FileManager.default.attributesOfItem(atPath: managedURL.path)
+        let fingerprint = try DocumentFingerprint.sha256(of: managedURL)
+        let repository = LibraryRepository(container: try CanopyModelContainer.make(inMemory: true))
+        let paper = Paper(
+            fingerprint: fingerprint,
+            title: "Managed Destination Guard",
+            storageMode: .managedCopy,
+            managedRelativePath: managedRelativePath,
+            sourceFilename: managedURL.lastPathComponent,
+            sourceFileSize: (attributes[.size] as? NSNumber)?.int64Value ?? 0,
+            sourceModificationDate: attributes[.modificationDate] as? Date,
+            pageCount: 1
+        )
+        try repository.insert(paper)
+        let managedStore = ManagedPaperStore(rootURL: managedRoot)
+        let workflow = PaperStorageConversionWorkflow()
+
+        #expect(await workflow.convertToReferenced(
+            paperID: paper.id,
+            destinationURL: managedURL,
+            repository: repository,
+            managedStore: managedStore
+        ) == false)
+        #expect(paper.storageMode == .managedCopy)
+        #expect(FileManager.default.fileExists(atPath: managedURL.path))
+        #expect(try DocumentFingerprint.sha256(of: managedURL) == fingerprint)
+    }
+
+    @MainActor
+    @Test("failed storage conversion restores both managed source and external destination")
+    func storageConversionSaveFailureIsAtomic() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let managedRoot = directory.appendingPathComponent("Managed", isDirectory: true)
+        let managedRelativePath = "paper.pdf"
+        let managedURL = managedRoot.appendingPathComponent(managedRelativePath)
+        let destinationURL = directory.appendingPathComponent("destination.pdf")
+        let storeURL = directory.appendingPathComponent("Canopy.store")
+        let sourceData = Data("managed-source".utf8)
+        let existingDestinationData = Data("existing-destination".utf8)
+        try FileManager.default.createDirectory(at: managedRoot, withIntermediateDirectories: true)
+        try sourceData.write(to: managedURL)
+        try existingDestinationData.write(to: destinationURL)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let attributes = try FileManager.default.attributesOfItem(atPath: managedURL.path)
+        let fingerprint = try DocumentFingerprint.sha256(of: managedURL)
+        let paperID = UUID()
+        do {
+            let repository = LibraryRepository(
+                container: try appTestPersistentContainer(at: storeURL, allowsSave: true)
+            )
+            try repository.insert(Paper(
+                id: paperID,
+                fingerprint: fingerprint,
+                title: "Atomic Conversion",
+                storageMode: .managedCopy,
+                managedRelativePath: managedRelativePath,
+                sourceFilename: managedURL.lastPathComponent,
+                sourceFileSize: (attributes[.size] as? NSNumber)?.int64Value ?? 0,
+                sourceModificationDate: attributes[.modificationDate] as? Date,
+                pageCount: 1
+            ))
+        }
+
+        let repository = LibraryRepository(
+            container: try appTestPersistentContainer(at: storeURL, allowsSave: false)
+        )
+        let workflow = PaperStorageConversionWorkflow()
+        #expect(await workflow.convertToReferenced(
+            paperID: paperID,
+            destinationURL: destinationURL,
+            repository: repository,
+            managedStore: ManagedPaperStore(rootURL: managedRoot)
+        ) == false)
+        #expect(try Data(contentsOf: managedURL) == sourceData)
+        #expect(try Data(contentsOf: destinationURL) == existingDestinationData)
+        #expect(try repository.paper(id: paperID)?.storageMode == .managedCopy)
+    }
+
+    @MainActor
     private func makePaper(
         title: String,
         dateAdded: Date,
@@ -1485,6 +1739,16 @@ struct CanopyAppTests {
         paper.lastOpenedAt = lastOpenedAt
         return paper
     }
+}
+
+@MainActor
+private func appTestPersistentContainer(at url: URL, allowsSave: Bool) throws -> ModelContainer {
+    let configuration = ModelConfiguration(url: url, allowsSave: allowsSave)
+    return try ModelContainer(
+        for: Schema(versionedSchema: CanopySchemaV1.self),
+        migrationPlan: CanopyMigrationPlan.self,
+        configurations: configuration
+    )
 }
 
 private struct StubDocumentAnalyzer: DocumentAnalyzing {

@@ -9,6 +9,7 @@ struct PDFReaderView: View {
     @Binding var inspectorPresented: Bool
     let annotationNavigation: AnnotationNavigation?
     @Binding var focusedAnnotationID: UUID?
+    @Binding var annotationAdjustmentRequest: AnnotationAdjustmentRequest?
     let annotationUndoTarget: AnnotationUndoTarget
     let annotationSession: AnnotationSession
     @Binding var reloadToken: UUID
@@ -30,6 +31,7 @@ struct PDFReaderView: View {
     @State private var pendingSave: PDFReaderPendingSave?
     @State private var failedSave: PDFReaderPendingSave?
     @State private var persistenceErrorMessage: String?
+    @State private var adjustmentCommand: AnnotationAdjustmentCommand?
     @FocusState private var findFieldFocused: Bool
 
     private var pageCount: Int { documentSession?.document.pageCount ?? 0 }
@@ -51,6 +53,23 @@ struct PDFReaderView: View {
                     .accessibilityLabel(
                         "This PDF has no selectable text. Find and text highlighting are unavailable. Area Annotation remains available."
                     )
+                }
+                if annotationAdjustmentRequest != nil {
+                    HStack(spacing: 10) {
+                        Label("Adjusting Annotation", systemImage: "move.3d")
+                            .font(.caption.weight(.semibold))
+                        Spacer()
+                        Button("Cancel") {
+                            adjustmentCommand = AnnotationAdjustmentCommand(action: .cancel)
+                        }
+                        .keyboardShortcut(.cancelAction)
+                        Button("Done") {
+                            adjustmentCommand = AnnotationAdjustmentCommand(action: .commit)
+                        }
+                        .keyboardShortcut(.defaultAction)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 7)
                 }
                 Divider()
             }
@@ -77,8 +96,14 @@ struct PDFReaderView: View {
                             ? annotationSession.annotations
                             : [],
                         annotationNavigation: annotationNavigation,
+                        adjustmentRequest: annotationAdjustmentRequest,
+                        adjustmentCommand: adjustmentCommand,
                         onCreateAnnotations: createAnnotations,
                         onCreateAreaAnnotation: createAreaAnnotation,
+                        onRequestAnnotationAdjustment: requestAnnotationAdjustment,
+                        onDeleteAnnotation: deleteAnnotation,
+                        onCommitAnnotationAdjustment: commitAnnotationAdjustment,
+                        onCancelAnnotationAdjustment: cancelAnnotationAdjustment,
                         onAreaAnnotationModeEnded: {
                             transientState.isAreaAnnotationMode = false
                         },
@@ -146,6 +171,9 @@ struct PDFReaderView: View {
         }
         .onChange(of: inspectorPresented) { _, isPresented in
             scheduleSave(isInspectorPresented: isPresented)
+        }
+        .onChange(of: annotationAdjustmentRequest?.requestID) {
+            adjustmentCommand = nil
         }
         .focusedValue(\.paperCommandContext, paperCommandContext)
         .onDisappear {
@@ -674,6 +702,70 @@ struct PDFReaderView: View {
         } catch {
             persistenceErrorMessage = error.localizedDescription
         }
+    }
+
+    private func commitAnnotationAdjustment(
+        annotationID: UUID,
+        anchor: AnnotationAnchorValue
+    ) -> Bool {
+        guard annotationAdjustmentRequest?.annotationID == annotationID,
+              let annotation = annotationSession.annotations.first(where: { $0.id == annotationID }),
+              let previousAnchor = AnnotationAnchorValue(annotation: annotation) else {
+            annotationAdjustmentRequest = nil
+            return false
+        }
+        if previousAnchor == anchor {
+            annotationAdjustmentRequest = nil
+            return true
+        }
+        do {
+            try repository.updateAnnotationAnchor(annotationID: annotationID, anchor: anchor)
+            AnnotationUndo.registerUndoForAnchorChange(
+                annotationID: annotationID,
+                previousAnchor: previousAnchor,
+                currentAnchor: anchor,
+                repository: repository,
+                target: annotationUndoTarget,
+                undoManager: undoManager,
+                onChange: { annotationSession.reload(repository: repository) },
+                onError: { persistenceErrorMessage = $0.localizedDescription }
+            )
+            annotationSession.reload(repository: repository)
+            annotationAdjustmentRequest = nil
+            return true
+        } catch {
+            persistenceErrorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    private func requestAnnotationAdjustment(_ annotationID: UUID) {
+        guard annotationAdjustmentRequest == nil else { return }
+        annotationAdjustmentRequest = AnnotationAdjustmentRequest(annotationID: annotationID)
+    }
+
+    private func deleteAnnotation(_ annotationID: UUID) {
+        do {
+            let snapshot = try repository.deleteAnnotation(annotationID: annotationID)
+            if annotationAdjustmentRequest?.annotationID == annotationID {
+                annotationAdjustmentRequest = nil
+            }
+            AnnotationUndo.registerUndoForDeletion(
+                snapshot: snapshot,
+                repository: repository,
+                target: annotationUndoTarget,
+                undoManager: undoManager,
+                onChange: { annotationSession.reload(repository: repository) },
+                onError: { persistenceErrorMessage = $0.localizedDescription }
+            )
+            annotationSession.reload(repository: repository)
+        } catch {
+            persistenceErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func cancelAnnotationAdjustment() {
+        annotationAdjustmentRequest = nil
     }
 }
 

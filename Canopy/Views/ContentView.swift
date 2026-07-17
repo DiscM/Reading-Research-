@@ -1,3 +1,4 @@
+import AppKit
 import CanopyCore
 import SwiftData
 import SwiftUI
@@ -14,12 +15,14 @@ struct ContentView: View {
     @State private var inspectorPresented = true
     @State private var annotationNavigation: AnnotationNavigation?
     @State private var focusedAnnotationID: UUID?
+    @State private var annotationAdjustmentRequest: AnnotationAdjustmentRequest?
     @State private var annotationUndoTarget = AnnotationUndoTarget()
     @State private var annotationSession = AnnotationSession()
     @State private var readerReloadToken = UUID()
     @State private var fileImporterPresented = false
     @State private var workflow = AddPapersWorkflow()
     @State private var paperInfoWorkflow = PaperInfoWorkflow()
+    @State private var paperStorageConversionWorkflow = PaperStorageConversionWorkflow()
     @State private var paperInfoUndoTarget = PaperInfoUndoTarget()
     @State private var paperRemovalUndoTarget = PaperRemovalUndoTarget()
     @State private var sourceRecoveryWorkflow = SourceRecoveryWorkflow()
@@ -62,6 +65,7 @@ struct ContentView: View {
                 inspectorPresented: $inspectorPresented,
                 annotationNavigation: annotationNavigation,
                 focusedAnnotationID: $focusedAnnotationID,
+                annotationAdjustmentRequest: $annotationAdjustmentRequest,
                 annotationUndoTarget: annotationUndoTarget,
                 annotationSession: annotationSession,
                 reloadToken: $readerReloadToken,
@@ -84,11 +88,19 @@ struct ContentView: View {
                         paper: selectedPaper,
                         repository: repository,
                         focusedAnnotationID: $focusedAnnotationID,
+                        adjustingAnnotationID: annotationAdjustmentRequest?.annotationID,
                         annotationUndoTarget: annotationUndoTarget,
                         annotationSession: annotationSession,
                         onRetrySource: { readerReloadToken = UUID() },
                         onNavigate: { annotationID in
                             annotationNavigation = AnnotationNavigation(annotationID: annotationID)
+                        },
+                        onAdjust: { annotationID in
+                            guard annotationAdjustmentRequest == nil else { return }
+                            annotationNavigation = AnnotationNavigation(annotationID: annotationID)
+                            annotationAdjustmentRequest = AnnotationAdjustmentRequest(
+                                annotationID: annotationID
+                            )
                         }
                     )
                         .inspectorColumnWidth(min: 260, ideal: 320, max: 420)
@@ -145,6 +157,7 @@ struct ContentView: View {
         .onChange(of: selectedPaperID) {
             annotationNavigation = nil
             focusedAnnotationID = nil
+            annotationAdjustmentRequest = nil
         }
         .focusedValue(
             \.addPapersCommandAction,
@@ -186,11 +199,13 @@ struct ContentView: View {
         ) {
             PaperInfoView(
                 workflow: paperInfoWorkflow,
+                storageConversionWorkflow: paperStorageConversionWorkflow,
                 onReparse: {
                     Task { @MainActor in
                         await paperInfoWorkflow.reparse(repository: repository)
                     }
                 },
+                onChangeStorage: changePaperStorage,
                 onSave: savePaperInfo
             )
         }
@@ -272,6 +287,41 @@ struct ContentView: View {
             paperInfoWorkflow.finishSaving(change)
         } catch {
             paperInfoWorkflow.errorMessage = error.localizedDescription
+        }
+    }
+
+    private func changePaperStorage(to mode: PaperStorageMode) {
+        guard let paperID = paperInfoWorkflow.paperID,
+              let paper = try? repository.paper(id: paperID) else { return }
+        switch mode {
+        case .managedCopy:
+            Task { @MainActor in
+                if await paperStorageConversionWorkflow.convertToManagedCopy(
+                    paperID: paperID,
+                    repository: repository
+                ) {
+                    paperInfoWorkflow.refreshReadOnlyDetails(repository: repository)
+                    readerReloadToken = UUID()
+                }
+            }
+        case .referenced:
+            let panel = NSSavePanel()
+            panel.title = "Choose Source PDF Location"
+            panel.prompt = "Use Location"
+            panel.allowedContentTypes = [.pdf]
+            panel.canCreateDirectories = true
+            panel.nameFieldStringValue = paper.sourceFilename
+            guard panel.runModal() == .OK, let destinationURL = panel.url else { return }
+            Task { @MainActor in
+                if await paperStorageConversionWorkflow.convertToReferenced(
+                    paperID: paperID,
+                    destinationURL: destinationURL,
+                    repository: repository
+                ) {
+                    paperInfoWorkflow.refreshReadOnlyDetails(repository: repository)
+                    readerReloadToken = UUID()
+                }
+            }
         }
     }
 

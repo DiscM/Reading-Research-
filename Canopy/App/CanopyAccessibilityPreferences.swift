@@ -28,6 +28,7 @@ enum CanopyPreferenceKeys {
     static let appearanceMode = "accessibility.appearanceMode"
     static let increasedContrast = "accessibility.increasedContrast"
     static let differentiateWithoutColor = "accessibility.differentiateWithoutColor"
+    static let annotationSortOrder = "annotations.sortOrder"
 }
 
 struct CanopyAccessibilityPreferences: DynamicProperty {

@@ -70,6 +70,25 @@ public final class Annotation {
         }
     }
 
+    public static func sortedByRecentActivity(_ annotations: [Annotation]) -> [Annotation] {
+        annotations.sorted { lhs, rhs in
+            if lhs.updatedAt != rhs.updatedAt { return lhs.updatedAt > rhs.updatedAt }
+            if lhs.createdAt != rhs.createdAt { return lhs.createdAt > rhs.createdAt }
+            return lhs.id.uuidString < rhs.id.uuidString
+        }
+    }
+
+    internal func replaceTextAnchor(_ anchor: TextAnnotationAnchor) throws {
+        pageIndex = anchor.pageIndex
+        quadrilaterals = try AnnotationQuadrilateralCoding.encode(anchor.quadrilaterals)
+        selectedText = anchor.selectedText
+    }
+
+    internal func replaceAreaAnchor(_ anchor: AreaAnnotationAnchor) throws {
+        pageIndex = anchor.pageIndex
+        areaRect = try AnnotationRectCoding.encode(anchor.rect)
+    }
+
     private init(
         id: UUID = UUID(),
         kind: AnnotationKind,

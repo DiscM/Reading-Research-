@@ -21,16 +21,9 @@ Items are deliberately unprioritized until the v1 reading loop is stable and obs
 
 ## Annotation and knowledge work
 
-- Semantic annotation categories such as claim, evidence, method, limitation, and question.
-- Move or resize an existing Area Annotation; v1 uses Undo/delete and redraw.
-- Multi-page logical text annotations; v1 text highlights are single-page.
-- Copy or export an Area Annotation's rendered region as an image.
+- Search annotations and highlights across the entire library.
+- Export an Area Annotation's exact selected region as an image.
 - Annotation re-anchoring when a source PDF changes.
-- Storage-mode conversion after import.
-- Knowledge cards, active recall, and spaced repetition.
-- Multi-paper excerpt and evidence workspaces.
-- Supporting and conflicting claim comparison.
-- Study-design and evidence-quality extraction.
 
 ## Metadata, citations, and discovery
 

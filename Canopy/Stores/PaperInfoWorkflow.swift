@@ -144,8 +144,12 @@ struct PaperInfoReadOnlyDetails: Equatable {
     let storage: String
     let sourceFilename: String
     let sourceLocation: String
+    let storageMode: PaperStorageMode
+    let sourceState: PaperSourceState
 
     init(paper: Paper) {
+        storageMode = paper.storageMode
+        sourceState = paper.sourceState
         sourceStatus = switch paper.sourceState {
         case .available: "Available"
         case .sourceUnavailable: "Source Unavailable"
@@ -596,7 +600,7 @@ final class PaperInfoWorkflow {
         return true
     }
 
-    private func refreshReadOnlyDetails(repository: LibraryRepository) {
+    func refreshReadOnlyDetails(repository: LibraryRepository) {
         guard let paperID,
               let paper = try? repository.paper(id: paperID) else { return }
         readOnlyDetails = PaperInfoReadOnlyDetails(paper: paper)

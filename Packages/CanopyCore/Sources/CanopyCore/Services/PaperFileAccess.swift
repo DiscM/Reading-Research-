@@ -63,6 +63,28 @@ public struct ManagedPaperStore: Sendable {
         }
     }
 
+    public func copyVerified(
+        _ sourceURL: URL,
+        paperID: UUID = UUID(),
+        expectedFingerprint: Data
+    ) throws -> String {
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        let filename = "\(paperID.uuidString).pdf"
+        let destination = rootURL.appendingPathComponent(filename)
+        let temporary = rootURL.appendingPathComponent(".\(filename).partial")
+        try? FileManager.default.removeItem(at: temporary)
+        guard !FileManager.default.fileExists(atPath: destination.path) else {
+            throw PaperFileAccessError.cannotAccessSource
+        }
+        try publishVerifiedCopy(
+            from: sourceURL,
+            temporary: temporary,
+            destination: destination,
+            expectedFingerprint: expectedFingerprint
+        )
+        return filename
+    }
+
     public func restoreMissingCopy(
         from sourceURL: URL,
         relativePath: String,
@@ -74,13 +96,27 @@ public struct ManagedPaperStore: Sendable {
             throw PaperFileAccessError.cannotAccessSource
         }
         let temporary = rootURL.appendingPathComponent(".\(UUID().uuidString).restore.partial")
+        try publishVerifiedCopy(
+            from: sourceURL,
+            temporary: temporary,
+            destination: destination,
+            expectedFingerprint: expectedFingerprint
+        )
+        return destination
+    }
+
+    private func publishVerifiedCopy(
+        from sourceURL: URL,
+        temporary: URL,
+        destination: URL,
+        expectedFingerprint: Data
+    ) throws {
         do {
             try FileManager.default.copyItem(at: sourceURL, to: temporary)
             guard try DocumentFingerprint.sha256(of: temporary) == expectedFingerprint else {
                 throw PaperFileAccessError.contentIdentityMismatch
             }
             try FileManager.default.moveItem(at: temporary, to: destination)
-            return destination
         } catch let error as PaperFileAccessError {
             try? FileManager.default.removeItem(at: temporary)
             throw error
@@ -124,6 +160,17 @@ public struct ManagedPaperStore: Sendable {
         do {
             try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
             try FileManager.default.moveItem(at: recoveryURL, to: destinationURL)
+            try removeRecoveryDirectoryIfEmpty()
+        } catch {
+            throw PaperFileAccessError.cannotAccessSource
+        }
+    }
+
+    public func discardRecovery(paperID: UUID) throws {
+        let recoveryURL = recoveryURL(paperID: paperID)
+        guard FileManager.default.fileExists(atPath: recoveryURL.path) else { return }
+        do {
+            try FileManager.default.removeItem(at: recoveryURL)
             try removeRecoveryDirectoryIfEmpty()
         } catch {
             throw PaperFileAccessError.cannotAccessSource
