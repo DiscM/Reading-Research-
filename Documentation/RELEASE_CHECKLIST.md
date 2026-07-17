@@ -2,8 +2,8 @@
 
 This checklist distinguishes automated evidence from work that needs a person, a particular host OS, removable hardware, or App Store credentials. A release candidate should record its commit and date here before the final pass.
 
-- Release candidate commit: _not yet assigned_
-- Checklist last updated: 2026-07-15
+- Release candidate: release-hardening commit based on `ca0a10de3e0cdaaad0fc8d7e3753f92869654426`; record the final commit SHA before distribution
+- Checklist last updated: 2026-07-16
 - Legend: **Automated**, **Manual**, **External**, **N/A**
 
 ## Automated gates
@@ -19,9 +19,11 @@ This checklist distinguishes automated evidence from work that needs a person, a
   - damaged PDF and password-protected PDF with distinct Add Papers failures
 - [x] **Automated** — The real macOS `CanopyUITests` target builds through the `Canopy` scheme.
 - [ ] **Automated** — Run `CanopyRelaunchUITests/testAddReadHighlightNoteAndResumeAfterRelaunch` successfully. The journey covers Add Papers → open Paper → page 2, intra-page scroll, and zoom → exact text highlight → note → close → terminate → relaunch → reopen → verify annotation, note, page, viewport, and zoom. It uses a generated three-page PDF and a UUID-isolated store below the app sandbox's `CanopyUITests` directory. A cleanup-only isolated launch removes that directory after the journey; malformed UI-test configuration fails closed and never opens the user's normal `CanopyV1.store`.
-  - Current host blocker (2026-07-15): `CanopyUITests-Runner` timed out while enabling macOS automation mode before any test method ran. Re-run on a host where Xcode UI-testing automation is enabled. Result bundle: `/tmp/CanopyDerivedData/Logs/Test/Test-Canopy-2026.07.15_19-03-42--0700.xcresult`.
+  - Current host blocker (2026-07-16): `testmanagerd` could not activate the UI-test runner listener (`Operation not permitted`), and `CanopyUITests-Runner` was killed before establishing a connection or entering the test method. Re-run on a host where Xcode UI-testing automation is enabled. Result bundle: `/tmp/CanopyReleaseHardeningDerivedData/Logs/Test/Test-Canopy-2026.07.16_17-22-46--0700.xcresult`.
 - [ ] **Automated** — Run the complete `CanopyCore`, `CanopyTests`, and `CanopyUITests` suites on the release-candidate commit.
+  - 2026-07-16 partial pass: all 64 `CanopyCore` tests and all 38 `CanopyTests` tests passed. `CanopyUITests` remains blocked by the host condition above.
 - [ ] **Automated** — Archive the Release configuration and validate the archive before App Store upload.
+  - 2026-07-16 partial pass: an unsigned universal Release archive succeeded with store-oriented product validation, version `1.0 (1)`, arm64 and x86_64 slices, a dSYM, and a valid bundled privacy manifest. Distribution signing and App Store validation remain blocked by the absence of a signing identity and account credentials on this host.
 
 ## Workflow-state applicability
 
@@ -44,9 +46,22 @@ This checklist distinguishes automated evidence from work that needs a person, a
 - [ ] **Manual** — Verify installation, launch, persistence, PDFKit selection, and accessibility on macOS 15.
 - [ ] **Manual** — Verify the same behavior on the current supported macOS release.
 - [ ] **External** — Confirm App Store application identity, team, signing certificate, provisioning, and sandbox entitlements.
-- [ ] **External** — Complete privacy labels. Canopy is offline, has no telemetry containing research content, and makes no network requests; labels still require App Store Connect confirmation.
+- [ ] **External** — Provide and review the final App Icon asset catalog. No App Icon asset is present in the current target.
+- [ ] **External** — Provide a public privacy-policy URL and add an easily accessible in-app privacy-policy link.
+- [ ] **External** — Complete privacy labels. The source audit found no network client, web view, analytics, tracking, or third-party SDK; `PrivacyInfo.xcprivacy` declares no collection and no tracking, but the labels still require App Store Connect confirmation.
 - [ ] **External** — Capture final screenshots and prepare review notes, including referenced-file access, managed copies, source recovery, and Area Annotation behavior.
 - [ ] **External** — Upload the validated archive and resolve App Store validation or review feedback.
+
+## Release-hardening evidence — 2026-07-16
+
+- Host: macOS 26.5.1 (25F80), Xcode 26.6 (17F113), XcodeGen 2.45.4.
+- `swift test --package-path Packages/CanopyCore`: 64 tests in 5 suites passed.
+- `xcodebuild test ... -only-testing:CanopyTests`: 38 tests in 1 suite passed.
+- `xcodebuild analyze` for the universal Release target succeeded without product-code diagnostics. The only emitted warning was the expected App Intents metadata skip because Canopy does not link AppIntents.
+- The final unsigned archive passed Xcode's `-validate-for-store` bundle validation. Its privacy manifest is at `Canopy.app/Contents/Resources/PrivacyInfo.xcprivacy`.
+- Ad hoc signing with hardened runtime and the production sandbox entitlements verified successfully for local inspection. Distribution signing cannot be inferred from this result.
+- Local UI inspection covered the empty-library shell in light, dark, increased-contrast, and Differentiate Without Color modes. The accessibility tree exposed labels for the library, search, Add Papers, reader placeholder, inspector, and menus. This is partial evidence only; native PDF text, annotation appearance, complete keyboard traversal, and spoken VoiceOver output remain manual gates.
+- `security find-identity -p codesigning -v` reported zero valid identities. App Store signing, export, upload, and validation therefore remain external.
 
 ## Release sign-off
 
