@@ -103,6 +103,22 @@ struct ContentView: View {
                 )
             }
         }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    inspectorPresented.toggle()
+                } label: {
+                    Label(
+                        inspectorPresented ? "Hide Annotations" : "Show Annotations",
+                        systemImage: "sidebar.right"
+                    )
+                    .labelStyle(.iconOnly)
+                }
+                .help(inspectorPresented ? "Hide Annotations" : "Show Annotations")
+                .accessibilityIdentifier("toggle-annotations-button")
+                .accessibilityValue(inspectorPresented ? "Shown" : "Hidden")
+            }
+        }
         .fileImporter(
             isPresented: $fileImporterPresented,
             allowedContentTypes: [.pdf],
@@ -129,7 +145,6 @@ struct ContentView: View {
         .onChange(of: selectedPaperID) {
             annotationNavigation = nil
             focusedAnnotationID = nil
-            annotationSession.beginVerification(paperID: selectedPaperID)
         }
         .focusedValue(
             \.addPapersCommandAction,

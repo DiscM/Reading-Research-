@@ -468,7 +468,9 @@ private enum AreaAnnotationPreviewRenderer {
         image.lockFocus()
         defer { image.unlockFocus() }
 
-        NSColor.textBackgroundColor.setFill()
+        // PDF pages can leave their background transparent. Give previews the
+        // same paper-white substrate that PDFView provides in the reader.
+        NSColor.white.setFill()
         NSBezierPath(rect: CGRect(origin: .zero, size: targetSize)).fill()
         guard let context = NSGraphicsContext.current?.cgContext else { return nil }
 

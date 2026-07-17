@@ -233,6 +233,56 @@ struct PDFReaderView: View {
     }
 
     private var readerControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    pageControls
+                    zoomControls
+                    findControls
+                    annotationControls
+                }
+                .fixedSize(horizontal: true, vertical: false)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 12) {
+                        pageControls
+                        zoomControls
+                        annotationControls
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+
+                    findControls
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 12) {
+                        pageControls
+                        zoomControls
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+
+                    findControls
+                    annotationControls
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if transientState.isAreaAnnotationMode {
+                Text("Drag one rectangle on a page. Press Esc to cancel.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel(
+                        "Area Annotation mode. Drag one rectangle on a page. Press Escape to cancel."
+                    )
+            }
+        }
+        .controlSize(.regular)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(.regularMaterial)
+    }
+
+    private var pageControls: some View {
         HStack(spacing: 8) {
             TextField("Page", text: $pageEntry)
                 .frame(width: 42)
@@ -245,22 +295,29 @@ struct PDFReaderView: View {
             Text("of \(pageCount)")
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
 
+    private var zoomControls: some View {
+        HStack(spacing: 8) {
             Button {
                 transientState.command = PDFReaderCommand(action: .zoomOut)
             } label: {
-                Label("Zoom Out", systemImage: "minus.magnifyingglass")
+                Image(systemName: "minus.magnifyingglass")
             }
             .disabled(documentSession == nil)
+            .accessibilityLabel("Zoom Out")
             .help("Zoom Out")
 
             Button {
                 transientState.command = PDFReaderCommand(action: .zoomIn)
             } label: {
-                Label("Zoom In", systemImage: "plus.magnifyingglass")
+                Image(systemName: "plus.magnifyingglass")
             }
             .disabled(documentSession == nil)
             .accessibilityIdentifier("reader-zoom-in")
+            .accessibilityLabel("Zoom In")
             .help("Zoom In")
 
             Menu {
@@ -271,10 +328,17 @@ struct PDFReaderView: View {
                     transientState.command = PDFReaderCommand(action: .actualSize)
                 }
             } label: {
-                Label("Zoom Options", systemImage: "rectangle.expand.vertical")
+                Image(systemName: "rectangle.expand.vertical")
             }
             .disabled(documentSession == nil)
+            .accessibilityLabel("Zoom Options")
+            .help("Zoom Options")
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
 
+    private var findControls: some View {
+        HStack(spacing: 8) {
             TextField("Find", text: $transientState.findQuery)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 180)
@@ -283,15 +347,17 @@ struct PDFReaderView: View {
                 .accessibilityLabel("Find in Paper")
 
             Button(action: previousMatch) {
-                Label("Previous Match", systemImage: "chevron.up")
+                Image(systemName: "chevron.up")
             }
             .disabled(findSession.matches.isEmpty)
+            .accessibilityLabel("Previous Match")
             .help("Previous Match")
 
             Button(action: nextMatch) {
-                Label("Next Match", systemImage: "chevron.down")
+                Image(systemName: "chevron.down")
             }
             .disabled(findSession.matches.isEmpty)
+            .accessibilityLabel("Next Match")
             .help("Next Match")
 
             if findSession.isFinding {
@@ -309,16 +375,21 @@ struct PDFReaderView: View {
                 .frame(minWidth: 58, alignment: .leading)
                 .accessibilityLabel("Find results")
                 .accessibilityValue(findResultText.isEmpty ? "No search" : findResultText)
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
 
+    private var annotationControls: some View {
+        HStack(spacing: 8) {
             Button {
                 transientState.isAreaAnnotationMode.toggle()
             } label: {
-                Label(
-                    transientState.isAreaAnnotationMode ? "Cancel Area Annotation" : "Area Annotation",
-                    systemImage: transientState.isAreaAnnotationMode ? "xmark" : "rectangle.dashed"
-                )
+                Image(systemName: transientState.isAreaAnnotationMode ? "xmark" : "rectangle.dashed")
             }
             .disabled(documentSession == nil)
+            .accessibilityLabel(
+                transientState.isAreaAnnotationMode ? "Cancel Area Annotation" : "Area Annotation"
+            )
             .help(transientState.isAreaAnnotationMode ? "Cancel Area Annotation" : "Draw an Area Annotation")
             .accessibilityHint(
                 transientState.isAreaAnnotationMode
@@ -327,17 +398,10 @@ struct PDFReaderView: View {
             )
 
             Button(action: onGetInfo) {
-                Label("Paper Info", systemImage: "info.circle")
+                Image(systemName: "info.circle")
             }
+            .accessibilityLabel("Paper Info")
             .help("Show Paper Info")
-
-            Button {
-                inspectorPresented.toggle()
-            } label: {
-                Label("Annotations", systemImage: "sidebar.right")
-            }
-            .help("Show or Hide Annotations")
-            .accessibilityValue(inspectorPresented ? "Shown" : "Hidden")
 
             #if DEBUG
             if CanopyUITestLibraryConfiguration.isRequested {
@@ -353,22 +417,7 @@ struct PDFReaderView: View {
             }
             #endif
         }
-        .controlSize(.small)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(.regularMaterial)
-        .overlay(alignment: .bottomLeading) {
-            if transientState.isAreaAnnotationMode {
-                Text("Drag one rectangle on a page. Press Esc to cancel.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .padding(.leading, 12)
-                    .offset(y: 18)
-                    .accessibilityLabel(
-                        "Area Annotation mode. Drag one rectangle on a page. Press Escape to cancel."
-                    )
-            }
-        }
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     private var zoomScaleTestValue: String {
