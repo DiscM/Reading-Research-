@@ -3,17 +3,24 @@ import Foundation
 import PDFKit
 import SwiftUI
 
+struct PDFPageNavigation: Equatable {
+    let id = UUID()
+    let pageIndex: Int
+}
+
 struct PDFReaderView: View {
     let paper: Paper?
     let repository: LibraryRepository
     @Binding var inspectorPresented: Bool
     let annotationNavigation: AnnotationNavigation?
+    let pageNavigation: PDFPageNavigation?
     @Binding var focusedAnnotationID: UUID?
     @Binding var annotationAdjustmentRequest: AnnotationAdjustmentRequest?
     let annotationUndoTarget: AnnotationUndoTarget
     let annotationSession: AnnotationSession
     @Binding var reloadToken: UUID
     let onGetInfo: () -> Void
+    let onShowAnnotations: () -> Void
     let onSourceRecoveryAction: (SourceRecoveryAction) -> Void
     let onCancelSourceRecovery: () -> Void
 
@@ -77,9 +84,9 @@ struct PDFReaderView: View {
             Group {
                 if paper == nil {
                     ContentUnavailableView(
-                        "Choose a Paper",
+                        "Choose a Document",
                         systemImage: "book.pages",
-                        description: Text("Select a recent or library paper to begin reading.")
+                        description: Text("Select a recent or library Document to begin reading.")
                     )
                 } else if let documentSession {
                     PDFKitReaderView(
@@ -138,12 +145,15 @@ struct PDFReaderView: View {
                         }
                     }
                 } else {
-                    ProgressView("Opening Paper…")
+                    ProgressView("Opening Document…")
                 }
             }
         }
         .task(id: loadTaskID) {
             loadPaper()
+        }
+        .onChange(of: pageNavigation) {
+            applyPageNavigation()
         }
         .task(id: pendingSave) {
             guard let pendingSave else { return }
@@ -175,7 +185,7 @@ struct PDFReaderView: View {
         .onChange(of: annotationAdjustmentRequest?.requestID) {
             adjustmentCommand = nil
         }
-        .focusedValue(\.paperCommandContext, paperCommandContext)
+        .focusedValue(\.documentCommandContext, documentCommandContext)
         .onDisappear {
             findSession.cancel(clearResults: true)
             flushPendingSave()
@@ -194,7 +204,7 @@ struct PDFReaderView: View {
                 failedSave = nil
             }
         } message: {
-            Text(persistenceErrorMessage ?? "Canopy could not save changes to this Paper.")
+            Text(persistenceErrorMessage ?? "Canopy could not save changes to this Document.")
         }
         .alert(
             "Select Text on One Page",
@@ -226,19 +236,19 @@ struct PDFReaderView: View {
         )
     }
 
-    private var paperCommandContext: PaperCommandContext? {
+    private var documentCommandContext: DocumentCommandContext? {
         guard documentSession != nil else { return nil }
-        return PaperCommandContext(
-            availableCommands: PaperCommand.availableReaderCommands(
+        return DocumentCommandContext(
+            availableCommands: DocumentCommand.availableReaderCommands(
                 hasFindMatches: !findSession.matches.isEmpty,
                 hasSelectableText: paper?.hasSelectableText != false
             ),
-            perform: performPaperCommand
+            perform: performDocumentCommand
         )
     }
 
-    private func performPaperCommand(_ paperCommand: PaperCommand) {
-        switch paperCommand {
+    private func performDocumentCommand(_ documentCommand: DocumentCommand) {
+        switch documentCommand {
         case .focusFind:
             findFieldFocused = true
         case .nextFindMatch:
@@ -253,7 +263,7 @@ struct PDFReaderView: View {
             transientState.command = PDFReaderCommand(action: .fitWidth)
         case .actualSize:
             transientState.command = PDFReaderCommand(action: .actualSize)
-        case .toggleAnnotations:
+        case .toggleInspector:
             inspectorPresented.toggle()
         case .startAreaAnnotation:
             transientState.isAreaAnnotationMode = true
@@ -372,7 +382,7 @@ struct PDFReaderView: View {
                 .frame(width: 180)
                 .focused($findFieldFocused)
                 .disabled(documentSession == nil || paper?.hasSelectableText == false)
-                .accessibilityLabel("Find in Paper")
+                .accessibilityLabel("Find in Document")
 
             Button(action: previousMatch) {
                 Image(systemName: "chevron.up")
@@ -428,8 +438,8 @@ struct PDFReaderView: View {
             Button(action: onGetInfo) {
                 Image(systemName: "info.circle")
             }
-            .accessibilityLabel("Paper Info")
-            .help("Show Paper Info")
+            .accessibilityLabel("Document Info")
+            .help("Show Document Info")
 
             #if DEBUG
             if CanopyUITestLibraryConfiguration.isRequested {
@@ -492,7 +502,6 @@ struct PDFReaderView: View {
         pageEntry = "1"
         guard let paper else { return }
 
-        inspectorPresented = paper.isInspectorPresented
         do {
             let sourceAccess = try repository.sourceAccess(paperID: paper.id)
             let session = try PDFDocumentSession(paperID: paper.id, sourceAccess: sourceAccess)
@@ -515,6 +524,7 @@ struct PDFReaderView: View {
                 persistenceErrorMessage = error.localizedDescription
             }
             documentSession = session
+            applyPageNavigation()
             annotationSession.sourceVerified(paperID: paper.id, repository: repository)
         } catch let error as PaperSourceAccessError {
             let readerError = PDFReaderLoadError(error)
@@ -530,6 +540,13 @@ struct PDFReaderView: View {
             )
             loadError = .cannotOpen
         }
+    }
+
+    private func applyPageNavigation() {
+        guard let pageNavigation, pageCount > 0 else { return }
+        let pageIndex = min(max(pageNavigation.pageIndex, 0), pageCount - 1)
+        pageEntry = String(pageIndex + 1)
+        transientState.command = PDFReaderCommand(action: .goToPage(pageIndex))
     }
 
     private func applyOutgoingSave(from outcome: PDFReaderPaperTransitionOutcome) {
@@ -656,6 +673,7 @@ struct PDFReaderView: View {
 
             if addNote, let annotationID = annotationIDs.first {
                 inspectorPresented = true
+                onShowAnnotations()
                 focusedAnnotationID = annotationID
             }
         } catch {
@@ -697,6 +715,7 @@ struct PDFReaderView: View {
 
             if addNote {
                 inspectorPresented = true
+                onShowAnnotations()
                 focusedAnnotationID = annotation.id
             }
         } catch {
@@ -931,13 +950,13 @@ private enum PDFReaderLoadError: Error, Equatable {
     var message: String {
         switch self {
         case .sourceUnavailable:
-            "Canopy can’t currently access this Paper’s Source PDF."
+            "Canopy can’t currently access this Document’s Source PDF."
         case .sourceMissing:
-            "Canopy can’t find this Paper’s Source PDF."
+            "Canopy can’t find this Document’s Source PDF."
         case .sourceChanged:
-            "The Source PDF has changed since this Paper was added."
+            "The Source PDF has changed since this Document was added."
         case .libraryCopyMissing:
-            "Canopy’s managed copy of this Paper is missing."
+            "Canopy’s managed copy of this Document is missing."
         case .cannotOpen:
             "The Source PDF could not be read."
         }

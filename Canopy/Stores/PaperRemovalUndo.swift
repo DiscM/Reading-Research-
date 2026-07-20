@@ -14,9 +14,28 @@ enum PaperRemovalUndo {
         undoManager: UndoManager?,
         onError: @escaping (Error) -> Void
     ) {
+        register(
+            snapshots: [snapshot],
+            repository: repository,
+            managedStore: managedStore,
+            target: target,
+            undoManager: undoManager,
+            onError: onError
+        )
+    }
+
+    static func register(
+        snapshots: [RemovedPaperSnapshot],
+        repository: LibraryRepository,
+        managedStore: ManagedPaperStore? = nil,
+        target: PaperRemovalUndoTarget,
+        undoManager: UndoManager?,
+        onError: @escaping (Error) -> Void
+    ) {
+        guard !snapshots.isEmpty else { return }
         guard let undoManager else { return }
         registerRestore(
-            snapshot: snapshot,
+            snapshots: snapshots,
             repository: repository,
             managedStore: managedStore,
             target: target,
@@ -26,7 +45,7 @@ enum PaperRemovalUndo {
     }
 
     private static func registerRestore(
-        snapshot: RemovedPaperSnapshot,
+        snapshots: [RemovedPaperSnapshot],
         repository: LibraryRepository,
         managedStore: ManagedPaperStore?,
         target: PaperRemovalUndoTarget,
@@ -35,12 +54,12 @@ enum PaperRemovalUndo {
     ) {
         undoManager.registerUndo(withTarget: target) { target in
             do {
-                _ = try repository.restoreRemovedPaper(
-                    snapshot: snapshot,
+                _ = try repository.restoreRemovedDocuments(
+                    snapshots: snapshots,
                     managedStore: managedStore
                 )
                 registerRemove(
-                    paperID: snapshot.id,
+                    documentIDs: snapshots.map(\.id),
                     repository: repository,
                     managedStore: managedStore,
                     target: target,
@@ -51,11 +70,11 @@ enum PaperRemovalUndo {
                 onError(error)
             }
         }
-        undoManager.setActionName("Remove Paper")
+        undoManager.setActionName(actionName(for: snapshots.count))
     }
 
     private static func registerRemove(
-        paperID: UUID,
+        documentIDs: [UUID],
         repository: LibraryRepository,
         managedStore: ManagedPaperStore?,
         target: PaperRemovalUndoTarget,
@@ -64,12 +83,12 @@ enum PaperRemovalUndo {
     ) {
         undoManager.registerUndo(withTarget: target) { target in
             do {
-                let snapshot = try repository.removePaper(
-                    paperID: paperID,
+                let snapshots = try repository.removeDocuments(
+                    documentIDs: documentIDs,
                     managedStore: managedStore
                 )
                 registerRestore(
-                    snapshot: snapshot,
+                    snapshots: snapshots,
                     repository: repository,
                     managedStore: managedStore,
                     target: target,
@@ -80,6 +99,10 @@ enum PaperRemovalUndo {
                 onError(error)
             }
         }
-        undoManager.setActionName("Remove Paper")
+        undoManager.setActionName(actionName(for: documentIDs.count))
+    }
+
+    private static func actionName(for documentCount: Int) -> String {
+        documentCount == 1 ? "Remove Document" : "Remove Documents"
     }
 }

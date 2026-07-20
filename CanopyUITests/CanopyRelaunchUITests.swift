@@ -28,15 +28,15 @@ final class CanopyRelaunchUITests: XCTestCase {
         }
         launch(resetLibrary: true)
 
-        let addPapers = app.buttons["add-papers-button"]
+        let addPapers = app.buttons["add-documents-button"]
         XCTAssertTrue(addPapers.waitForExistence(timeout: 10))
         addPapers.click()
 
-        let confirmAdd = app.buttons["confirm-add-papers-button"]
+        let confirmAdd = app.buttons["confirm-add-documents-button"]
         XCTAssertTrue(confirmAdd.waitForExistence(timeout: 5))
         confirmAdd.click()
 
-        let paperRow = app.descendants(matching: .any)["paper-row"].firstMatch
+        let paperRow = app.descendants(matching: .any)["document-row"].firstMatch
         XCTAssertTrue(paperRow.waitForExistence(timeout: 15))
         paperRow.click()
 
@@ -105,7 +105,7 @@ final class CanopyRelaunchUITests: XCTestCase {
         app.terminate()
 
         launch(resetLibrary: false)
-        let relaunchedPaperRow = app.descendants(matching: .any)["paper-row"].firstMatch
+        let relaunchedPaperRow = app.descendants(matching: .any)["document-row"].firstMatch
         XCTAssertTrue(relaunchedPaperRow.waitForExistence(timeout: 10))
         relaunchedPaperRow.click()
 

@@ -4,15 +4,22 @@ import SwiftData
 import SwiftUI
 
 struct AddBatchStorageSheet: View {
-    @Bindable var workflow: AddPapersWorkflow
+    @Bindable var workflow: AddDocumentsWorkflow
     let onAdd: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Add Papers")
+            Text("Add Documents")
                 .font(.title2.bold())
             Text("\(workflow.pendingURLs.count) PDF\(workflow.pendingURLs.count == 1 ? "" : "s") • \(ByteCountFormatter.string(fromByteCount: workflow.totalFileSize, countStyle: .file))")
                 .foregroundStyle(.secondary)
+
+            Picker("Document Kind", selection: $workflow.documentKind) {
+                ForEach(DocumentKind.allCases) { kind in
+                    Label(kind.displayName, systemImage: kind.systemImage)
+                        .tag(kind)
+                }
+            }
 
             Picker("Storage", selection: $workflow.storageChoice) {
                 ForEach(AddBatchStorageChoice.allCases) { choice in
@@ -32,19 +39,19 @@ struct AddBatchStorageSheet: View {
                     workflow.reset()
                 }
                 .keyboardShortcut(.cancelAction)
-                Button("Add Papers", action: onAdd)
+                Button("Add Documents", action: onAdd)
                     .keyboardShortcut(.defaultAction)
-                    .accessibilityIdentifier("confirm-add-papers-button")
+                    .accessibilityIdentifier("confirm-add-documents-button")
             }
         }
         .padding(24)
         .frame(width: 440)
-        .accessibilityIdentifier("add-papers-storage-sheet")
+        .accessibilityIdentifier("add-documents-storage-sheet")
     }
 }
 
 struct AddBatchProgressSheet: View {
-    @Bindable var workflow: AddPapersWorkflow
+    @Bindable var workflow: AddDocumentsWorkflow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -65,11 +72,11 @@ struct AddBatchProgressSheet: View {
                 .truncationMode(.middle)
                 .accessibilityLabel("Current Source PDF")
                 .accessibilityValue(workflow.progressFilename)
-            if workflow.canCancelCheckingPapers {
+            if workflow.canCancelCheckingDocuments {
                 HStack {
                     Spacer()
                     Button("Cancel") {
-                        workflow.cancelCheckingPapers()
+                        workflow.cancelCheckingDocuments()
                     }
                     .keyboardShortcut(.cancelAction)
                 }
@@ -82,7 +89,7 @@ struct AddBatchProgressSheet: View {
 }
 
 struct PotentialDuplicateReviewSheet: View {
-    @Bindable var workflow: AddPapersWorkflow
+    @Bindable var workflow: AddDocumentsWorkflow
     let onFinish: () -> Void
     @State private var selectedID: UUID?
 
@@ -157,7 +164,7 @@ struct PotentialDuplicateReviewSheet: View {
 
     private func decisionLabel(for duplicate: PotentialDuplicate) -> String {
         switch workflow.potentialDecisions[duplicate.candidate.id] {
-        case .addAsSeparate: "Add as separate Paper"
+        case .addAsSeparate: "Add as separate Document"
         case .keepExisting: "Keep existing"
         case nil: "Decision needed"
         }
@@ -185,7 +192,7 @@ private struct PotentialDuplicateComparison: View {
                                 fields: PotentialDuplicateComparisonFields(candidate: duplicate.candidate)
                             )
                             comparisonSection(
-                                "Existing Paper",
+                                "Existing Research Paper",
                                 fields: PotentialDuplicateComparisonFields(existingPaper: match.existingPaper)
                             )
                         }
@@ -194,7 +201,7 @@ private struct PotentialDuplicateComparison: View {
 
                 Picker("Decision", selection: $decision) {
                     Text("Choose…").tag(PotentialDuplicateDecision?.none)
-                    Text("Add as Separate Paper").tag(PotentialDuplicateDecision?.some(.addAsSeparate))
+                    Text("Add as Separate Document").tag(PotentialDuplicateDecision?.some(.addAsSeparate))
                     Text("Keep Existing").tag(PotentialDuplicateDecision?.some(.keepExisting))
                 }
                 .pickerStyle(.segmented)
@@ -279,12 +286,12 @@ struct PotentialDuplicateComparisonFields: Equatable {
 
 struct AddBatchSummarySheet: View {
     @Environment(\.modelContext) private var modelContext
-    @Bindable var workflow: AddPapersWorkflow
+    @Bindable var workflow: AddDocumentsWorkflow
     let onOpenPaper: (UUID) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Add Papers Summary")
+            Text("Add Documents Summary")
                 .font(.title2.bold())
             List(workflow.summaryItems) { item in
                 HStack(alignment: .top) {

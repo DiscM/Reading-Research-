@@ -7,15 +7,48 @@ public enum PaperSourceAccessError: Error, Equatable {
     case libraryCopyMissing
 }
 
-public final class PaperSourceAccess {
+public struct DocumentSourceAccessSnapshot: Sendable {
+    public let fingerprint: Data
+    public let storageMode: DocumentStorageMode
+    public let sourceState: DocumentSourceState
+    public let bookmarkData: Data?
+    public let managedRelativePath: String?
+    public let sourceFileSize: Int64
+    public let sourceModificationDate: Date?
+
+    public init(document: Document) {
+        fingerprint = document.fingerprint
+        storageMode = document.storageMode
+        sourceState = document.sourceState
+        bookmarkData = document.bookmarkData
+        managedRelativePath = document.managedRelativePath
+        sourceFileSize = document.sourceFileSize
+        sourceModificationDate = document.sourceModificationDate
+    }
+}
+
+public final class PaperSourceAccess: @unchecked Sendable {
     public let url: URL
     public let verifiedFileSize: Int64
     public let verifiedModificationDate: Date?
     public let attributesChanged: Bool
     private let securityScopedURL: URL?
 
-    public init(paper: Paper, managedStore suppliedManagedStore: ManagedPaperStore? = nil) throws {
-        switch paper.sourceState {
+    public convenience init(
+        paper: Paper,
+        managedStore suppliedManagedStore: ManagedPaperStore? = nil
+    ) throws {
+        try self.init(
+            snapshot: DocumentSourceAccessSnapshot(document: paper),
+            managedStore: suppliedManagedStore
+        )
+    }
+
+    public init(
+        snapshot: DocumentSourceAccessSnapshot,
+        managedStore suppliedManagedStore: ManagedPaperStore? = nil
+    ) throws {
+        switch snapshot.sourceState {
         case .available, .sourceUnavailable:
             break
         case .brokenReference:
@@ -28,9 +61,9 @@ public final class PaperSourceAccess {
 
         let resolvedURL: URL
         let scopedURL: URL?
-        switch paper.storageMode {
+        switch snapshot.storageMode {
         case .referenced:
-            guard let bookmarkData = paper.bookmarkData else {
+            guard let bookmarkData = snapshot.bookmarkData else {
                 throw PaperSourceAccessError.sourceMissing
             }
             var bookmarkIsStale = false
@@ -49,7 +82,7 @@ public final class PaperSourceAccess {
             }
             scopedURL = resolvedURL
         case .managedCopy:
-            guard let relativePath = paper.managedRelativePath,
+            guard let relativePath = snapshot.managedRelativePath,
                   let managedStore = suppliedManagedStore ?? (try? ManagedPaperStore.applicationSupport()) else {
                 throw PaperSourceAccessError.libraryCopyMissing
             }
@@ -59,7 +92,7 @@ public final class PaperSourceAccess {
 
         guard FileManager.default.fileExists(atPath: resolvedURL.path) else {
             scopedURL?.stopAccessingSecurityScopedResource()
-            throw paper.storageMode == .managedCopy
+            throw snapshot.storageMode == .managedCopy
                 ? PaperSourceAccessError.libraryCopyMissing
                 : PaperSourceAccessError.sourceMissing
         }
@@ -73,8 +106,8 @@ public final class PaperSourceAccess {
         }
         let currentFileSize = (attributes[.size] as? NSNumber)?.int64Value ?? 0
         let currentModificationDate = attributes[.modificationDate] as? Date
-        let attributesChanged = currentFileSize != paper.sourceFileSize
-            || currentModificationDate != paper.sourceModificationDate
+        let attributesChanged = currentFileSize != snapshot.sourceFileSize
+            || currentModificationDate != snapshot.sourceModificationDate
 
         if attributesChanged {
             let fingerprint: Data
@@ -84,7 +117,7 @@ public final class PaperSourceAccess {
                 scopedURL?.stopAccessingSecurityScopedResource()
                 throw PaperSourceAccessError.sourceUnavailable
             }
-            guard fingerprint == paper.fingerprint else {
+            guard fingerprint == snapshot.fingerprint else {
                 scopedURL?.stopAccessingSecurityScopedResource()
                 throw PaperSourceAccessError.sourceChanged
             }

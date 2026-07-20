@@ -250,6 +250,183 @@ struct PaperRemovalTests {
     }
 
     @MainActor
+    @Test("batch removal deletes every requested Document in one repository transaction")
+    func batchRemovalSucceedsAtomically() throws {
+        let repository = LibraryRepository(container: try CanopyModelContainer.make(inMemory: true))
+        let first = Document(
+            fingerprint: Data(repeating: 31, count: 32),
+            title: "First Document",
+            storageMode: .referenced,
+            bookmarkData: Data([1]),
+            sourceFilename: "first.pdf",
+            sourceFileSize: 1
+        )
+        let second = Document(
+            fingerprint: Data(repeating: 32, count: 32),
+            title: "Second Document",
+            storageMode: .referenced,
+            bookmarkData: Data([2]),
+            sourceFilename: "second.pdf",
+            sourceFileSize: 1
+        )
+        try repository.insert(first)
+        try repository.insert(second)
+
+        let snapshots = try repository.removeDocuments(
+            documentIDs: [second.id, first.id, second.id]
+        )
+
+        #expect(snapshots.map(\.id) == [second.id, first.id])
+        #expect(try repository.paper(id: first.id) == nil)
+        #expect(try repository.paper(id: second.id) == nil)
+    }
+
+    @MainActor
+    @Test("a failed batch database deletion restores every managed copy and Document")
+    func batchRemovalSaveFailureIsAtomic() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let storeURL = directory.appendingPathComponent("Canopy.store")
+        let managedDirectory = directory.appendingPathComponent("Documents", isDirectory: true)
+        try FileManager.default.createDirectory(at: managedDirectory, withIntermediateDirectories: true)
+        let managedStore = ManagedPaperStore(rootURL: managedDirectory)
+        let firstSourceURL = managedDirectory.appendingPathComponent("first.pdf")
+        let secondSourceURL = managedDirectory.appendingPathComponent("second.pdf")
+        try Data("first".utf8).write(to: firstSourceURL)
+        try Data("second".utf8).write(to: secondSourceURL)
+        let firstID = UUID()
+        let secondID = UUID()
+
+        do {
+            let repository = LibraryRepository(
+                container: try persistentContainer(url: storeURL, allowsSave: true)
+            )
+            try repository.insert(Document(
+                id: firstID,
+                fingerprint: Data(repeating: 33, count: 32),
+                title: "First Atomic Document",
+                storageMode: .managedCopy,
+                managedRelativePath: "first.pdf",
+                sourceFilename: "first.pdf",
+                sourceFileSize: 5
+            ))
+            try repository.insert(Document(
+                id: secondID,
+                fingerprint: Data(repeating: 34, count: 32),
+                title: "Second Atomic Document",
+                storageMode: .managedCopy,
+                managedRelativePath: "second.pdf",
+                sourceFilename: "second.pdf",
+                sourceFileSize: 6
+            ))
+        }
+
+        do {
+            let repository = LibraryRepository(
+                container: try persistentContainer(url: storeURL, allowsSave: false)
+            )
+            #expect(throws: (any Error).self) {
+                _ = try repository.removeDocuments(
+                    documentIDs: [firstID, secondID],
+                    managedStore: managedStore
+                )
+            }
+        }
+
+        #expect(FileManager.default.fileExists(atPath: firstSourceURL.path))
+        #expect(FileManager.default.fileExists(atPath: secondSourceURL.path))
+        #expect(try regularFiles(in: managedDirectory) == ["first.pdf", "second.pdf"])
+        let reopened = LibraryRepository(
+            container: try persistentContainer(url: storeURL, allowsSave: true)
+        )
+        #expect(try reopened.paper(id: firstID) != nil)
+        #expect(try reopened.paper(id: secondID) != nil)
+    }
+
+    @MainActor
+    @Test("a failed batch restoration re-stages every managed copy and restores no Documents")
+    func batchRestorationSaveFailureIsAtomic() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let storeURL = directory.appendingPathComponent("Canopy.store")
+        let managedDirectory = directory.appendingPathComponent("Documents", isDirectory: true)
+        try FileManager.default.createDirectory(at: managedDirectory, withIntermediateDirectories: true)
+        let managedStore = ManagedPaperStore(rootURL: managedDirectory)
+        let firstSourceURL = managedDirectory.appendingPathComponent("first.pdf")
+        let secondSourceURL = managedDirectory.appendingPathComponent("second.pdf")
+        try Data("first".utf8).write(to: firstSourceURL)
+        try Data("second".utf8).write(to: secondSourceURL)
+        let firstID = UUID()
+        let secondID = UUID()
+        let snapshots: [RemovedPaperSnapshot]
+
+        do {
+            let repository = LibraryRepository(
+                container: try persistentContainer(url: storeURL, allowsSave: true)
+            )
+            try repository.insert(Document(
+                id: firstID,
+                fingerprint: Data(repeating: 35, count: 32),
+                title: "First Restored Document",
+                storageMode: .managedCopy,
+                managedRelativePath: "first.pdf",
+                sourceFilename: "first.pdf",
+                sourceFileSize: 5
+            ))
+            try repository.insert(Document(
+                id: secondID,
+                fingerprint: Data(repeating: 36, count: 32),
+                title: "Second Restored Document",
+                storageMode: .managedCopy,
+                managedRelativePath: "second.pdf",
+                sourceFilename: "second.pdf",
+                sourceFileSize: 6
+            ))
+            snapshots = try repository.removeDocuments(
+                documentIDs: [firstID, secondID],
+                managedStore: managedStore
+            )
+        }
+
+        do {
+            let repository = LibraryRepository(
+                container: try persistentContainer(url: storeURL, allowsSave: false)
+            )
+            #expect(throws: (any Error).self) {
+                _ = try repository.restoreRemovedDocuments(
+                    snapshots: snapshots,
+                    managedStore: managedStore
+                )
+            }
+        }
+
+        #expect(!FileManager.default.fileExists(atPath: firstSourceURL.path))
+        #expect(!FileManager.default.fileExists(atPath: secondSourceURL.path))
+        #expect(try regularFiles(in: managedDirectory) == [
+            "\(firstID.uuidString).pdf",
+            "\(secondID.uuidString).pdf"
+        ].sorted())
+        let reopened = LibraryRepository(
+            container: try persistentContainer(url: storeURL, allowsSave: true)
+        )
+        #expect(try reopened.paper(id: firstID) == nil)
+        #expect(try reopened.paper(id: secondID) == nil)
+
+        _ = try reopened.restoreRemovedDocuments(
+            snapshots: snapshots,
+            managedStore: managedStore
+        )
+        #expect(try reopened.paper(id: firstID) != nil)
+        #expect(try reopened.paper(id: secondID) != nil)
+        #expect(FileManager.default.fileExists(atPath: firstSourceURL.path))
+        #expect(FileManager.default.fileExists(atPath: secondSourceURL.path))
+    }
+
+    @MainActor
     @Test("a failed database deletion restores the managed copy and Paper")
     func removalSaveFailureIsAtomic() throws {
         let directory = FileManager.default.temporaryDirectory

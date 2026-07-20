@@ -22,8 +22,8 @@ enum PotentialDuplicateDecision: String {
 }
 
 enum AddBatchProgressPhase: String {
-    case checkingPapers = "Checking Papers"
-    case addingPapers = "Adding Papers"
+    case checkingDocuments = "Checking Documents"
+    case addingDocuments = "Adding Documents"
 
     var title: String { rawValue }
 }
@@ -38,9 +38,9 @@ struct AddBatchSummaryItem: Identifiable {
 
         var title: String {
             switch self {
-            case .repair: "Repair Existing Paper"
+            case .repair: "Repair Existing Document"
             case .relocate: "Use New Location"
-            case .openExisting: "Open Existing Paper"
+            case .openExisting: "Open Existing Document"
             case .reveal: "Reveal Current Source"
             }
         }
@@ -55,17 +55,19 @@ struct AddBatchSummaryItem: Identifiable {
 
 @Observable
 @MainActor
-final class AddPapersWorkflow {
+final class AddDocumentsWorkflow {
     static let progressPresentationDelay = Duration.milliseconds(300)
 
     var pendingURLs: [URL] = []
+    var destinationCollectionID: UUID?
+    var documentKind: DocumentKind = .generalDocument
     var storageChoice: AddBatchStorageChoice = .referenced
     var isStorageChoicePresented = false
     var isProgressPresented = false
     var isPotentialReviewPresented = false
     var isSummaryPresented = false
     var progressFraction = 0.0
-    var progressPhase: AddBatchProgressPhase = .checkingPapers
+    var progressPhase: AddBatchProgressPhase = .checkingDocuments
     var progressFilename = ""
     var progressCount = ""
     var potentialDuplicates: [PotentialDuplicate] = []
@@ -91,14 +93,16 @@ final class AddPapersWorkflow {
         potentialDuplicates.allSatisfy { potentialDecisions[$0.candidate.id] != nil }
     }
 
-    var canCancelCheckingPapers: Bool {
-        progressPhase == .checkingPapers && checkingTask != nil
+    var canCancelCheckingDocuments: Bool {
+        progressPhase == .checkingDocuments && checkingTask != nil
     }
 
-    func prepare(urls: [URL]) {
+    func prepare(urls: [URL], destinationCollectionID: UUID? = nil) {
         let pdfs = urls.filter { $0.pathExtension.caseInsensitiveCompare("pdf") == .orderedSame }
         guard !pdfs.isEmpty else { return }
         pendingURLs = Array(NSOrderedSet(array: pdfs).array.compactMap { $0 as? URL })
+        self.destinationCollectionID = destinationCollectionID
+        documentKind = .generalDocument
         storageChoice = .referenced
         isStorageChoicePresented = true
     }
@@ -106,7 +110,7 @@ final class AddPapersWorkflow {
     func start(repository: LibraryRepository) {
         isStorageChoicePresented = false
         isProgressPresented = false
-        progressPhase = .checkingPapers
+        progressPhase = .checkingDocuments
         progressFraction = 0
         summaryItems = []
 
@@ -123,10 +127,12 @@ final class AddPapersWorkflow {
         let generation = UUID()
         checkingGeneration = generation
         let workflow = self
+        let documentKind = documentKind
         let task = Task.detached(priority: .userInitiated) {
             try AddBatchPreflight(analyzer: PDFDocumentAnalyzer()).run(
                 urls: urls,
                 existingPapers: existing,
+                documentKind: documentKind,
                 progress: { update in
                     Task { @MainActor in
                         workflow.receiveCheckingProgress(update, generation: generation)
@@ -154,8 +160,8 @@ final class AddPapersWorkflow {
         }
     }
 
-    func cancelCheckingPapers() {
-        guard canCancelCheckingPapers else { return }
+    func cancelCheckingDocuments() {
+        guard canCancelCheckingDocuments else { return }
         isProgressPresented = false
         reset()
     }
@@ -297,6 +303,7 @@ final class AddPapersWorkflow {
             Self.stopAccessingSecurityScopedResources(urlsToRelease)
         }
         pendingURLs = []
+        destinationCollectionID = nil
         preflightResult = nil
         potentialDuplicates = []
         potentialDecisions = [:]
@@ -307,13 +314,13 @@ final class AddPapersWorkflow {
 
     private func commitApprovedCandidates(repository: LibraryRepository) async {
         guard let result = preflightResult else { return }
-        progressPhase = .addingPapers
+        progressPhase = .addingDocuments
         var candidates = result.ready
         candidates.append(contentsOf: result.potentialDuplicates.compactMap {
             potentialDecisions[$0.candidate.id] == .addAsSeparate ? $0.candidate : nil
         })
 
-        appendPreflightExceptions(result)
+        appendPreflightExceptions(result, repository: repository)
         let bookmarkService = SecurityScopedBookmarkService()
         let managedStore = try? ManagedPaperStore.applicationSupport()
 
@@ -335,7 +342,12 @@ final class AddPapersWorkflow {
                     copiedRelativePath = relativePath
                     source = .managedCopy(relativePath: relativePath)
                 }
-                try repository.add(candidate, source: source)
+                _ = try repository.add(
+                    candidate,
+                    source: source,
+                    kind: documentKind,
+                    toCollection: destinationCollectionID
+                )
             } catch {
                 if let copiedRelativePath, let managedStore {
                     try? managedStore.remove(relativePath: copiedRelativePath)
@@ -359,8 +371,28 @@ final class AddPapersWorkflow {
         }
     }
 
-    private func appendPreflightExceptions(_ result: AddBatchPreflightResult) {
+    private func appendPreflightExceptions(
+        _ result: AddBatchPreflightResult,
+        repository: LibraryRepository
+    ) {
         for duplicate in result.exactDuplicates {
+            var collectionMessage = ""
+            if let destinationCollectionID {
+                do {
+                    try repository.addDocuments(
+                        [duplicate.existingPaper.id],
+                        toCollection: destinationCollectionID
+                    )
+                    collectionMessage = ". Existing Document is in the Collection"
+                } catch {
+                    summaryItems.append(AddBatchSummaryItem(
+                        kind: .failure,
+                        filename: duplicate.candidate.url.lastPathComponent,
+                        message: error.localizedDescription,
+                        path: duplicate.candidate.url.path
+                    ))
+                }
+            }
             var actions: [AddBatchSummaryItem.Action] = [.openExisting(duplicate.existingPaper.id)]
             if let currentPath = duplicate.existingPaper.rememberedLocation {
                 actions.append(.reveal(currentPath))
@@ -375,7 +407,7 @@ final class AddPapersWorkflow {
             summaryItems.append(AddBatchSummaryItem(
                 kind: .duplicate,
                 filename: duplicate.candidate.url.lastPathComponent,
-                message: "Exact duplicate of \(duplicate.existingPaper.title)",
+                message: "Exact duplicate of \(duplicate.existingPaper.title)\(collectionMessage)",
                 path: duplicate.candidate.url.path,
                 actions: actions
             ))
@@ -384,7 +416,7 @@ final class AddPapersWorkflow {
             summaryItems.append(AddBatchSummaryItem(
                 kind: .skipped,
                 filename: duplicate.candidate.url.lastPathComponent,
-                message: "Kept existing Paper",
+                message: "Kept existing Document",
                 path: duplicate.candidate.url.path
             ))
         }
@@ -420,7 +452,7 @@ final class AddPapersWorkflow {
 
     private func finishWithWorkflowFailure(_ error: Error) {
         stopProgressPresentation()
-        summaryItems = [AddBatchSummaryItem(kind: .failure, filename: "Add Papers", message: error.localizedDescription, path: nil)]
+        summaryItems = [AddBatchSummaryItem(kind: .failure, filename: "Add Documents", message: error.localizedDescription, path: nil)]
         isSummaryPresented = true
     }
 

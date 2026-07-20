@@ -9,7 +9,7 @@ public enum PaperFileAccessError: LocalizedError {
         switch self {
         case .cannotCreateBookmark: "Canopy could not retain permission to access this PDF."
         case .cannotAccessSource: "Canopy could not access the selected PDF."
-        case .contentIdentityMismatch: "The selected PDF does not match the Paper's original content."
+        case .contentIdentityMismatch: "The selected PDF does not match the Document's original content."
         }
     }
 }
@@ -44,7 +44,7 @@ public struct ManagedPaperStore: Sendable {
             appropriateFor: nil,
             create: true
         )
-        return ManagedPaperStore(rootURL: support.appendingPathComponent("Canopy/Papers", isDirectory: true))
+        return ManagedPaperStore(rootURL: support.appendingPathComponent("Canopy/Documents", isDirectory: true))
     }
 
     public func copy(_ sourceURL: URL, paperID: UUID = UUID()) throws -> String {

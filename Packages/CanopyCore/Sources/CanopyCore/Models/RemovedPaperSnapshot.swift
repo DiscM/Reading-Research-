@@ -37,6 +37,10 @@ public struct RemovedPaperSnapshot: Equatable, Sendable {
     public let fingerprint: Data
     public let title: String
     public let titleProvenance: MetadataProvenance
+    public let kind: DocumentKind
+    public let documentDate: DocumentDate?
+    public let documentDateProvenance: MetadataProvenance?
+    public let documentNote: String
     public let publicationYear: Int?
     public let publicationYearProvenance: MetadataProvenance?
     public let doi: String?
@@ -61,6 +65,7 @@ public struct RemovedPaperSnapshot: Equatable, Sendable {
     public let isInspectorPresented: Bool
     public let authorCredits: [AuthorCreditSnapshot]
     public let annotations: [AnnotationSnapshot]
+    public let collectionIDs: [UUID]
     public let managedCopyWasStaged: Bool
 
     init(paper: Paper, managedCopyWasStaged: Bool) {
@@ -68,6 +73,10 @@ public struct RemovedPaperSnapshot: Equatable, Sendable {
         fingerprint = paper.fingerprint
         title = paper.title
         titleProvenance = paper.titleProvenance
+        kind = paper.kind
+        documentDate = paper.documentDate
+        documentDateProvenance = paper.documentDateProvenance
+        documentNote = paper.documentNote
         publicationYear = paper.publicationYear
         publicationYearProvenance = paper.publicationYearProvenance
         doi = paper.doi
@@ -99,6 +108,7 @@ public struct RemovedPaperSnapshot: Equatable, Sendable {
         annotations = paper.annotations
             .sorted { $0.id.uuidString < $1.id.uuidString }
             .map { AnnotationSnapshot(annotation: $0, paperID: paper.id) }
+        collectionIDs = paper.collections.map(\.id).sorted { $0.uuidString < $1.uuidString }
         self.managedCopyWasStaged = managedCopyWasStaged
     }
 }

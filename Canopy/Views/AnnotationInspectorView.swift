@@ -28,7 +28,7 @@ struct AnnotationInspectorView: View {
                 ContentUnavailableView(
                     "Annotations",
                     systemImage: "sidebar.right",
-                    description: Text("Choose a Paper to inspect its highlights and notes.")
+                    description: Text("Choose a Document to inspect its highlights and notes.")
                 )
             } else if let paper, annotationSession.paperID != paper.id {
                 ProgressView("Verifying Source PDF…")
@@ -36,7 +36,7 @@ struct AnnotationInspectorView: View {
                 ContentUnavailableView(
                     "Annotations Unavailable",
                     systemImage: "exclamationmark.shield",
-                    description: Text("Canopy must verify this Paper’s original Source PDF before showing or editing its annotations.")
+                    description: Text("Canopy must verify this Document’s original Source PDF before showing or editing its annotations.")
                 )
             } else if let verificationErrorMessage = annotationSession.verificationErrorMessage {
                 ContentUnavailableView {

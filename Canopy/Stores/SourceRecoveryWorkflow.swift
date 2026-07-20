@@ -17,7 +17,7 @@ enum SourceRecoveryAction: Hashable, Identifiable {
         case .retry: "Retry"
         case .locateSource: "Locate Source…"
         case .locateOriginal: "Locate Original…"
-        case .addChangedAsSeparate: "Add Changed File as Separate Paper…"
+        case .addChangedAsSeparate: "Add Changed File as Separate Document…"
         case .restoreLibraryCopy: "Restore Library Copy…"
         case .removeFromLibrary: "Remove from Library…"
         }

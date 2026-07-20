@@ -8,6 +8,10 @@ public enum ApprovedPaperSource: Sendable {
 
 public enum LibraryRepositoryError: LocalizedError, Equatable {
     case paperNotFound
+    case documentNotFound
+    case collectionNotFound
+    case invalidCollectionName
+    case duplicateCollectionName
     case annotationNotFound
     case annotationsUnavailable
     case invalidAnnotationAnchor
@@ -22,18 +26,22 @@ public enum LibraryRepositoryError: LocalizedError, Equatable {
 
     public var errorDescription: String? {
         switch self {
-        case .paperNotFound: "The Paper is no longer in the library."
-        case .annotationNotFound: "The annotation is no longer attached to this Paper."
-        case .annotationsUnavailable: "Canopy must verify the Paper's original Source PDF before changing its annotations."
+        case .paperNotFound: "The Document is no longer in the library."
+        case .documentNotFound: "The Document is no longer in the library."
+        case .collectionNotFound: "The Collection is no longer in the library."
+        case .invalidCollectionName: "Enter a name for this Collection."
+        case .duplicateCollectionName: "A Collection with this name already exists."
+        case .annotationNotFound: "The annotation is no longer attached to this Document."
+        case .annotationsUnavailable: "Canopy must verify the Document's original Source PDF before changing its annotations."
         case .invalidAnnotationAnchor: "The annotation could not be anchored on this PDF page."
-        case .invalidTitle: "Enter a valid title for this Paper."
+        case .invalidTitle: "Enter a valid title for this Document."
         case .invalidPublicationYear: "Enter a publication year from 1000 through next year, or leave it blank."
         case .invalidDOI: "Enter a valid DOI, or leave it blank."
         case .invalidArxivID: "Enter a valid arXiv ID, or leave it blank."
         case .invalidAuthorCredit: "Enter a display and family name for each Author Credit, or remove empty rows."
-        case .invalidMetadataProvenance: "The Paper Info snapshot has inconsistent metadata provenance."
-        case .contentIdentityMismatch: "The selected PDF does not match the Paper's original content."
-        case .incompatibleStorageMode: "This source operation is not valid for the Paper's storage mode."
+        case .invalidMetadataProvenance: "The Document Info snapshot has inconsistent metadata provenance."
+        case .contentIdentityMismatch: "The selected PDF does not match the Document's original content."
+        case .incompatibleStorageMode: "This source operation is not valid for the Document's storage mode."
         }
     }
 }
@@ -61,8 +69,281 @@ public final class LibraryRepository {
         try context.save()
     }
 
+    public func documents() throws -> [Document] {
+        try context.fetch(FetchDescriptor<Document>())
+    }
+
+    public func document(id: UUID) throws -> Document? {
+        var descriptor = FetchDescriptor<Document>(predicate: #Predicate { $0.id == id })
+        descriptor.fetchLimit = 1
+        return try context.fetch(descriptor).first
+    }
+
+    public func collections() throws -> [Collection] {
+        try context.fetch(FetchDescriptor<Collection>()).sorted {
+            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+    }
+
+    public func collection(id: UUID) throws -> Collection? {
+        var descriptor = FetchDescriptor<Collection>(predicate: #Predicate { $0.id == id })
+        descriptor.fetchLimit = 1
+        return try context.fetch(descriptor).first
+    }
+
+    public func collectionSnapshot(id: UUID) throws -> CollectionSnapshot {
+        guard let collection = try collection(id: id) else {
+            throw LibraryRepositoryError.collectionNotFound
+        }
+        return CollectionSnapshot(
+            id: collection.id,
+            name: collection.name,
+            dateCreated: collection.dateCreated,
+            documentIDs: collection.documents.map(\.id).sorted { $0.uuidString < $1.uuidString }
+        )
+    }
+
     @discardableResult
-    public func add(_ candidate: PreflightCandidate, source: ApprovedPaperSource) throws -> Paper {
+    public func createCollection(
+        name: String,
+        documentIDs: [UUID] = []
+    ) throws -> Collection {
+        let name = try validatedCollectionName(name)
+        try ensureCollectionNameIsAvailable(name)
+        let documents = try requiredDocuments(ids: documentIDs)
+        let collection = Collection(name: name, documents: documents)
+        do {
+            context.insert(collection)
+            for document in documents where !document.collections.contains(where: { $0.id == collection.id }) {
+                document.collections.append(collection)
+            }
+            try save()
+            return collection
+        } catch {
+            context.rollback()
+            throw error
+        }
+    }
+
+    public func renameCollection(id: UUID, name: String) throws {
+        guard let collection = try collection(id: id) else {
+            throw LibraryRepositoryError.collectionNotFound
+        }
+        let name = try validatedCollectionName(name)
+        try ensureCollectionNameIsAvailable(name, excluding: id)
+        do {
+            collection.name = name
+            try save()
+        } catch {
+            context.rollback()
+            throw error
+        }
+    }
+
+    public func collectionMemberships(for documentID: UUID) throws -> [Collection] {
+        guard let document = try document(id: documentID) else {
+            throw LibraryRepositoryError.documentNotFound
+        }
+        return document.collections.sorted {
+            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+    }
+
+    public func addDocuments(_ documentIDs: [UUID], toCollection collectionID: UUID) throws {
+        guard let collection = try collection(id: collectionID) else {
+            throw LibraryRepositoryError.collectionNotFound
+        }
+        let documents = try requiredDocuments(ids: documentIDs)
+        guard !documents.isEmpty else { return }
+        do {
+            var changed = false
+            for document in documents where !document.collections.contains(where: { $0.id == collectionID }) {
+                document.collections.append(collection)
+                changed = true
+            }
+            if changed {
+                try save()
+            }
+        } catch {
+            context.rollback()
+            throw error
+        }
+    }
+
+    public func removeDocuments(_ documentIDs: [UUID], fromCollection collectionID: UUID) throws {
+        guard try collection(id: collectionID) != nil else {
+            throw LibraryRepositoryError.collectionNotFound
+        }
+        let documents = try requiredDocuments(ids: documentIDs)
+        guard !documents.isEmpty else { return }
+        do {
+            var changed = false
+            for document in documents where document.collections.contains(where: { $0.id == collectionID }) {
+                document.collections.removeAll { $0.id == collectionID }
+                changed = true
+            }
+            if changed {
+                try save()
+            }
+        } catch {
+            context.rollback()
+            throw error
+        }
+    }
+
+    public func deleteCollection(id: UUID) throws {
+        guard let collection = try collection(id: id) else {
+            throw LibraryRepositoryError.collectionNotFound
+        }
+        do {
+            for document in collection.documents {
+                document.collections.removeAll { $0.id == id }
+            }
+            context.delete(collection)
+            try save()
+        } catch {
+            context.rollback()
+            throw error
+        }
+    }
+
+    public func restoreCollection(_ snapshot: CollectionSnapshot) throws {
+        guard try collection(id: snapshot.id) == nil else {
+            throw LibraryRepositoryError.duplicateCollectionName
+        }
+        let name = try validatedCollectionName(snapshot.name)
+        try ensureCollectionNameIsAvailable(name)
+        let documents = try requiredDocuments(ids: snapshot.documentIDs)
+        let collection = Collection(
+            id: snapshot.id,
+            name: name,
+            dateCreated: snapshot.dateCreated,
+            documents: documents
+        )
+        do {
+            context.insert(collection)
+            for document in documents where !document.collections.contains(where: { $0.id == snapshot.id }) {
+                document.collections.append(collection)
+            }
+            try save()
+        } catch {
+            context.rollback()
+            throw error
+        }
+    }
+
+    public func updateDocumentNote(documentID: UUID, note: String) throws {
+        guard let document = try document(id: documentID) else {
+            throw LibraryRepositoryError.documentNotFound
+        }
+        do {
+            document.documentNote = note
+            try save()
+        } catch {
+            context.rollback()
+            throw error
+        }
+    }
+
+    public func updateDocumentDate(documentID: UUID, date: DocumentDate?) throws {
+        try setDocumentDate(
+            date,
+            provenance: date == nil ? nil : .userEntry,
+            for: documentID
+        )
+    }
+
+    public func setDocumentDate(
+        _ date: DocumentDate?,
+        provenance: MetadataProvenance?,
+        for documentID: UUID
+    ) throws {
+        guard MetadataValidator.validPublicationYear(date?.year) else {
+            throw LibraryRepositoryError.invalidPublicationYear
+        }
+        guard let document = try document(id: documentID) else {
+            throw LibraryRepositoryError.documentNotFound
+        }
+        guard (date == nil) == (provenance == nil) else {
+            throw LibraryRepositoryError.invalidMetadataProvenance
+        }
+        do {
+            document.documentDate = date
+            document.documentDateProvenance = provenance
+            try save()
+        } catch {
+            context.rollback()
+            throw error
+        }
+    }
+
+    public func setDocumentKind(_ kind: DocumentKind, for documentIDs: [UUID]) throws {
+        try setDocumentKinds(Dictionary(uniqueKeysWithValues: documentIDs.map { ($0, kind) }))
+    }
+
+    public func setDocumentKinds(_ kindsByDocumentID: [UUID: DocumentKind]) throws {
+        let documentIDs = Array(kindsByDocumentID.keys)
+        let documents = try requiredDocuments(ids: documentIDs)
+        guard !documents.isEmpty else { return }
+        do {
+            for document in documents {
+                guard let kind = kindsByDocumentID[document.id] else { continue }
+                document.kind = kind
+            }
+            try save()
+        } catch {
+            context.rollback()
+            throw error
+        }
+    }
+
+    public func setCollectionMembership(
+        collectionID: UUID,
+        documentIDs: [UUID],
+        memberDocumentIDs: Set<UUID>
+    ) throws {
+        guard let collection = try collection(id: collectionID) else {
+            throw LibraryRepositoryError.collectionNotFound
+        }
+        let uniqueDocumentIDs = Array(Set(documentIDs))
+        guard memberDocumentIDs.isSubset(of: Set(uniqueDocumentIDs)) else {
+            throw LibraryRepositoryError.documentNotFound
+        }
+        let documents = try requiredDocuments(ids: uniqueDocumentIDs)
+        guard !documents.isEmpty else { return }
+        do {
+            for document in documents {
+                let isMember = document.collections.contains { $0.id == collectionID }
+                let shouldBeMember = memberDocumentIDs.contains(document.id)
+                if shouldBeMember, !isMember {
+                    document.collections.append(collection)
+                } else if !shouldBeMember, isMember {
+                    document.collections.removeAll { $0.id == collectionID }
+                }
+            }
+            try save()
+        } catch {
+            context.rollback()
+            throw error
+        }
+    }
+
+    @discardableResult
+    public func add(
+        _ candidate: PreflightCandidate,
+        source: ApprovedPaperSource,
+        kind: DocumentKind = .generalDocument,
+        toCollection collectionID: UUID? = nil
+    ) throws -> Document {
+        let destinationCollection: Collection?
+        if let collectionID {
+            guard let collection = try collection(id: collectionID) else {
+                throw LibraryRepositoryError.collectionNotFound
+            }
+            destinationCollection = collection
+        } else {
+            destinationCollection = nil
+        }
         let storageMode: PaperStorageMode
         let bookmarkData: Data?
         let managedRelativePath: String?
@@ -80,24 +361,35 @@ public final class LibraryRepository {
             rememberedLocation = nil
         }
 
-        let credits = candidate.metadata.authors.enumerated().map { index, author in
-            AuthorCredit(
+        let isResearchPaper = kind == .researchPaper
+        let acceptedAuthors = isResearchPaper
+            ? candidate.metadata.authors
+            : candidate.metadata.authors.filter { $0.provenance == .embeddedMetadata }
+        let credits = acceptedAuthors.enumerated().map { index, author in
+            CreatorCredit(
                 position: index,
                 displayName: author.displayName,
                 familyName: author.familyName,
                 provenance: author.provenance
             )
         }
+        let acceptsParsedDate = isResearchPaper
+            || candidate.metadata.publicationYearProvenance == .embeddedMetadata
+        let publicationYear = acceptsParsedDate ? candidate.metadata.publicationYear : nil
+        let publicationYearProvenance = acceptsParsedDate
+            ? candidate.metadata.publicationYearProvenance
+            : nil
         let paper = Paper(
             fingerprint: candidate.fingerprint,
             title: candidate.metadata.title,
             titleProvenance: candidate.metadata.titleProvenance,
-            publicationYear: candidate.metadata.publicationYear,
-            publicationYearProvenance: candidate.metadata.publicationYearProvenance,
-            doi: candidate.metadata.doi,
-            doiProvenance: candidate.metadata.doiProvenance,
-            arxivID: candidate.metadata.arxivID,
-            arxivIDProvenance: candidate.metadata.arxivIDProvenance,
+            publicationYear: publicationYear,
+            publicationYearProvenance: publicationYearProvenance,
+            doi: isResearchPaper ? candidate.metadata.doi : nil,
+            doiProvenance: isResearchPaper ? candidate.metadata.doiProvenance : nil,
+            arxivID: isResearchPaper ? candidate.metadata.arxivID : nil,
+            arxivIDProvenance: isResearchPaper ? candidate.metadata.arxivIDProvenance : nil,
+            kind: kind,
             storageMode: storageMode,
             bookmarkData: bookmarkData,
             managedRelativePath: managedRelativePath,
@@ -109,8 +401,17 @@ public final class LibraryRepository {
             hasSelectableText: candidate.metadata.hasSelectableText,
             authorCredits: credits
         )
-        try insert(paper)
-        return paper
+        do {
+            context.insert(paper)
+            if let destinationCollection {
+                paper.collections.append(destinationCollection)
+            }
+            try save()
+            return paper
+        } catch {
+            context.rollback()
+            throw error
+        }
     }
 
     public func paperIdentitySnapshots() throws -> [PaperIdentitySnapshot] {
@@ -118,6 +419,7 @@ public final class LibraryRepository {
             PaperIdentitySnapshot(
                 id: paper.id,
                 fingerprint: paper.fingerprint,
+                kind: paper.kind,
                 title: paper.title,
                 authorFamilyNames: paper.authorCredits.map(\.familyName),
                 publicationYear: paper.publicationYear,
@@ -209,14 +511,18 @@ public final class LibraryRepository {
         }
         let values = try validatedPaperInfoValues(update)
         let before = paperInfoSnapshot(for: paper)
+        let targetDate = values.publicationYear == before.publicationYear
+            ? before.documentDate
+            : values.publicationYear.flatMap { DocumentDate(year: $0) }
+        let targetDateProvenance = values.publicationYear == before.publicationYear
+            ? before.documentDateProvenance
+            : values.publicationYear.map { _ in MetadataProvenance.userEntry }
         let target = PaperInfoSnapshot(
             paperID: paperID,
             title: values.title,
             titleProvenance: values.title == before.title ? before.titleProvenance : .userEntry,
-            publicationYear: values.publicationYear,
-            publicationYearProvenance: values.publicationYear == before.publicationYear
-                ? before.publicationYearProvenance
-                : values.publicationYear.map { _ in .userEntry },
+            documentDate: targetDate,
+            documentDateProvenance: targetDateProvenance,
             doi: values.doi,
             doiProvenance: values.doi == before.doi
                 ? before.doiProvenance
@@ -249,7 +555,7 @@ public final class LibraryRepository {
     }
 
     private func validatedPaperInfoSnapshot(_ snapshot: PaperInfoSnapshot) throws -> PaperInfoSnapshot {
-        guard (snapshot.publicationYear == nil) == (snapshot.publicationYearProvenance == nil),
+        guard (snapshot.documentDate == nil) == (snapshot.documentDateProvenance == nil),
               (snapshot.doi == nil) == (snapshot.doiProvenance == nil),
               (snapshot.arxivID == nil) == (snapshot.arxivIDProvenance == nil) else {
             throw LibraryRepositoryError.invalidMetadataProvenance
@@ -291,8 +597,8 @@ public final class LibraryRepository {
             paperID: snapshot.paperID,
             title: values.title,
             titleProvenance: snapshot.titleProvenance,
-            publicationYear: values.publicationYear,
-            publicationYearProvenance: snapshot.publicationYearProvenance,
+            documentDate: snapshot.documentDate,
+            documentDateProvenance: snapshot.documentDateProvenance,
             doi: values.doi,
             doiProvenance: snapshot.doiProvenance,
             arxivID: values.arxivID,
@@ -596,25 +902,53 @@ public final class LibraryRepository {
         do {
             let access = try PaperSourceAccess(paper: paper, managedStore: managedStore)
             if access.attributesChanged || paper.sourceState != .available {
-                try markSourceAvailable(
-                    paper,
+                try recordVerifiedSourceAccess(
+                    documentID: paperID,
                     fileSize: access.verifiedFileSize,
                     modificationDate: access.verifiedModificationDate
                 )
             }
             return access
         } catch let error as PaperSourceAccessError {
-            switch error {
-            case .sourceUnavailable:
-                paper.sourceState = .sourceUnavailable
-            case .sourceMissing:
-                paper.sourceState = .brokenReference
-            case .sourceChanged:
-                paper.sourceState = .sourceChanged
-            case .libraryCopyMissing:
-                paper.sourceState = .libraryCopyMissing
-            }
+            try recordSourceAccessFailure(documentID: paperID, error: error)
+            throw error
+        }
+    }
+
+    public func recordVerifiedSourceAccess(
+        documentID: UUID,
+        fileSize: Int64,
+        modificationDate: Date?
+    ) throws {
+        guard let document = try document(id: documentID) else {
+            throw LibraryRepositoryError.documentNotFound
+        }
+        try markSourceAvailable(
+            document,
+            fileSize: fileSize,
+            modificationDate: modificationDate
+        )
+    }
+
+    public func recordSourceAccessFailure(
+        documentID: UUID,
+        error: PaperSourceAccessError
+    ) throws {
+        guard let document = try document(id: documentID) else {
+            throw LibraryRepositoryError.documentNotFound
+        }
+        let previousState = document.sourceState
+        document.sourceState = switch error {
+        case .sourceUnavailable: .sourceUnavailable
+        case .sourceMissing: .brokenReference
+        case .sourceChanged: .sourceChanged
+        case .libraryCopyMissing: .libraryCopyMissing
+        }
+        do {
             try save()
+        } catch {
+            document.sourceState = previousState
+            context.rollback()
             throw error
         }
     }
@@ -802,47 +1136,210 @@ public final class LibraryRepository {
         }
     }
 
+    public func removeDocuments(
+        documentIDs: [UUID],
+        managedStore suppliedManagedStore: ManagedPaperStore? = nil
+    ) throws -> [RemovedPaperSnapshot] {
+        var seenDocumentIDs = Set<UUID>()
+        let orderedDocumentIDs = documentIDs.filter {
+            seenDocumentIDs.insert($0).inserted
+        }
+        guard !orderedDocumentIDs.isEmpty else { return [] }
+
+        let documents = try orderedDocumentIDs.map { documentID in
+            guard let document = try paper(id: documentID) else {
+                throw LibraryRepositoryError.paperNotFound
+            }
+            return document
+        }
+
+        var managedStore = suppliedManagedStore
+        var stagedManagedCopyByDocumentID: [UUID: Bool] = [:]
+
+        func restoreStagedManagedCopies() throws {
+            guard let managedStore else { return }
+            for document in documents.reversed()
+                where stagedManagedCopyByDocumentID[document.id] == true {
+                guard let relativePath = document.managedRelativePath else {
+                    throw LibraryRepositoryError.incompatibleStorageMode
+                }
+                try managedStore.restoreFromRecovery(
+                    relativePath: relativePath,
+                    paperID: document.id
+                )
+            }
+        }
+
+        do {
+            for document in documents where document.storageMode == .managedCopy {
+                guard let relativePath = document.managedRelativePath else {
+                    throw LibraryRepositoryError.incompatibleStorageMode
+                }
+                if managedStore == nil {
+                    managedStore = try ManagedPaperStore.applicationSupport()
+                }
+                stagedManagedCopyByDocumentID[document.id] = try managedStore?.stageForRecovery(
+                    relativePath: relativePath,
+                    paperID: document.id
+                ) ?? false
+            }
+        } catch {
+            let operationError = error
+            try restoreStagedManagedCopies()
+            throw operationError
+        }
+
+        let snapshots = documents.map { document in
+            RemovedPaperSnapshot(
+                paper: document,
+                managedCopyWasStaged: stagedManagedCopyByDocumentID[document.id] == true
+            )
+        }
+        for document in documents {
+            context.delete(document)
+        }
+
+        do {
+            try context.save()
+            return snapshots
+        } catch {
+            let saveError = error
+            context.rollback()
+            try restoreStagedManagedCopies()
+            throw saveError
+        }
+    }
+
     public func removePaper(
         paperID: UUID,
         managedStore suppliedManagedStore: ManagedPaperStore? = nil
     ) throws -> RemovedPaperSnapshot {
-        guard let paper = try paper(id: paperID) else {
+        guard let snapshot = try removeDocuments(
+            documentIDs: [paperID],
+            managedStore: suppliedManagedStore
+        ).first else {
             throw LibraryRepositoryError.paperNotFound
         }
+        return snapshot
+    }
 
-        var managedStore: ManagedPaperStore?
-        var managedCopyWasStaged = false
-        if paper.storageMode == .managedCopy {
-            guard let relativePath = paper.managedRelativePath else {
+    @discardableResult
+    public func restoreRemovedDocuments(
+        snapshots: [RemovedPaperSnapshot],
+        managedStore suppliedManagedStore: ManagedPaperStore? = nil
+    ) throws -> [Document] {
+        guard !snapshots.isEmpty else { return [] }
+        var snapshotIDs = Set<UUID>()
+        for snapshot in snapshots {
+            guard snapshotIDs.insert(snapshot.id).inserted,
+                  try paper(id: snapshot.id) == nil else {
                 throw LibraryRepositoryError.incompatibleStorageMode
             }
-            let store = try suppliedManagedStore ?? ManagedPaperStore.applicationSupport()
-            managedStore = store
-            managedCopyWasStaged = try store.stageForRecovery(
-                relativePath: relativePath,
-                paperID: paper.id
-            )
         }
 
-        let snapshot = RemovedPaperSnapshot(
-            paper: paper,
-            managedCopyWasStaged: managedCopyWasStaged
-        )
-        context.delete(paper)
-        do {
-            try context.save()
-            return snapshot
-        } catch {
-            let saveError = error
-            defer { context.rollback() }
-            if managedCopyWasStaged,
-               let managedStore,
-               let relativePath = snapshot.managedRelativePath {
-                try managedStore.restoreFromRecovery(
+        var managedStore = suppliedManagedStore
+        var restoredManagedCopyIDs = Set<UUID>()
+
+        func restageRestoredManagedCopies() throws {
+            guard let managedStore else { return }
+            for snapshot in snapshots.reversed()
+                where restoredManagedCopyIDs.contains(snapshot.id) {
+                guard let relativePath = snapshot.managedRelativePath else {
+                    throw LibraryRepositoryError.incompatibleStorageMode
+                }
+                _ = try managedStore.stageForRecovery(
                     relativePath: relativePath,
                     paperID: snapshot.id
                 )
             }
+        }
+
+        do {
+            for snapshot in snapshots
+                where snapshot.storageMode == .managedCopy && snapshot.managedCopyWasStaged {
+                guard let relativePath = snapshot.managedRelativePath else {
+                    throw LibraryRepositoryError.incompatibleStorageMode
+                }
+                if managedStore == nil {
+                    managedStore = try ManagedPaperStore.applicationSupport()
+                }
+                try managedStore?.restoreFromRecovery(
+                    relativePath: relativePath,
+                    paperID: snapshot.id
+                )
+                restoredManagedCopyIDs.insert(snapshot.id)
+            }
+        } catch {
+            let operationError = error
+            try restageRestoredManagedCopies()
+            throw operationError
+        }
+
+        do {
+            let availableCollections = try context.fetch(FetchDescriptor<Collection>())
+            var restoredDocuments: [Document] = []
+            for snapshot in snapshots {
+                let creatorCredits = snapshot.authorCredits.map { creator in
+                    CreatorCredit(
+                        id: creator.id,
+                        position: creator.position,
+                        displayName: creator.displayName,
+                        familyName: creator.familyName,
+                        provenance: creator.provenance
+                    )
+                }
+                let document = Document(
+                    id: snapshot.id,
+                    fingerprint: snapshot.fingerprint,
+                    title: snapshot.title,
+                    titleProvenance: snapshot.titleProvenance,
+                    publicationYear: snapshot.publicationYear,
+                    publicationYearProvenance: snapshot.publicationYearProvenance,
+                    doi: snapshot.doi,
+                    doiProvenance: snapshot.doiProvenance,
+                    arxivID: snapshot.arxivID,
+                    arxivIDProvenance: snapshot.arxivIDProvenance,
+                    kind: snapshot.kind,
+                    documentDate: snapshot.documentDate,
+                    documentNote: snapshot.documentNote,
+                    storageMode: snapshot.storageMode,
+                    sourceState: snapshot.sourceState,
+                    bookmarkData: snapshot.bookmarkData,
+                    managedRelativePath: snapshot.managedRelativePath,
+                    sourceFilename: snapshot.sourceFilename,
+                    rememberedLocation: snapshot.rememberedLocation,
+                    sourceFileSize: snapshot.sourceFileSize,
+                    sourceModificationDate: snapshot.sourceModificationDate,
+                    pageCount: snapshot.pageCount,
+                    hasSelectableText: snapshot.hasSelectableText,
+                    dateAdded: snapshot.dateAdded,
+                    authorCredits: creatorCredits
+                )
+                document.lastOpenedAt = snapshot.lastOpenedAt
+                document.lastPageIndex = snapshot.lastPageIndex
+                document.lastViewport = snapshot.lastViewport
+                document.lastZoomScale = snapshot.lastZoomScale
+                document.isInspectorPresented = snapshot.isInspectorPresented
+                document.documentDateProvenance = snapshot.documentDateProvenance
+                let collectionIDs = Set(snapshot.collectionIDs)
+                document.collections = availableCollections.filter {
+                    collectionIDs.contains($0.id)
+                }
+
+                context.insert(document)
+                for annotationSnapshot in snapshot.annotations {
+                    let annotation = try annotation(from: annotationSnapshot, paper: document)
+                    annotation.updatedAt = annotationSnapshot.updatedAt
+                    context.insert(annotation)
+                }
+                restoredDocuments.append(document)
+            }
+            try context.save()
+            return restoredDocuments
+        } catch {
+            let saveError = error
+            context.rollback()
+            try restageRestoredManagedCopies()
             throw saveError
         }
     }
@@ -852,82 +1349,13 @@ public final class LibraryRepository {
         snapshot: RemovedPaperSnapshot,
         managedStore suppliedManagedStore: ManagedPaperStore? = nil
     ) throws -> Paper {
-        guard try paper(id: snapshot.id) == nil else {
-            throw LibraryRepositoryError.incompatibleStorageMode
+        guard let document = try restoreRemovedDocuments(
+            snapshots: [snapshot],
+            managedStore: suppliedManagedStore
+        ).first else {
+            throw LibraryRepositoryError.paperNotFound
         }
-
-        var managedStore: ManagedPaperStore?
-        if snapshot.storageMode == .managedCopy, snapshot.managedCopyWasStaged {
-            guard let relativePath = snapshot.managedRelativePath else {
-                throw LibraryRepositoryError.incompatibleStorageMode
-            }
-            let store = try suppliedManagedStore ?? ManagedPaperStore.applicationSupport()
-            try store.restoreFromRecovery(relativePath: relativePath, paperID: snapshot.id)
-            managedStore = store
-        }
-
-        let authorCredits = snapshot.authorCredits.map { author in
-            AuthorCredit(
-                id: author.id,
-                position: author.position,
-                displayName: author.displayName,
-                familyName: author.familyName,
-                provenance: author.provenance
-            )
-        }
-        let paper = Paper(
-            id: snapshot.id,
-            fingerprint: snapshot.fingerprint,
-            title: snapshot.title,
-            titleProvenance: snapshot.titleProvenance,
-            publicationYear: snapshot.publicationYear,
-            publicationYearProvenance: snapshot.publicationYearProvenance,
-            doi: snapshot.doi,
-            doiProvenance: snapshot.doiProvenance,
-            arxivID: snapshot.arxivID,
-            arxivIDProvenance: snapshot.arxivIDProvenance,
-            storageMode: snapshot.storageMode,
-            sourceState: snapshot.sourceState,
-            bookmarkData: snapshot.bookmarkData,
-            managedRelativePath: snapshot.managedRelativePath,
-            sourceFilename: snapshot.sourceFilename,
-            rememberedLocation: snapshot.rememberedLocation,
-            sourceFileSize: snapshot.sourceFileSize,
-            sourceModificationDate: snapshot.sourceModificationDate,
-            pageCount: snapshot.pageCount,
-            hasSelectableText: snapshot.hasSelectableText,
-            dateAdded: snapshot.dateAdded,
-            authorCredits: authorCredits
-        )
-        paper.lastOpenedAt = snapshot.lastOpenedAt
-        paper.lastPageIndex = snapshot.lastPageIndex
-        paper.lastViewport = snapshot.lastViewport
-        paper.lastZoomScale = snapshot.lastZoomScale
-        paper.isInspectorPresented = snapshot.isInspectorPresented
-
-        context.insert(paper)
-        for annotationSnapshot in snapshot.annotations {
-            let annotation = try annotation(from: annotationSnapshot, paper: paper)
-            annotation.updatedAt = annotationSnapshot.updatedAt
-            context.insert(annotation)
-        }
-
-        do {
-            try context.save()
-            return paper
-        } catch {
-            let saveError = error
-            defer { context.rollback() }
-            if snapshot.managedCopyWasStaged,
-               let managedStore,
-               let relativePath = snapshot.managedRelativePath {
-                _ = try managedStore.stageForRecovery(
-                    relativePath: relativePath,
-                    paperID: snapshot.id
-                )
-            }
-            throw saveError
-        }
+        return document
     }
 
     public func reconcileManagedPaperRecovery(
@@ -996,8 +1424,8 @@ public final class LibraryRepository {
             paperID: paper.id,
             title: paper.title,
             titleProvenance: paper.titleProvenance,
-            publicationYear: paper.publicationYear,
-            publicationYearProvenance: paper.publicationYearProvenance,
+            documentDate: paper.documentDate,
+            documentDateProvenance: paper.documentDateProvenance,
             doi: paper.doi,
             doiProvenance: paper.doiProvenance,
             arxivID: paper.arxivID,
@@ -1133,8 +1561,8 @@ public final class LibraryRepository {
 
             paper.title = target.title
             paper.titleProvenance = target.titleProvenance
-            paper.publicationYear = target.publicationYear
-            paper.publicationYearProvenance = target.publicationYearProvenance
+            paper.documentDate = target.documentDate
+            paper.documentDateProvenance = target.documentDateProvenance
             paper.doi = target.doi
             paper.doiProvenance = target.doiProvenance
             paper.arxivID = target.arxivID
@@ -1152,6 +1580,38 @@ public final class LibraryRepository {
         }
     }
 
+    private func requiredDocuments(ids documentIDs: [UUID]) throws -> [Document] {
+        let requestedIDs = Set(documentIDs)
+        guard !requestedIDs.isEmpty else { return [] }
+        let documents = try context.fetch(FetchDescriptor<Document>()).filter {
+            requestedIDs.contains($0.id)
+        }
+        guard documents.count == requestedIDs.count else {
+            throw LibraryRepositoryError.documentNotFound
+        }
+        return documents
+    }
+
+    private func validatedCollectionName(_ name: String) throws -> String {
+        let normalized = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else {
+            throw LibraryRepositoryError.invalidCollectionName
+        }
+        return normalized
+    }
+
+    private func ensureCollectionNameIsAvailable(
+        _ name: String,
+        excluding excludedID: UUID? = nil
+    ) throws {
+        let conflicts = try context.fetch(FetchDescriptor<Collection>()).contains { collection in
+            collection.id != excludedID
+                && collection.name.caseInsensitiveCompare(name) == .orderedSame
+        }
+        guard !conflicts else {
+            throw LibraryRepositoryError.duplicateCollectionName
+        }
+    }
 }
 
 private struct PaperStorageSnapshot {

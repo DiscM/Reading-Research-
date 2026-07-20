@@ -47,6 +47,6 @@ enum PaperInfoUndo {
                 onError(error)
             }
         }
-        undoManager.setActionName("Edit Paper Info")
+        undoManager.setActionName("Edit Document Info")
     }
 }

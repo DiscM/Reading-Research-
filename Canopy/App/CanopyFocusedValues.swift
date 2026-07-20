@@ -1,14 +1,14 @@
 import SwiftUI
 
-struct AddPapersCommandAction {
+struct AddDocumentsCommandAction {
     let perform: @MainActor () -> Void
 }
 
-struct PaperInfoCommandAction {
+struct DocumentInfoCommandAction {
     let perform: @MainActor () -> Void
 }
 
-enum PaperCommand: Hashable {
+enum DocumentCommand: Hashable {
     case focusFind
     case nextFindMatch
     case previousFindMatch
@@ -16,19 +16,19 @@ enum PaperCommand: Hashable {
     case zoomOut
     case fitWidth
     case actualSize
-    case toggleAnnotations
+    case toggleInspector
     case startAreaAnnotation
 
     static func availableReaderCommands(
         hasFindMatches: Bool,
         hasSelectableText: Bool = true
-    ) -> Set<PaperCommand> {
-        var commands: Set<PaperCommand> = [
+    ) -> Set<DocumentCommand> {
+        var commands: Set<DocumentCommand> = [
             .zoomIn,
             .zoomOut,
             .fitWidth,
             .actualSize,
-            .toggleAnnotations,
+            .toggleInspector,
             .startAreaAnnotation
         ]
         if hasSelectableText {
@@ -41,40 +41,64 @@ enum PaperCommand: Hashable {
     }
 }
 
-struct PaperCommandContext {
-    let availableCommands: Set<PaperCommand>
-    let perform: @MainActor (PaperCommand) -> Void
+struct DocumentCommandContext {
+    let availableCommands: Set<DocumentCommand>
+    let perform: @MainActor (DocumentCommand) -> Void
 
-    func canPerform(_ command: PaperCommand) -> Bool {
+    func canPerform(_ command: DocumentCommand) -> Bool {
         availableCommands.contains(command)
     }
 }
 
-private struct PaperInfoCommandActionKey: FocusedValueKey {
-    typealias Value = PaperInfoCommandAction
+enum WorkspaceCommand: Hashable {
+    case toggleNavigationSidebar
+    case toggleDocumentList
+    case toggleInspector
+    case showOverview
+    case showAnnotations
+    case focusSearch
+    case focusContextualSearch
 }
 
-private struct AddPapersCommandActionKey: FocusedValueKey {
-    typealias Value = AddPapersCommandAction
+struct WorkspaceCommandContext {
+    let perform: @MainActor (WorkspaceCommand) -> Void
 }
 
-private struct PaperCommandContextKey: FocusedValueKey {
-    typealias Value = PaperCommandContext
+private struct DocumentInfoCommandActionKey: FocusedValueKey {
+    typealias Value = DocumentInfoCommandAction
+}
+
+private struct AddDocumentsCommandActionKey: FocusedValueKey {
+    typealias Value = AddDocumentsCommandAction
+}
+
+private struct DocumentCommandContextKey: FocusedValueKey {
+    typealias Value = DocumentCommandContext
+}
+
+private struct WorkspaceCommandContextKey: FocusedValueKey {
+    typealias Value = WorkspaceCommandContext
 }
 
 extension FocusedValues {
-    var addPapersCommandAction: AddPapersCommandAction? {
-        get { self[AddPapersCommandActionKey.self] }
-        set { self[AddPapersCommandActionKey.self] = newValue }
+    var addDocumentsCommandAction: AddDocumentsCommandAction? {
+        get { self[AddDocumentsCommandActionKey.self] }
+        set { self[AddDocumentsCommandActionKey.self] = newValue }
     }
 
-    var paperInfoCommandAction: PaperInfoCommandAction? {
-        get { self[PaperInfoCommandActionKey.self] }
-        set { self[PaperInfoCommandActionKey.self] = newValue }
+    var documentInfoCommandAction: DocumentInfoCommandAction? {
+        get { self[DocumentInfoCommandActionKey.self] }
+        set { self[DocumentInfoCommandActionKey.self] = newValue }
     }
 
-    var paperCommandContext: PaperCommandContext? {
-        get { self[PaperCommandContextKey.self] }
-        set { self[PaperCommandContextKey.self] = newValue }
+    var documentCommandContext: DocumentCommandContext? {
+        get { self[DocumentCommandContextKey.self] }
+        set { self[DocumentCommandContextKey.self] = newValue }
+    }
+
+
+    var workspaceCommandContext: WorkspaceCommandContext? {
+        get { self[WorkspaceCommandContextKey.self] }
+        set { self[WorkspaceCommandContextKey.self] = newValue }
     }
 }

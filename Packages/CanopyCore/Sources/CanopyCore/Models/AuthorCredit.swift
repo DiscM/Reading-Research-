@@ -2,13 +2,18 @@ import Foundation
 import SwiftData
 
 @Model
-public final class AuthorCredit {
+public final class CreatorCredit {
     @Attribute(.unique) public var id: UUID
     public var position: Int
     public var displayName: String
     public var familyName: String
     public var provenanceRawValue: String
-    public var paper: Paper?
+    public var paper: Document?
+
+    public var document: Document? {
+        get { paper }
+        set { paper = newValue }
+    }
 
     public var provenance: MetadataProvenance {
         get { MetadataProvenance(rawValue: provenanceRawValue) ?? .firstPage }
@@ -21,14 +26,33 @@ public final class AuthorCredit {
         displayName: String,
         familyName: String,
         provenance: MetadataProvenance,
-        paper: Paper? = nil
+        document: Document? = nil
     ) {
         self.id = id
         self.position = position
         self.displayName = displayName
         self.familyName = familyName
         self.provenanceRawValue = provenance.rawValue
-        self.paper = paper
+        self.paper = document
+    }
+
+    public convenience init(
+        id: UUID = UUID(),
+        position: Int,
+        displayName: String,
+        familyName: String,
+        provenance: MetadataProvenance,
+        paper: Document
+    ) {
+        self.init(
+            id: id,
+            position: position,
+            displayName: displayName,
+            familyName: familyName,
+            provenance: provenance,
+            document: paper
+        )
     }
 }
 
+public typealias AuthorCredit = CreatorCredit

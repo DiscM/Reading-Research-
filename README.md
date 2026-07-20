@@ -1,27 +1,30 @@
 # Canopy
 
-Canopy is a dependable, offline-first research PDF reader for macOS. Version 1 focuses on one complete workflow: add a Source PDF, find it again, read it, annotate text or a page area, attach an optional note, and resume where you stopped.
+Canopy is a dependable, offline-first PDF knowledge workspace for macOS. It keeps research papers, lecture slides, class notes, textbooks, handouts, and general documents in one searchable library while preserving each Source PDF and the reader’s work around it.
 
 ## Status
 
 This branch is a ground-up rebuild. It intentionally contains no source code or data migrations from the archived Research Paper Reader prototype.
 
-The core reading loop is implemented across five slices:
+The first-release workspace is implemented across these slices:
 
-- **Add Papers** supports multi-file selection and drag-and-drop, referenced or managed storage, cancellable bounded Preflight, PDF validation and local metadata parsing, SHA-256 duplicate detection, per-comparison Potential Duplicate Review, partial-success reporting, exact-match source repair or relocation, and lightweight background availability checks.
-- **Library browsing and management** presents recently opened Papers above the remaining library, supports Title and Date Added sorting, ranks title search matches ahead of metadata and note matches, clears recent history without removing Papers, and removes referenced or managed Papers with storage-specific confirmation and native Undo.
+- **Add Documents** supports multi-file selection and direct multi-file drops onto Collections, a batch Document Kind, referenced or managed storage, cancellable bounded Preflight, local metadata parsing, universal SHA-256 duplicate detection, and bibliographic Potential Duplicate Review only for Research Papers. Dropping an Exact Duplicate onto a Collection adds the existing Document's membership instead of creating a second Document.
+- **Workspace organization** provides All Documents, Recent, Unfiled, and flat many-to-many Collections. Collections are organizational references: they may mix referenced and managed Documents and never own, move, copy, or delete Source PDFs.
+- **Browsing and multi-selection** provides a compact Document list, multi-kind filters, four sort modes, standard macOS multi-selection, bulk Kind and Collection changes, and storage-aware removal summaries.
 - **Reader and resume** verifies Source PDF identity before opening, presents a continuous vertical PDFKit reader with page and zoom controls plus asynchronous cancellable Find, explains PDFs without selectable text, and restores page, viewport, zoom, and inspector state.
-- **Annotations and notes** captures single-page text selections or user-drawn areas, presents an accessible named five-color palette, renders database-backed overlays and area previews without modifying the Source PDF, and provides a current-Paper inspector with Recent Activity or Page Order sorting, multi-color filtering, navigation, anchor adjustment, color editing, and debounced inline notes. Create, delete, anchor, color, and note changes save explicitly and participate in native Undo and Redo.
-- **Paper Info** opens from the reader, a Paper row, or `⌘I`; stages title, publication year, DOI, arXiv, and ordered Author Credit edits until Save; validates and normalizes the transaction atomically; shows provenance and Source PDF details; can reparse a verified Source PDF through field-by-field replacement choices; and can transactionally convert an available Source PDF between referenced and managed storage. Metadata edits participate in native Undo and Redo; storage conversion does not.
+- **Overview, annotations, and notes** adds one searchable Document Note, retains page-linked Annotation Notes, and switches the inspector between Overview and Annotations without overlaying PDF content. Annotations remains the launch-default tab.
+- **Document Info** adapts Creator Credit and date labels by Document Kind, limits DOI and arXiv to Research Papers, reparses non-research metadata conservatively, and preserves source recovery and storage conversion.
+- **Offline search and indexing** builds a durable, versioned, page-linked PDF text index in the background. It resumes after relaunch, reuses exact-content indexes, retains search text for unavailable referenced sources, and exposes progress through a floating activity popover.
 
-Annotations remain hidden until the selected Paper's Source PDF is verified in the current reading session. Source changes and annotation-load failures have explicit unavailable, error, and retry states.
+Annotations remain hidden until the selected Document’s Source PDF is verified in the current reading session. Source changes and annotation-load failures have explicit unavailable, error, and retry states.
 
 The refined v1 product scope is implemented. Release readiness still requires the manual accessibility/OS checks, an automation-enabled run of the relaunch UI journey, packaging, and App Store work recorded in [`Documentation/RELEASE_CHECKLIST.md`](Documentation/RELEASE_CHECKLIST.md).
 
 - Prototype branch: `codex/archive-research-paper-reader-prototype`
 - Prototype tag: `archive/research-paper-reader-prototype-2026-07-10`
 - Deferred capabilities: [`Documentation/DEFERRED_FEATURES.md`](Documentation/DEFERRED_FEATURES.md)
-- Architecture and delivery plan: [`Documentation/V1_PLAN.md`](Documentation/V1_PLAN.md)
+- General workspace plan: [`Documentation/GENERAL_WORKSPACE_PLAN.md`](Documentation/GENERAL_WORKSPACE_PLAN.md)
+- Original reader-foundation plan: [`Documentation/V1_PLAN.md`](Documentation/V1_PLAN.md)
 
 ## Development
 

@@ -411,9 +411,9 @@ struct CanopyV1RefinementTests {
         #expect(analyzer.callCount == 0)
     }
 
-    @Test("the unreleased draft store is replaced by an explicitly named v1 store")
+    @Test("the unreleased research-only draft store is replaced by the workspace v1 store")
     func explicitV1StoreURL() {
-        #expect(CanopyModelContainer.defaultStoreURL.lastPathComponent == "CanopyV1.store")
+        #expect(CanopyModelContainer.defaultStoreURL.lastPathComponent == "CanopyWorkspaceV1.store")
         #expect(CanopyModelContainer.defaultStoreURL.deletingLastPathComponent().lastPathComponent == "Canopy")
     }
 }

@@ -17,22 +17,24 @@ struct PaperInfoView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Paper Info")
+                Text("Document Info")
                     .font(.title2.bold())
                 Spacer()
             }
             .padding([.horizontal, .top], 24)
 
             Form {
-                Section("Bibliographic Information") {
+                Section("Document Information") {
                     metadataField("Title", text: $workflow.draft.title, provenance: workflow.provenance(for: .title))
                     metadataField(
-                        "Publication Year",
+                        workflow.documentKind.dateLabel,
                         text: $workflow.draft.publicationYearText,
                         provenance: workflow.provenance(for: .publicationYear)
                     )
-                    metadataField("DOI", text: $workflow.draft.doi, provenance: workflow.provenance(for: .doi))
-                    metadataField("arXiv ID", text: $workflow.draft.arxivID, provenance: workflow.provenance(for: .arxivID))
+                    if workflow.showsResearchMetadata {
+                        metadataField("DOI", text: $workflow.draft.doi, provenance: workflow.provenance(for: .doi))
+                        metadataField("arXiv ID", text: $workflow.draft.arxivID, provenance: workflow.provenance(for: .arxivID))
+                    }
                 }
                 .disabled(workflow.hasActiveReparse)
 
@@ -48,14 +50,14 @@ struct PaperInfoView: View {
                     }
                 }
 
-                Section("Author Credits") {
+                Section("\(workflow.documentKind.creatorLabel) Credits") {
                     VStack(alignment: .leading, spacing: 8) {
                         List(selection: $selectedAuthorCreditID) {
                             if workflow.draft.authorCredits.isEmpty {
                                 ContentUnavailableView(
-                                    "No Author Credits",
+                                    "No Creator Credits",
                                     systemImage: "person.2",
-                                    description: Text("Add an author to include a credit for this Paper.")
+                                    description: Text("Add a creator to include a credit for this Document.")
                                 )
                             } else {
                                 ForEach(Array(workflow.draft.authorCredits.enumerated()), id: \.element.id) { index, author in
@@ -92,10 +94,10 @@ struct PaperInfoView: View {
 
                         HStack(spacing: 8) {
                             Button(action: addAuthorCredit) {
-                                Label("Add Author Credit", systemImage: "plus")
+                                Label("Add Creator Credit", systemImage: "plus")
                             }
                             Button(action: removeSelectedAuthorCredit) {
-                                Label("Remove Author Credit", systemImage: "minus")
+                                Label("Remove Creator Credit", systemImage: "minus")
                             }
                             .disabled(!hasSelectedAuthorCredit)
 
@@ -175,7 +177,7 @@ struct PaperInfoView: View {
                                 .foregroundStyle(.secondary)
                         }
                     } else if workflow.hasChanges {
-                        Text("Save or cancel Paper Info changes before changing Source PDF storage.")
+                        Text("Save or cancel Document Info changes before changing Source PDF storage.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -234,7 +236,7 @@ struct PaperInfoView: View {
             Text(storageConversionMessage)
         }
         .alert(
-            "Couldn’t Save Paper Info",
+            "Couldn’t Save Document Info",
             isPresented: Binding(
                 get: { workflow.errorMessage != nil },
                 set: { if !$0 { workflow.errorMessage = nil } }

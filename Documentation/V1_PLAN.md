@@ -1,5 +1,7 @@
 # Canopy v1 Plan
 
+> **Superseded:** The research Paper–only product boundary in this document has been superseded by [`GENERAL_WORKSPACE_PLAN.md`](GENERAL_WORKSPACE_PLAN.md). This file remains as a record of the implemented reader foundation until the generalized workspace plan is implemented.
+
 ## Product boundary
 
 Canopy v1 is a Mac App Store application for macOS 15 or later. It is fully offline and makes no network requests. The launch experience always opens the library rather than reopening a document.

@@ -4,7 +4,7 @@ import SwiftData
 public enum CanopySchemaV1: VersionedSchema {
     public static let versionIdentifier = Schema.Version(1, 0, 0)
     public static var models: [any PersistentModel.Type] {
-        [Paper.self, AuthorCredit.self, Annotation.self]
+        [Document.self, CreatorCredit.self, Annotation.self, Collection.self]
     }
 }
 
@@ -20,7 +20,7 @@ public enum CanopyModelContainer {
     public static var defaultStoreURL: URL {
         URL.applicationSupportDirectory
             .appendingPathComponent("Canopy", isDirectory: true)
-            .appendingPathComponent("CanopyV1.store")
+            .appendingPathComponent("CanopyWorkspaceV1.store")
     }
 
     public static func make(

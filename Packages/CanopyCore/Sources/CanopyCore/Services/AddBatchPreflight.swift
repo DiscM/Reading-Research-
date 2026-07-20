@@ -71,6 +71,7 @@ public enum AddBatchPreflightInputError: LocalizedError, Equatable, Sendable {
 public struct PaperIdentitySnapshot: Identifiable, Equatable, Sendable {
     public let id: UUID
     public let fingerprint: Data
+    public let kind: DocumentKind
     public let title: String
     public let authorFamilyNames: [String]
     public let publicationYear: Int?
@@ -87,6 +88,7 @@ public struct PaperIdentitySnapshot: Identifiable, Equatable, Sendable {
     public init(
         id: UUID,
         fingerprint: Data,
+        kind: DocumentKind = .generalDocument,
         title: String,
         authorFamilyNames: [String],
         publicationYear: Int?,
@@ -102,6 +104,7 @@ public struct PaperIdentitySnapshot: Identifiable, Equatable, Sendable {
     ) {
         self.id = id
         self.fingerprint = fingerprint
+        self.kind = kind
         self.title = title
         self.authorFamilyNames = authorFamilyNames
         self.publicationYear = publicationYear
@@ -218,6 +221,7 @@ public struct AddBatchPreflight<Analyzer: DocumentAnalyzing>: Sendable {
     public func run(
         urls: [URL],
         existingPapers: [PaperIdentitySnapshot],
+        documentKind: DocumentKind = .generalDocument,
         progress: (@Sendable (AddBatchPreflightProgress) -> Void)? = nil
     ) throws -> AddBatchPreflightResult {
         try Task.checkCancellation()
@@ -247,8 +251,14 @@ public struct AddBatchPreflight<Analyzer: DocumentAnalyzing>: Sendable {
                 } else if let retained = processedCandidates.first(where: { $0.fingerprint == candidate.fingerprint }) {
                     result.withinBatchExactDuplicates.append(WithinBatchExactDuplicate(retained: retained, duplicate: candidate))
                 } else {
-                    let comparisonPapers = existingPapers + processedCandidates.map(identitySnapshot)
+                    let comparisonPapers = existingPapers + processedCandidates.map {
+                        identitySnapshot($0, kind: documentKind)
+                    }
                     let matches = comparisonPapers.compactMap { paper -> PotentialDuplicateMatch? in
+                        guard documentKind == .researchPaper,
+                              paper.kind == .researchPaper else {
+                            return nil
+                        }
                         let reasons = duplicateReasons(candidate: candidate, paper: paper)
                         guard !reasons.isEmpty else { return nil }
                         return PotentialDuplicateMatch(
@@ -344,10 +354,14 @@ public struct AddBatchPreflight<Analyzer: DocumentAnalyzing>: Sendable {
         return reasons
     }
 
-    private func identitySnapshot(_ candidate: PreflightCandidate) -> PaperIdentitySnapshot {
+    private func identitySnapshot(
+        _ candidate: PreflightCandidate,
+        kind: DocumentKind
+    ) -> PaperIdentitySnapshot {
         PaperIdentitySnapshot(
             id: candidate.id,
             fingerprint: candidate.fingerprint,
+            kind: kind,
             title: candidate.metadata.title,
             authorFamilyNames: candidate.metadata.authors.map(\.familyName),
             publicationYear: candidate.metadata.publicationYear,

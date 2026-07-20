@@ -33,9 +33,9 @@ struct LibrarySidebarView: View {
         List(selection: $selection) {
             if contents.recent.isEmpty && contents.library.isEmpty {
                 ContentUnavailableView(
-                    hasSearchQuery ? "No Results" : "No Papers",
+                    hasSearchQuery ? "No Results" : "No Documents",
                     systemImage: hasSearchQuery ? "magnifyingglass" : "doc.text",
-                    description: Text(hasSearchQuery ? "Try another title, author, year, or note." : "Add a PDF to begin your library.")
+                    description: Text(hasSearchQuery ? "Try another title, creator, date, Collection, or note." : "Add a PDF to begin your library.")
                 )
             } else {
                 if !contents.recent.isEmpty {
@@ -74,10 +74,10 @@ struct LibrarySidebarView: View {
         .toolbar {
             ToolbarItemGroup(placement: .navigation) {
                 Button(action: onAddPapers) {
-                    Label("Add Papers", systemImage: "plus")
+                    Label("Add Documents", systemImage: "plus")
                 }
-                .accessibilityIdentifier("add-papers-button")
-                .help("Add Papers")
+                .accessibilityIdentifier("add-documents-button")
+                .help("Add Documents")
 
                 Menu {
                     Picker("Sort Library By", selection: $sortOrder) {
@@ -134,11 +134,11 @@ struct LibrarySidebarView: View {
             }
         }
         .tag(paper.id)
-        .accessibilityIdentifier("paper-row")
+        .accessibilityIdentifier("document-row")
         .accessibilityElement(children: .combine)
         .accessibilityLabel(paper.title)
         .accessibilityValue(paperAccessibilityValue(paper, presentation: sourcePresentation))
-        .accessibilityHint("Select to open this Paper")
+        .accessibilityHint("Select to open this Document")
         .contextMenu {
             Button("Get Info", systemImage: "info.circle") {
                 onGetInfo(paper.id)

@@ -140,6 +140,7 @@ struct PaperInfoAuthorCreditDraft: Equatable, Identifiable {
 }
 
 struct PaperInfoReadOnlyDetails: Equatable {
+    let documentKind: DocumentKind
     let sourceStatus: String
     let storage: String
     let sourceFilename: String
@@ -148,6 +149,7 @@ struct PaperInfoReadOnlyDetails: Equatable {
     let sourceState: PaperSourceState
 
     init(paper: Paper) {
+        documentKind = paper.kind
         storageMode = paper.storageMode
         sourceState = paper.sourceState
         sourceStatus = switch paper.sourceState {
@@ -191,6 +193,14 @@ final class PaperInfoWorkflow {
     var hasChanges: Bool {
         guard let originalSnapshot else { return false }
         return draft != PaperInfoDraft(snapshot: originalSnapshot)
+    }
+
+    var documentKind: DocumentKind {
+        readOnlyDetails?.documentKind ?? .generalDocument
+    }
+
+    var showsResearchMetadata: Bool {
+        documentKind == .researchPaper
     }
 
     var reparseProposal: PaperInfoReparseProposal? {
@@ -346,7 +356,7 @@ final class PaperInfoWorkflow {
             )
             guard isCurrentReparse(requestID: requestID, paperID: requestedPaperID) else { return }
             refreshReadOnlyDetails(repository: repository)
-            reviewReparsedMetadata(parsed)
+            reviewReparsedMetadata(metadataForCurrentDocument(parsed))
         } catch is CancellationError {
             guard isCurrentReparse(requestID: requestID, paperID: requestedPaperID) else { return }
             reparseState = .idle
@@ -356,6 +366,25 @@ final class PaperInfoWorkflow {
             reparseState = .idle
             reparseErrorMessage = reparseErrorDescription(error)
         }
+    }
+
+    private func metadataForCurrentDocument(
+        _ metadata: ParsedPaperMetadata
+    ) -> ParsedPaperMetadata {
+        guard !showsResearchMetadata else { return metadata }
+        return ParsedPaperMetadata(
+            title: metadata.title,
+            titleProvenance: metadata.titleProvenance,
+            authors: metadata.authors.filter { $0.provenance == .embeddedMetadata },
+            publicationYear: metadata.publicationYearProvenance == .embeddedMetadata
+                ? metadata.publicationYear
+                : nil,
+            publicationYearProvenance: metadata.publicationYearProvenance == .embeddedMetadata
+                ? metadata.publicationYearProvenance
+                : nil,
+            pageCount: metadata.pageCount,
+            hasSelectableText: metadata.hasSelectableText
+        )
     }
 
     func reviewReparsedMetadata(_ parsed: ParsedPaperMetadata) {
@@ -428,6 +457,17 @@ final class PaperInfoWorkflow {
         let title = MetadataValidator.usableTitle(update.title) ?? update.title
         let doi = MetadataValidator.normalizedDOI(update.doi)
         let arxivID = MetadataValidator.normalizedArxivID(update.arxivID)
+        let documentDate = update.publicationYear == originalSnapshot.publicationYear
+            ? originalSnapshot.documentDate
+            : update.publicationYear.flatMap { DocumentDate(year: $0) }
+        let documentDateProvenance = optionalProvenance(
+            field: .publicationYear,
+            value: update.publicationYear,
+            originalValue: originalSnapshot.publicationYear,
+            originalProvenance: originalSnapshot.documentDateProvenance,
+            reparsedValue: acceptedReparsedMetadata[.publicationYear]?.publicationYear,
+            reparsedProvenance: acceptedReparsedMetadata[.publicationYear]?.publicationYearProvenance
+        )
 
         return PaperInfoSnapshot(
             paperID: paperID,
@@ -441,15 +481,8 @@ final class PaperInfoWorkflow {
                     .map { PaperInfoMetadataNormalization.title($0.title) },
                 reparsedProvenance: acceptedReparsedMetadata[.title]?.titleProvenance
             ),
-            publicationYear: update.publicationYear,
-            publicationYearProvenance: optionalProvenance(
-                field: .publicationYear,
-                value: update.publicationYear,
-                originalValue: originalSnapshot.publicationYear,
-                originalProvenance: originalSnapshot.publicationYearProvenance,
-                reparsedValue: acceptedReparsedMetadata[.publicationYear]?.publicationYear,
-                reparsedProvenance: acceptedReparsedMetadata[.publicationYear]?.publicationYearProvenance
-            ),
+            documentDate: documentDate,
+            documentDateProvenance: documentDateProvenance,
             doi: update.doi,
             doiProvenance: identifierProvenance(
                 field: .doi,
@@ -625,7 +658,7 @@ final class PaperInfoWorkflow {
         case .sourceMissing:
             "Locate the missing Source PDF before reparsing metadata."
         case .sourceChanged:
-            "The Source PDF no longer matches this Paper. Locate the original before reparsing metadata."
+            "The Source PDF no longer matches this Document. Locate the original before reparsing metadata."
         case .libraryCopyMissing:
             "Restore the missing Canopy-managed Source PDF before reparsing metadata."
         }

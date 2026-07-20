@@ -52,6 +52,7 @@ struct CanopyCoreTests {
         let existing = PaperIdentitySnapshot(
             id: UUID(),
             fingerprint: Data(repeating: 1, count: 32),
+            kind: .researchPaper,
             title: "A Canopy Study: Results",
             authorFamilyNames: ["Smith"],
             publicationYear: 2025,
@@ -77,26 +78,26 @@ struct CanopyCoreTests {
             title: "Different title",
             titleProvenance: .firstPage,
             doi: "https://doi.org/10.1000/CANOPY"
-        ))).run(urls: [doiFile.url], existingPapers: [existing])
+        ))).run(urls: [doiFile.url], existingPapers: [existing], documentKind: .researchPaper)
         let arxivResult = try AddBatchPreflight(analyzer: StubDocumentAnalyzer(metadata: .init(
             title: "Different title",
             titleProvenance: .firstPage,
             arxivID: "arXiv:2401.12345v9"
-        ))).run(urls: [arxivFile.url], existingPapers: [existing])
+        ))).run(urls: [arxivFile.url], existingPapers: [existing], documentKind: .researchPaper)
         let titleAuthorResult = try AddBatchPreflight(analyzer: StubDocumentAnalyzer(metadata: .init(
             title: "A canopy study results",
             titleProvenance: .firstPage,
             authors: [.init(displayName: "Jamie Smith", familyName: "Smith", provenance: .firstPage)]
-        ))).run(urls: [titleAuthorFile.url], existingPapers: [existing])
+        ))).run(urls: [titleAuthorFile.url], existingPapers: [existing], documentKind: .researchPaper)
         let titleYearResult = try AddBatchPreflight(analyzer: StubDocumentAnalyzer(metadata: .init(
             title: "A canopy study results",
             titleProvenance: .firstPage,
             publicationYear: 2025
-        ))).run(urls: [titleYearFile.url], existingPapers: [existing])
+        ))).run(urls: [titleYearFile.url], existingPapers: [existing], documentKind: .researchPaper)
         let titleOnlyResult = try AddBatchPreflight(analyzer: StubDocumentAnalyzer(metadata: .init(
             title: "A canopy study results",
             titleProvenance: .firstPage
-        ))).run(urls: [titleOnlyFile.url], existingPapers: [existing])
+        ))).run(urls: [titleOnlyFile.url], existingPapers: [existing], documentKind: .researchPaper)
 
         #expect(doiResult.potentialDuplicates.count == 1)
         #expect(arxivResult.potentialDuplicates.count == 1)
@@ -113,6 +114,7 @@ struct CanopyCoreTests {
         let doiMatch = PaperIdentitySnapshot(
             id: doiMatchID,
             fingerprint: Data(repeating: 1, count: 32),
+            kind: .researchPaper,
             title: "A different study",
             authorFamilyNames: [],
             publicationYear: 2024,
@@ -124,6 +126,7 @@ struct CanopyCoreTests {
         let titleAndYearMatch = PaperIdentitySnapshot(
             id: titleAndYearMatchID,
             fingerprint: Data(repeating: 2, count: 32),
+            kind: .researchPaper,
             title: "A Canopy Study",
             authorFamilyNames: [],
             publicationYear: 2026,
@@ -146,7 +149,8 @@ struct CanopyCoreTests {
 
         let result = try AddBatchPreflight(analyzer: analyzer).run(
             urls: [fixture.url],
-            existingPapers: [doiMatch, titleAndYearMatch]
+            existingPapers: [doiMatch, titleAndYearMatch],
+            documentKind: .researchPaper
         )
 
         let duplicate = try #require(result.potentialDuplicates.first)
@@ -162,7 +166,11 @@ struct CanopyCoreTests {
         defer { first.remove(); second.remove() }
         let analyzer = StubDocumentAnalyzer(metadata: .init(title: "Same Paper", titleProvenance: .firstPage))
 
-        let result = try AddBatchPreflight(analyzer: analyzer).run(urls: [first.url, second.url], existingPapers: [])
+        let result = try AddBatchPreflight(analyzer: analyzer).run(
+            urls: [first.url, second.url],
+            existingPapers: [],
+            documentKind: .researchPaper
+        )
 
         #expect(result.ready.count == 1)
         #expect(result.withinBatchExactDuplicates.count == 1)
@@ -184,7 +192,11 @@ struct CanopyCoreTests {
             hasSelectableText: true
         ))
 
-        let result = try AddBatchPreflight(analyzer: analyzer).run(urls: [first.url, second.url], existingPapers: [])
+        let result = try AddBatchPreflight(analyzer: analyzer).run(
+            urls: [first.url, second.url],
+            existingPapers: [],
+            documentKind: .researchPaper
+        )
 
         #expect(result.ready.count == 1)
         #expect(result.potentialDuplicates.count == 1)
@@ -214,7 +226,7 @@ struct CanopyCoreTests {
     }
 
     @MainActor
-    @Test("repository adds an approved referenced candidate as one complete Paper")
+    @Test("repository adds an approved referenced candidate as one complete Research Paper")
     func repositoryAddsReferencedPaper() throws {
         let container = try CanopyModelContainer.make(inMemory: true)
         let repository = LibraryRepository(container: container)
@@ -239,7 +251,8 @@ struct CanopyCoreTests {
 
         let paper = try repository.add(
             candidate,
-            source: .referenced(bookmarkData: Data([1, 2, 3]), rememberedLocation: "/Research/approved.pdf")
+            source: .referenced(bookmarkData: Data([1, 2, 3]), rememberedLocation: "/Research/approved.pdf"),
+            kind: .researchPaper
         )
 
         #expect(paper.title == "Approved Paper")

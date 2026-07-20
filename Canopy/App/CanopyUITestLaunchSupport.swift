@@ -26,7 +26,7 @@ struct CanopyUITestLibraryConfiguration {
         URL.applicationSupportDirectory
             .appendingPathComponent("CanopyUITests", isDirectory: true)
             .appendingPathComponent("InvalidConfiguration", isDirectory: true)
-            .appendingPathComponent("CanopyV1.store")
+            .appendingPathComponent("CanopyWorkspaceV1.store")
     }
 
     let directoryURL: URL
@@ -34,7 +34,7 @@ struct CanopyUITestLibraryConfiguration {
     let resetsBeforeOpening: Bool
     let cleansBeforeOpening: Bool
 
-    func materializeAddPapersFixture() -> URL? {
+    func materializeAddDocumentsFixture() -> URL? {
         let environment = ProcessInfo.processInfo.environment
         guard let encoded = environment["CANOPY_UI_TEST_PDF_BASE64"],
               let data = Data(base64Encoded: encoded) else {
@@ -58,7 +58,7 @@ struct CanopyUITestLibraryConfiguration {
         directoryURL = URL.applicationSupportDirectory
             .appendingPathComponent("CanopyUITests", isDirectory: true)
             .appendingPathComponent(identifier.uuidString, isDirectory: true)
-        storeURL = directoryURL.appendingPathComponent("CanopyV1.store")
+        storeURL = directoryURL.appendingPathComponent("CanopyWorkspaceV1.store")
         self.resetsBeforeOpening = resetsBeforeOpening
         self.cleansBeforeOpening = cleansBeforeOpening
     }

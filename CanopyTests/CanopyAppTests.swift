@@ -16,16 +16,16 @@ struct CanopyAppTests {
 
     @Test("Paper commands disable find navigation until the reader has matches")
     func paperCommandAvailability() {
-        let withoutMatches = PaperCommand.availableReaderCommands(hasFindMatches: false)
-        let withMatches = PaperCommand.availableReaderCommands(hasFindMatches: true)
-        let withoutSelectableText = PaperCommand.availableReaderCommands(
+        let withoutMatches = DocumentCommand.availableReaderCommands(hasFindMatches: false)
+        let withMatches = DocumentCommand.availableReaderCommands(hasFindMatches: true)
+        let withoutSelectableText = DocumentCommand.availableReaderCommands(
             hasFindMatches: false,
             hasSelectableText: false
         )
 
         #expect(withoutMatches.contains(.focusFind))
         #expect(withoutMatches.contains(.zoomIn))
-        #expect(withoutMatches.contains(.toggleAnnotations))
+        #expect(withoutMatches.contains(.toggleInspector))
         #expect(!withoutMatches.contains(.nextFindMatch))
         #expect(!withoutMatches.contains(.previousFindMatch))
         #expect(withMatches.contains(.nextFindMatch))
@@ -276,11 +276,13 @@ struct CanopyAppTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let pdf = directory.appendingPathComponent("paper.pdf")
         try Data("fixture".utf8).write(to: pdf)
-        let workflow = AddPapersWorkflow()
+        let workflow = AddDocumentsWorkflow()
 
         workflow.prepare(urls: [pdf])
 
         #expect(workflow.pendingURLs == [pdf])
+        #expect(workflow.documentKind == .generalDocument)
+        #expect(workflow.destinationCollectionID == nil)
         #expect(workflow.storageChoice == .referenced)
         #expect(workflow.isStorageChoicePresented)
     }
@@ -295,13 +297,13 @@ struct CanopyAppTests {
         let pdf = directory.appendingPathComponent("large.pdf")
         try Data(repeating: 7, count: 8 * 1_024 * 1_024).write(to: pdf)
         let repository = LibraryRepository(container: try CanopyModelContainer.make(inMemory: true))
-        let workflow = AddPapersWorkflow()
+        let workflow = AddDocumentsWorkflow()
         workflow.prepare(urls: [pdf])
 
         workflow.start(repository: repository)
-        #expect(workflow.canCancelCheckingPapers)
+        #expect(workflow.canCancelCheckingDocuments)
         #expect(!workflow.isProgressPresented)
-        workflow.cancelCheckingPapers()
+        workflow.cancelCheckingDocuments()
         try await Task.sleep(for: .milliseconds(100))
 
         #expect(try repository.paperIdentitySnapshots().isEmpty)
@@ -373,7 +375,7 @@ struct CanopyAppTests {
     @MainActor
     @Test("opening an existing duplicate uses the owning window callback")
     func openingExistingDuplicateUsesCallback() throws {
-        let workflow = AddPapersWorkflow()
+        let workflow = AddDocumentsWorkflow()
         let paperID = UUID()
         let item = AddBatchSummaryItem(
             kind: .duplicate,
@@ -664,6 +666,37 @@ struct CanopyAppTests {
         #expect(update.publicationYear == nil)
         #expect(update.doi == nil)
         #expect(update.arxivID == nil)
+    }
+
+    @MainActor
+    @Test("Document Info preserves month and day precision during unrelated edits")
+    func documentInfoWorkflowPreservesDatePrecision() throws {
+        let repository = LibraryRepository(
+            container: try CanopyModelContainer.make(inMemory: true)
+        )
+        let date = try #require(DocumentDate(year: 2026, month: 7, day: 20))
+        let document = Document(
+            fingerprint: Data(repeating: 65, count: 32),
+            title: "Lecture Notes",
+            titleProvenance: .firstPage,
+            publicationYearProvenance: .embeddedMetadata,
+            kind: .classNotes,
+            documentDate: date,
+            storageMode: .referenced,
+            sourceFilename: "lecture-notes.pdf",
+            sourceFileSize: 100
+        )
+        try repository.insert(document)
+        let workflow = PaperInfoWorkflow()
+        try workflow.present(paperID: document.id, repository: repository)
+        workflow.draft.title = "Edited Lecture Notes"
+
+        let target = try workflow.makeTargetSnapshot()
+        #expect(target.documentDate == date)
+        #expect(target.documentDateProvenance == .embeddedMetadata)
+
+        _ = try repository.applyPaperInfoSnapshot(target)
+        #expect(try repository.document(id: document.id)?.documentDate == date)
     }
 
     @Test("Paper Info stages ordered Author Credit edits and preserves family-name corrections")
@@ -1408,6 +1441,68 @@ struct CanopyAppTests {
         undoManager.redo()
         #expect(try repository.paper(id: paper.id) == nil)
         #expect(!FileManager.default.fileExists(atPath: sourceURL.path))
+        #expect(errors.isEmpty)
+    }
+
+    @MainActor
+    @Test("bulk Document removal participates in one atomic native Undo and Redo")
+    func bulkDocumentRemovalUndoRedo() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let firstSourceURL = directory.appendingPathComponent("first.pdf")
+        let secondSourceURL = directory.appendingPathComponent("second.pdf")
+        try Data("first".utf8).write(to: firstSourceURL)
+        try Data("second".utf8).write(to: secondSourceURL)
+        let managedStore = ManagedPaperStore(rootURL: directory)
+        let repository = LibraryRepository(container: try CanopyModelContainer.make(inMemory: true))
+        let first = Document(
+            fingerprint: Data(repeating: 41, count: 32),
+            title: "First Bulk Document",
+            storageMode: .managedCopy,
+            managedRelativePath: "first.pdf",
+            sourceFilename: "first.pdf",
+            sourceFileSize: 5
+        )
+        let second = Document(
+            fingerprint: Data(repeating: 42, count: 32),
+            title: "Second Bulk Document",
+            storageMode: .managedCopy,
+            managedRelativePath: "second.pdf",
+            sourceFilename: "second.pdf",
+            sourceFileSize: 6
+        )
+        try repository.insert(first)
+        try repository.insert(second)
+        let snapshots = try repository.removeDocuments(
+            documentIDs: [first.id, second.id],
+            managedStore: managedStore
+        )
+        let undoManager = UndoManager()
+        let undoTarget = PaperRemovalUndoTarget()
+        var errors: [Error] = []
+        PaperRemovalUndo.register(
+            snapshots: snapshots,
+            repository: repository,
+            managedStore: managedStore,
+            target: undoTarget,
+            undoManager: undoManager,
+            onError: { errors.append($0) }
+        )
+
+        #expect(undoManager.undoActionName == "Remove Documents")
+        undoManager.undo()
+        #expect(try repository.paper(id: first.id) != nil)
+        #expect(try repository.paper(id: second.id) != nil)
+        #expect(FileManager.default.fileExists(atPath: firstSourceURL.path))
+        #expect(FileManager.default.fileExists(atPath: secondSourceURL.path))
+
+        undoManager.redo()
+        #expect(try repository.paper(id: first.id) == nil)
+        #expect(try repository.paper(id: second.id) == nil)
+        #expect(!FileManager.default.fileExists(atPath: firstSourceURL.path))
+        #expect(!FileManager.default.fileExists(atPath: secondSourceURL.path))
         #expect(errors.isEmpty)
     }
 

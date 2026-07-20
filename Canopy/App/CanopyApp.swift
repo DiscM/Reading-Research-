@@ -39,6 +39,7 @@ private struct CanopyContentRoot: View {
                 ContentView(
                     managedCopyReconciliationWarning: startup.managedCopyReconciliationWarning,
                     isRetryingManagedCopyReconciliation: startup.isRetryingManagedCopyReconciliation,
+                    indexDatabaseURL: startup.indexDatabaseURL,
                     onRetryManagedCopyReconciliation: startup.retryManagedCopyReconciliation
                 )
                 .modelContainer(container)
@@ -79,6 +80,10 @@ private final class CanopyStartupController {
     private let storeURL: URL
     private let usesInMemoryStore: Bool
     private let isUITestMode: Bool
+
+    var indexDatabaseURL: URL {
+        storeURL.deletingLastPathComponent().appendingPathComponent("PDFTextIndex.sqlite")
+    }
 
     init() {
         #if DEBUG
@@ -211,37 +216,79 @@ private struct CanopyLibraryRecoveryView: View {
 }
 
 private struct CanopyCommands: Commands {
-    @FocusedValue(\.addPapersCommandAction) private var addPapersCommandAction
-    @FocusedValue(\.paperInfoCommandAction) private var paperInfoCommandAction
-    @FocusedValue(\.paperCommandContext) private var paperCommandContext
+    @FocusedValue(\.addDocumentsCommandAction) private var addDocumentsCommandAction
+    @FocusedValue(\.documentInfoCommandAction) private var documentInfoCommandAction
+    @FocusedValue(\.documentCommandContext) private var documentCommandContext
+    @FocusedValue(\.workspaceCommandContext) private var workspaceCommandContext
     private var accessibilityPreferences = CanopyAccessibilityPreferences()
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Button("Add Papers…") {
-                addPapersCommandAction?.perform()
+            Button("Add Documents…") {
+                addDocumentsCommandAction?.perform()
             }
             .keyboardShortcut("o")
-            .disabled(addPapersCommandAction == nil)
+            .disabled(addDocumentsCommandAction == nil)
+        }
+        CommandGroup(after: .textEditing) {
+            Button(canPerform(.focusFind) ? "Find in Document…" : "Find in Workspace…") {
+                if canPerform(.focusFind) {
+                    documentCommandContext?.perform(.focusFind)
+                } else {
+                    workspaceCommandContext?.perform(.focusContextualSearch)
+                }
+            }
+            .keyboardShortcut("f")
+            .disabled(!canPerform(.focusFind) && workspaceCommandContext == nil)
+        }
+        CommandGroup(after: .sidebar) {
+            Button("Show or Hide Navigation") {
+                workspaceCommandContext?.perform(.toggleNavigationSidebar)
+            }
+            .keyboardShortcut("1", modifiers: [.command, .option])
+            .disabled(workspaceCommandContext == nil)
+
+            Button("Show or Hide Document List") {
+                workspaceCommandContext?.perform(.toggleDocumentList)
+            }
+            .keyboardShortcut("2", modifiers: [.command, .option])
+            .disabled(workspaceCommandContext == nil)
+
+            Button("Show or Hide Inspector") {
+                workspaceCommandContext?.perform(.toggleInspector)
+            }
+            .keyboardShortcut("3", modifiers: [.command, .option])
+            .disabled(workspaceCommandContext == nil)
+
+            Button("Show Overview Inspector") {
+                workspaceCommandContext?.perform(.showOverview)
+            }
+            .disabled(workspaceCommandContext == nil)
+
+            Button("Show Annotations Inspector") {
+                workspaceCommandContext?.perform(.showAnnotations)
+            }
+            .disabled(workspaceCommandContext == nil)
 
             Divider()
 
-            Button("Get Info") {
-                paperInfoCommandAction?.perform()
+            Button("Search Workspace") {
+                workspaceCommandContext?.perform(.focusSearch)
+            }
+            .keyboardShortcut("f", modifiers: [.command, .shift])
+            .disabled(workspaceCommandContext == nil)
+        }
+        CommandMenu("Document") {
+            Button("Get Info…") {
+                documentInfoCommandAction?.perform()
             }
             .keyboardShortcut("i")
-            .disabled(paperInfoCommandAction == nil)
-        }
-        CommandGroup(after: .textEditing) {
-            Button("Find in Paper…") {
-                paperCommandContext?.perform(.focusFind)
-            }
-            .keyboardShortcut("f")
-            .disabled(!canPerform(.focusFind))
-        }
-        CommandMenu("Paper") {
+            .disabled(documentInfoCommandAction == nil)
+
+            Divider()
+
             Button("Area Annotation…") {
-                paperCommandContext?.perform(.startAreaAnnotation)
+                documentCommandContext?.perform(.startAreaAnnotation)
             }
             .keyboardShortcut("a", modifiers: [.command, .shift])
             .disabled(!canPerform(.startAreaAnnotation))
@@ -249,13 +296,13 @@ private struct CanopyCommands: Commands {
             Divider()
 
             Button("Find Next") {
-                paperCommandContext?.perform(.nextFindMatch)
+                documentCommandContext?.perform(.nextFindMatch)
             }
             .keyboardShortcut("g")
             .disabled(!canPerform(.nextFindMatch))
 
             Button("Find Previous") {
-                paperCommandContext?.perform(.previousFindMatch)
+                documentCommandContext?.perform(.previousFindMatch)
             }
             .keyboardShortcut("g", modifiers: [.command, .shift])
             .disabled(!canPerform(.previousFindMatch))
@@ -263,25 +310,25 @@ private struct CanopyCommands: Commands {
             Divider()
 
             Button("Zoom In") {
-                paperCommandContext?.perform(.zoomIn)
+                documentCommandContext?.perform(.zoomIn)
             }
             .keyboardShortcut("+")
             .disabled(!canPerform(.zoomIn))
 
             Button("Zoom Out") {
-                paperCommandContext?.perform(.zoomOut)
+                documentCommandContext?.perform(.zoomOut)
             }
             .keyboardShortcut("-")
             .disabled(!canPerform(.zoomOut))
 
             Button("Actual Size") {
-                paperCommandContext?.perform(.actualSize)
+                documentCommandContext?.perform(.actualSize)
             }
             .keyboardShortcut("0")
             .disabled(!canPerform(.actualSize))
 
             Button("Fit Width") {
-                paperCommandContext?.perform(.fitWidth)
+                documentCommandContext?.perform(.fitWidth)
             }
             .keyboardShortcut("2")
             .disabled(!canPerform(.fitWidth))
@@ -289,10 +336,10 @@ private struct CanopyCommands: Commands {
             Divider()
 
             Button("Show or Hide Annotations") {
-                paperCommandContext?.perform(.toggleAnnotations)
+                documentCommandContext?.perform(.toggleInspector)
             }
             .keyboardShortcut("i", modifiers: [.command, .option])
-            .disabled(!canPerform(.toggleAnnotations))
+            .disabled(!canPerform(.toggleInspector))
         }
         CommandMenu("Accessibility") {
             Picker("Appearance", selection: accessibilityPreferences.appearanceModeSelection) {
@@ -318,7 +365,7 @@ private struct CanopyCommands: Commands {
         }
     }
 
-    private func canPerform(_ command: PaperCommand) -> Bool {
-        paperCommandContext?.canPerform(command) == true
+    private func canPerform(_ command: DocumentCommand) -> Bool {
+        documentCommandContext?.canPerform(command) == true
     }
 }

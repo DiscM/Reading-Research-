@@ -10,7 +10,7 @@ struct PaperInfoReparseReviewView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Choose each value to use, review your choices, then select Done. Nothing is saved until you save Paper Info.")
+            Text("Choose each value to use, review your choices, then select Done. Nothing is saved until you save Document Info.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
 

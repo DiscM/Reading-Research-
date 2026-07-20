@@ -1,0 +1,3 @@
+# Index PDF content in the background by content identity
+
+Canopy builds its offline full-text index asynchronously after a Document is added, keys reusable index data by the Source PDF fingerprint and an index-format version, and resumes incomplete work without blocking intake or reading. This trades immediate body-text search for a responsive Add Documents workflow while ensuring exact duplicates share work and genuinely changed PDF bytes never silently replace indexed content. Indexed matches remain locally searchable when a referenced source is unavailable, but navigation requires source recovery. Removing the final Document for a fingerprint durably queues its index deletion; background reconciliation completes that deletion after a relaunch if necessary.
