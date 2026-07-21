@@ -149,6 +149,7 @@ struct WorkspaceOverviewInspectorView: View {
 
             TextField("Find a Collection", text: $membershipSearchText)
                 .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: .infinity)
 
             ScrollView {
                 LazyVStack(spacing: 2) {
@@ -272,6 +273,7 @@ private struct WorkspaceDocumentNoteEditor: View {
             }
         }
         .frame(minHeight: 120)
+        .frame(maxWidth: .infinity)
         .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
         .overlay {
             RoundedRectangle(cornerRadius: 8)
@@ -321,6 +323,7 @@ private struct WorkspaceDocumentDateEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             TextField(label, text: $draft, prompt: Text("YYYY, YYYY-MM, or YYYY-MM-DD"))
+                .frame(maxWidth: .infinity)
                 .focused($isFocused)
                 .onSubmit(commitDraft)
                 .onChange(of: draft) { _, _ in
@@ -340,12 +343,14 @@ private struct WorkspaceDocumentDateEditor: View {
                 Label(validationMessage, systemImage: "exclamationmark.triangle")
                     .font(.caption)
                     .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
             } else {
                 Text("Enter only the precision you know.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
         .onDisappear(perform: commitDraft)
     }

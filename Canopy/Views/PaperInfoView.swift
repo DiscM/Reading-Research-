@@ -304,7 +304,7 @@ struct PaperInfoView: View {
         LabeledContent(label) {
             VStack(alignment: .trailing, spacing: 3) {
                 TextField(label, text: text)
-                    .frame(minWidth: 300)
+                    .frame(maxWidth: .infinity)
                     .multilineTextAlignment(.leading)
                 if let provenance {
                     Text(provenance.displayName)
@@ -433,7 +433,7 @@ private struct PaperInfoAuthorCreditRow: View {
             VStack(alignment: .leading, spacing: 5) {
                 LabeledContent("Family Name") {
                     TextField("Family Name", text: $familyName)
-                        .frame(minWidth: 260)
+                        .frame(maxWidth: .infinity)
                 }
                 Text("Used for duplicate matching.")
                     .font(.caption)
@@ -458,6 +458,7 @@ private struct PaperInfoAuthorCreditRow: View {
                     .frame(width: 24, alignment: .trailing)
                 VStack(alignment: .leading, spacing: 2) {
                     TextField("Display Name", text: $displayName)
+                        .frame(maxWidth: .infinity)
                         .focused(displayNameFocus, equals: id)
                     if displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Text("Display Name is required.")
@@ -469,6 +470,7 @@ private struct PaperInfoAuthorCreditRow: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 Button(role: .destructive, action: onRemove) {
                     Label("Remove Author Credit", systemImage: "minus.circle")
                         .labelStyle(.iconOnly)

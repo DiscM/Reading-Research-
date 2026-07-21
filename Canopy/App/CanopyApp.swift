@@ -15,7 +15,7 @@ struct CanopyApp: App {
                 accessibilityOverrides: accessibilityPreferences.overrides
             )
         }
-        .defaultSize(width: 1200, height: 760)
+        .defaultSize(width: 1404, height: 800)
         .windowResizability(.contentMinSize)
         .commands {
             CanopyCommands()
@@ -28,6 +28,9 @@ private struct CanopyContentRoot: View {
     let accessibilityOverrides: CanopyAccessibilityOverrides
 
     @Environment(\.colorSchemeContrast) private var systemColorSchemeContrast
+    @AppStorage("workspace.navigationPresented") private var navigationPresented = true
+    @AppStorage("workspace.documentListPresented") private var documentListPresented = true
+    @AppStorage("workspace.inspectorPresented") private var inspectorPresented = true
     @State private var startup = CanopyStartupController()
 
     var body: some View {
@@ -52,7 +55,7 @@ private struct CanopyContentRoot: View {
                 )
             }
         }
-        .frame(minWidth: 900, minHeight: 600)
+        .frame(minWidth: minimumWindowWidth, minHeight: 600)
         .environment(\.canopyAccessibilityOverrides, accessibilityOverrides)
         .contrast(appContrastAmount)
         .preferredColorScheme(appearanceMode.preferredColorScheme)
@@ -61,6 +64,14 @@ private struct CanopyContentRoot: View {
     private var appContrastAmount: Double {
         accessibilityOverrides.interfaceContrastAmount(
             systemIncreasedContrast: systemColorSchemeContrast == .increased
+        )
+    }
+
+    private var minimumWindowWidth: CGFloat {
+        WorkspaceLayoutMetrics.minimumWindowWidth(
+            navigationPresented: navigationPresented,
+            documentListPresented: documentListPresented,
+            inspectorPresented: inspectorPresented
         )
     }
 }

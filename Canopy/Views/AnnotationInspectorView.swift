@@ -329,8 +329,11 @@ private struct AnnotationRow: View {
                     "\(annotationKindName) · Page \(annotation.pageIndex + 1)",
                     systemImage: annotation.kind == .area ? "rectangle.dashed" : "highlighter"
                 )
-                    .font(.caption.weight(.semibold))
-                Spacer()
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .layoutPriority(1)
+                Spacer(minLength: 6)
                 Menu {
                     ForEach(HighlightColor.allCases, id: \.self) { color in
                         Button {
@@ -368,18 +371,15 @@ private struct AnnotationRow: View {
             TextField("Add a note", text: $draftNote, axis: .vertical)
                 .lineLimit(2...7)
                 .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
                 .focused($noteFocused)
                 .accessibilityIdentifier("annotation-note-field")
                 .accessibilityLabel("Note for \(annotationKindName.lowercased()) on page \(annotation.pageIndex + 1)")
                 .onSubmit { saveNote() }
 
-            HStack(spacing: 4) {
-                Text(annotation.updatedAt == annotation.createdAt ? "Created" : "Note edited")
-                Text(annotation.updatedAt, style: .relative)
-            }
-            .font(.caption2)
-            .foregroundStyle(.secondary)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 6)
         .task(id: draftNote) {
             guard draftNote != savedNote else { return }
@@ -431,6 +431,7 @@ private struct AnnotationRow: View {
                     )
             }
             .buttonStyle(.plain)
+            .frame(maxWidth: .infinity)
             .accessibilityIdentifier("text-highlight-quotation")
             .accessibilityLabel("Go to text highlight on page \(annotation.pageIndex + 1)")
             .accessibilityValue(annotation.textAnchor?.selectedText ?? "")
@@ -449,6 +450,7 @@ private struct AnnotationRow: View {
                 }
             }
             .buttonStyle(.plain)
+            .frame(maxWidth: .infinity)
             .accessibilityLabel("Go to Area Annotation on page \(annotation.pageIndex + 1)")
             .accessibilityHint("Centers and zooms the annotated region in the reader.")
         }

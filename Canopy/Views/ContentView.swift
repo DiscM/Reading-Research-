@@ -4,6 +4,31 @@ import SwiftData
 import SwiftUI
 import UniformTypeIdentifiers
 
+enum WorkspaceLayoutMetrics {
+    static let navigationWidth: CGFloat = 220
+    static let documentListWidth: CGFloat = 320
+    static let inspectorWidth: CGFloat = 320
+    static let readerMinimumWidth: CGFloat = 540
+    static let dividerWidth: CGFloat = 1
+
+    static func minimumWindowWidth(
+        navigationPresented: Bool,
+        documentListPresented: Bool,
+        inspectorPresented: Bool
+    ) -> CGFloat {
+        let visibleOptionalPaneCount = [
+            navigationPresented,
+            documentListPresented,
+            inspectorPresented
+        ].filter { $0 }.count
+        let optionalPaneWidth = (navigationPresented ? navigationWidth : 0)
+            + (documentListPresented ? documentListWidth : 0)
+            + (inspectorPresented ? inspectorWidth : 0)
+        let totalDividerWidth = CGFloat(visibleOptionalPaneCount) * Self.dividerWidth
+        return max(900, readerMinimumWidth + optionalPaneWidth + totalDividerWidth)
+    }
+}
+
 struct ContentView: View {
     let managedCopyReconciliationWarning: String?
     let isRetryingManagedCopyReconciliation: Bool
@@ -78,6 +103,15 @@ struct ContentView: View {
 
     var body: some View {
         workspaceDialogs
+            .fileImporter(
+                isPresented: $fileImporterPresented,
+                allowedContentTypes: [.pdf],
+                allowsMultipleSelection: true
+            ) { result in
+                if case let .success(urls) = result {
+                    workflow.prepare(urls: urls)
+                }
+            }
     }
 
     private var workspaceChrome: some View {
@@ -123,15 +157,6 @@ struct ContentView: View {
                 .help(inspectorPresented ? "Hide Inspector" : "Show Inspector")
                 .accessibilityIdentifier("toggle-annotations-button")
                 .accessibilityValue(inspectorPresented ? "Shown" : "Hidden")
-            }
-        }
-        .fileImporter(
-            isPresented: $fileImporterPresented,
-            allowedContentTypes: [.pdf],
-            allowsMultipleSelection: true
-        ) { result in
-            if case let .success(urls) = result {
-                workflow.prepare(urls: urls)
             }
         }
         .fileImporter(
@@ -308,74 +333,119 @@ struct ContentView: View {
     }
 
     private var workspaceShell: some View {
-        NavigationSplitView(columnVisibility: navigationColumnVisibility) {
-            WorkspaceNavigationSidebar(
-                selection: $navigationDestination,
-                counts: WorkspaceNavigationCounts(documents: workspaceDocumentItems),
-                collections: workspaceCollections,
-                onNewCollection: { presentCollectionEditor(for: nil) },
-                onRenameCollection: { collectionID in
-                    presentCollectionEditor(for: collectionID)
-                },
-                onDeleteCollection: presentCollectionDeletion,
-                onAddDocumentsToCollection: { documentIDs, collectionID in
-                    setDocuments(documentIDs, inCollection: collectionID, add: true)
-                },
-                onAddSourcePDFsToCollection: { urls, collectionID in
-                    workflow.prepare(urls: urls, destinationCollectionID: collectionID)
-                }
-            ) {
-                WorkspaceIndexFooterView(
-                    coordinator: indexCoordinator,
-                    documents: documents,
-                    onRetry: { fingerprint in
-                        indexCoordinator.retry(fingerprint: fingerprint, repository: repository)
-                    },
-                    onLocateSource: { documentID in
-                        performSourceRecoveryAction(.locateSource, documentID)
-                    }
-                )
+        HStack(spacing: 0) {
+            if navigationPresented {
+                navigationSidebar
+                    .frame(width: WorkspaceLayoutMetrics.navigationWidth)
+                    .clipped()
+                workspaceDivider
             }
-            .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 300)
-            .background(SplitViewAutosaveBridge(name: "Canopy.NavigationSplit"))
-        } detail: {
-            NavigationSplitView(columnVisibility: documentListColumnVisibility) {
-                WorkspaceDocumentListView(
-                    title: documentListTitle,
-                    documents: workspaceDocumentItems,
-                    destination: activeNavigationDestination,
-                    selection: $selectedDocumentIDs,
-                    searchText: $workspaceSearchText,
-                    searchFocusRequest: $workspaceSearchFocusRequest,
-                    selectedKinds: $selectedKinds,
-                    sort: $documentSort,
-                    onAddDocuments: presentAddDocuments,
-                    onSearchSubmitted: { _, _ in },
-                    onSearchAllDocuments: { query in
-                        selectionSearchDocumentIDs = nil
-                        workspaceSearchText = query
-                        navigationDestination = .allDocuments
-                    },
-                    onGetInfo: presentPaperInfo,
-                    onAttentionAction: performAttentionAction,
-                    onRequestRemoval: requestDocumentRemoval,
-                    searchGroups: workspaceSearchGroups,
-                    searchScopeDescription: workspaceSearchScopeDescription,
-                    canExpandSearchToAllDocuments: selectionSearchDocumentIDs != nil
-                        || activeNavigationDestination != .allDocuments,
-                    onActivateSearchHit: activateSearchHit
+
+            if documentListPresented {
+                documentList
+                    .frame(width: WorkspaceLayoutMetrics.documentListWidth)
+                    .clipped()
+                workspaceDivider
+            }
+
+            readerCanvas
+                .frame(
+                    minWidth: WorkspaceLayoutMetrics.readerMinimumWidth,
+                    maxWidth: .infinity,
+                    maxHeight: .infinity
                 )
-                .navigationSplitViewColumnWidth(min: 240, ideal: 320, max: 440)
-                .background(SplitViewAutosaveBridge(name: "Canopy.DocumentListSplit"))
-            } detail: {
-                readerCanvas
-                    .inspector(isPresented: $inspectorPresented) {
-                        workspaceInspector
-                            .inspectorColumnWidth(min: 260, ideal: 320, max: 420)
-                            .background(SplitViewAutosaveBridge(name: "Canopy.InspectorSplit"))
-                    }
+                .layoutPriority(1)
+
+            if inspectorPresented {
+                workspaceDivider
+                workspaceInspector
+                    .frame(width: WorkspaceLayoutMetrics.inspectorWidth)
+                    .background(.background)
+                    .clipped()
+                    .accessibilityIdentifier("workspace-inspector")
             }
         }
+        .animation(nil, value: navigationPresented)
+        .animation(nil, value: documentListPresented)
+        .animation(nil, value: inspectorPresented)
+        .frame(minWidth: workspaceMinimumWidth)
+    }
+
+    private var workspaceDivider: some View {
+        Rectangle()
+            .fill(Color(nsColor: .separatorColor))
+            .frame(width: WorkspaceLayoutMetrics.dividerWidth)
+            .accessibilityHidden(true)
+    }
+
+    /// Keeps every explicitly presented pane usable while allowing a compact
+    /// reader window as optional panes are collapsed.
+    private var workspaceMinimumWidth: CGFloat {
+        WorkspaceLayoutMetrics.minimumWindowWidth(
+            navigationPresented: navigationPresented,
+            documentListPresented: documentListPresented,
+            inspectorPresented: inspectorPresented
+        )
+    }
+
+    private var navigationSidebar: some View {
+        WorkspaceNavigationSidebar(
+            selection: $navigationDestination,
+            counts: WorkspaceNavigationCounts(documents: workspaceDocumentItems),
+            collections: workspaceCollections,
+            onNewCollection: { presentCollectionEditor(for: nil) },
+            onRenameCollection: { collectionID in
+                presentCollectionEditor(for: collectionID)
+            },
+            onDeleteCollection: presentCollectionDeletion,
+            onAddDocumentsToCollection: { documentIDs, collectionID in
+                setDocuments(documentIDs, inCollection: collectionID, add: true)
+            },
+            onAddSourcePDFsToCollection: { urls, collectionID in
+                workflow.prepare(urls: urls, destinationCollectionID: collectionID)
+            }
+        ) {
+            WorkspaceIndexFooterView(
+                coordinator: indexCoordinator,
+                documents: documents,
+                onRetry: { fingerprint in
+                    indexCoordinator.retry(fingerprint: fingerprint, repository: repository)
+                },
+                onLocateSource: { documentID in
+                    performSourceRecoveryAction(.locateSource, documentID)
+                }
+            )
+        }
+        .accessibilityIdentifier("workspace-navigation-sidebar")
+    }
+
+    private var documentList: some View {
+        WorkspaceDocumentListView(
+            title: documentListTitle,
+            documents: workspaceDocumentItems,
+            destination: activeNavigationDestination,
+            selection: $selectedDocumentIDs,
+            searchText: $workspaceSearchText,
+            searchFocusRequest: $workspaceSearchFocusRequest,
+            selectedKinds: $selectedKinds,
+            sort: $documentSort,
+            onAddDocuments: presentAddDocuments,
+            onSearchSubmitted: { _, _ in },
+            onSearchAllDocuments: { query in
+                selectionSearchDocumentIDs = nil
+                workspaceSearchText = query
+                navigationDestination = .allDocuments
+            },
+            onGetInfo: presentPaperInfo,
+            onAttentionAction: performAttentionAction,
+            onRequestRemoval: requestDocumentRemoval,
+            searchGroups: workspaceSearchGroups,
+            searchScopeDescription: workspaceSearchScopeDescription,
+            canExpandSearchToAllDocuments: selectionSearchDocumentIDs != nil
+                || activeNavigationDestination != .allDocuments,
+            onActivateSearchHit: activateSearchHit
+        )
+        .accessibilityIdentifier("workspace-document-list")
     }
 
     @ViewBuilder
@@ -581,20 +651,6 @@ struct ContentView: View {
             }
         }
         return hasher.finalize()
-    }
-
-    private var navigationColumnVisibility: Binding<NavigationSplitViewVisibility> {
-        Binding(
-            get: { navigationPresented ? .all : .detailOnly },
-            set: { navigationPresented = $0 != .detailOnly }
-        )
-    }
-
-    private var documentListColumnVisibility: Binding<NavigationSplitViewVisibility> {
-        Binding(
-            get: { documentListPresented ? .all : .detailOnly },
-            set: { documentListPresented = $0 != .detailOnly }
-        )
     }
 
     private func performWorkspaceCommand(_ command: WorkspaceCommand) {
