@@ -20,6 +20,10 @@ struct CanopyApp: App {
         .commands {
             CanopyCommands()
         }
+
+        Settings {
+            CanopySettingsView()
+        }
     }
 }
 
@@ -56,6 +60,12 @@ private struct CanopyContentRoot: View {
             }
         }
         .frame(minWidth: minimumWindowWidth, minHeight: 600)
+        .containerBackground(
+            CanopySemanticColors.controlBackground(
+                for: appearanceMode.preferredColorScheme
+            ),
+            for: .window
+        )
         .environment(\.canopyAccessibilityOverrides, accessibilityOverrides)
         .contrast(appContrastAmount)
         .preferredColorScheme(appearanceMode.preferredColorScheme)
@@ -353,14 +363,6 @@ private struct CanopyCommands: Commands {
             .disabled(!canPerform(.toggleInspector))
         }
         CommandMenu("Accessibility") {
-            Picker("Appearance", selection: accessibilityPreferences.appearanceModeSelection) {
-                ForEach(CanopyAppearanceMode.allCases) { mode in
-                    Text(mode.title).tag(mode.rawValue)
-                }
-            }
-
-            Divider()
-
             Toggle("Increase Contrast", isOn: accessibilityPreferences.increasedContrastSelection)
             Toggle(
                 "Differentiate Without Color",
@@ -369,10 +371,10 @@ private struct CanopyCommands: Commands {
 
             Divider()
 
-            Button("Reset to System Defaults") {
-                accessibilityPreferences.reset()
+            Button("Reset Accessibility Settings") {
+                accessibilityPreferences.resetAccessibility()
             }
-            .disabled(accessibilityPreferences.usesSystemDefaults)
+            .disabled(accessibilityPreferences.usesSystemAccessibilityDefaults)
         }
     }
 

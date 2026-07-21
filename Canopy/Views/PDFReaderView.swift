@@ -1,3 +1,4 @@
+import AppKit
 import CanopyCore
 import Foundation
 import PDFKit
@@ -25,6 +26,7 @@ struct PDFReaderView: View {
     let onCancelSourceRecovery: () -> Void
 
     @Environment(\.undoManager) private var undoManager
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @Environment(\.canopyAccessibilityOverrides) private var accessibilityOverrides
 
@@ -44,108 +46,116 @@ struct PDFReaderView: View {
     private var pageCount: Int { documentSession?.document.pageCount ?? 0 }
 
     var body: some View {
-        VStack(spacing: 0) {
-            if documentSession != nil {
-                readerControls
-                if paper?.hasSelectableText == false {
-                    Label(
-                        "This PDF has no selectable text. Find and text highlighting are unavailable; Area Annotation still works.",
-                        systemImage: "text.magnifyingglass"
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 7)
-                    .accessibilityLabel(
-                        "This PDF has no selectable text. Find and text highlighting are unavailable. Area Annotation remains available."
-                    )
-                }
-                if annotationAdjustmentRequest != nil {
-                    HStack(spacing: 10) {
-                        Label("Adjusting Annotation", systemImage: "move.3d")
-                            .font(.caption.weight(.semibold))
-                        Spacer()
-                        Button("Cancel") {
-                            adjustmentCommand = AnnotationAdjustmentCommand(action: .cancel)
-                        }
-                        .keyboardShortcut(.cancelAction)
-                        Button("Done") {
-                            adjustmentCommand = AnnotationAdjustmentCommand(action: .commit)
-                        }
-                        .keyboardShortcut(.defaultAction)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 7)
-                }
-                Divider()
-            }
+        ZStack {
+            CanopyOpaqueSemanticBackground(
+                semanticColor: .windowBackgroundColor,
+                colorScheme: colorScheme
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            Group {
-                if paper == nil {
-                    ContentUnavailableView(
-                        "Choose a Document",
-                        systemImage: "book.pages",
-                        description: Text("Select a recent or library Document to begin reading.")
-                    )
-                } else if let documentSession {
-                    PDFKitReaderView(
-                        document: documentSession.document,
-                        restoredState: restoredState,
-                        command: transientState.command,
-                        matches: findSession.matches,
-                        matchesVersion: findSession.resultsVersion,
-                        selectedMatchIndex: transientState.selectedMatchIndex,
-                        allowsTextAnnotations: paper?.hasSelectableText != false,
-                        isAreaAnnotationMode: transientState.isAreaAnnotationMode,
-                        pdfInteractionResetID: transientState.pdfInteractionResetID,
-                        annotations: annotationSession.paperID == paper?.id && annotationSession.isSourceVerified
-                            ? annotationSession.annotations
-                            : [],
-                        annotationNavigation: annotationNavigation,
-                        adjustmentRequest: annotationAdjustmentRequest,
-                        adjustmentCommand: adjustmentCommand,
-                        onCreateAnnotations: createAnnotations,
-                        onCreateAreaAnnotation: createAreaAnnotation,
-                        onRequestAnnotationAdjustment: requestAnnotationAdjustment,
-                        onDeleteAnnotation: deleteAnnotation,
-                        onCommitAnnotationAdjustment: commitAnnotationAdjustment,
-                        onCancelAnnotationAdjustment: cancelAnnotationAdjustment,
-                        onAreaAnnotationModeEnded: {
-                            transientState.isAreaAnnotationMode = false
-                        },
-                        onTextSelectionRejected: { message in
-                            transientState.annotationGuidanceMessage = message
-                        },
-                        onSnapshotChange: updateSnapshot
-                    )
-                    .id(documentSession.paperID)
-                    .contrast(sourceDocumentContrastCompensation)
-                } else if let loadError {
-                    VStack(spacing: 12) {
-                        ContentUnavailableView(
-                            loadError.title,
-                            systemImage: loadError.systemImage,
-                            description: Text(loadError.message)
+            VStack(spacing: 0) {
+                if documentSession != nil {
+                    readerControls
+                    if paper?.hasSelectableText == false {
+                        Label(
+                            "This PDF has no selectable text. Find and text highlighting are unavailable; Area Annotation still works.",
+                            systemImage: "text.magnifyingglass"
                         )
-                        if let paper {
-                            VStack(spacing: 8) {
-                                ForEach(SourceRecoveryAction.actions(for: paper.sourceState)) { action in
-                                    Button(
-                                        action.title,
-                                        role: action == .removeFromLibrary ? .destructive : nil
-                                    ) {
-                                        onSourceRecoveryAction(action)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 7)
+                        .accessibilityLabel(
+                            "This PDF has no selectable text. Find and text highlighting are unavailable. Area Annotation remains available."
+                        )
+                    }
+                    if annotationAdjustmentRequest != nil {
+                        HStack(spacing: 10) {
+                            Label("Adjusting Annotation", systemImage: "move.3d")
+                                .font(.caption.weight(.semibold))
+                            Spacer()
+                            Button("Cancel") {
+                                adjustmentCommand = AnnotationAdjustmentCommand(action: .cancel)
+                            }
+                            .keyboardShortcut(.cancelAction)
+                            Button("Done") {
+                                adjustmentCommand = AnnotationAdjustmentCommand(action: .commit)
+                            }
+                            .keyboardShortcut(.defaultAction)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 7)
+                    }
+                    Divider()
+                }
+
+                Group {
+                    if paper == nil {
+                        ContentUnavailableView(
+                            "Choose a Document",
+                            systemImage: "book.pages",
+                            description: Text("Select a recent or library Document to begin reading.")
+                        )
+                    } else if let documentSession {
+                        PDFKitReaderView(
+                            document: documentSession.document,
+                            restoredState: restoredState,
+                            command: transientState.command,
+                            matches: findSession.matches,
+                            matchesVersion: findSession.resultsVersion,
+                            selectedMatchIndex: transientState.selectedMatchIndex,
+                            allowsTextAnnotations: paper?.hasSelectableText != false,
+                            isAreaAnnotationMode: transientState.isAreaAnnotationMode,
+                            pdfInteractionResetID: transientState.pdfInteractionResetID,
+                            annotations: annotationSession.paperID == paper?.id && annotationSession.isSourceVerified
+                                ? annotationSession.annotations
+                                : [],
+                            annotationNavigation: annotationNavigation,
+                            adjustmentRequest: annotationAdjustmentRequest,
+                            adjustmentCommand: adjustmentCommand,
+                            onCreateAnnotations: createAnnotations,
+                            onCreateAreaAnnotation: createAreaAnnotation,
+                            onRequestAnnotationAdjustment: requestAnnotationAdjustment,
+                            onDeleteAnnotation: deleteAnnotation,
+                            onCommitAnnotationAdjustment: commitAnnotationAdjustment,
+                            onCancelAnnotationAdjustment: cancelAnnotationAdjustment,
+                            onAreaAnnotationModeEnded: {
+                                transientState.isAreaAnnotationMode = false
+                            },
+                            onTextSelectionRejected: { message in
+                                transientState.annotationGuidanceMessage = message
+                            },
+                            onSnapshotChange: updateSnapshot
+                        )
+                        .id(documentSession.paperID)
+                        .contrast(sourceDocumentContrastCompensation)
+                    } else if let loadError {
+                        VStack(spacing: 12) {
+                            ContentUnavailableView(
+                                loadError.title,
+                                systemImage: loadError.systemImage,
+                                description: Text(loadError.message)
+                            )
+                            if let paper {
+                                VStack(spacing: 8) {
+                                    ForEach(SourceRecoveryAction.actions(for: paper.sourceState)) { action in
+                                        Button(
+                                            action.title,
+                                            role: action == .removeFromLibrary ? .destructive : nil
+                                        ) {
+                                            onSourceRecoveryAction(action)
+                                        }
                                     }
-                                }
-                                if paper.sourceState == .brokenReference || paper.sourceState == .sourceChanged {
-                                    Button("Cancel", role: .cancel, action: onCancelSourceRecovery)
+                                    if paper.sourceState == .brokenReference || paper.sourceState == .sourceChanged {
+                                        Button("Cancel", role: .cancel, action: onCancelSourceRecovery)
+                                    }
                                 }
                             }
                         }
+                    } else {
+                        ProgressView("Opening Document…")
                     }
-                } else {
-                    ProgressView("Opening Document…")
                 }
             }
         }
@@ -272,6 +282,12 @@ struct PDFReaderView: View {
 
     private var readerControls: some View {
         VStack(alignment: .leading, spacing: 8) {
+            Text(paper?.title ?? "Document")
+                .font(.headline)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .accessibilityIdentifier("reader-document-title")
+
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 12) {
                     pageControls
@@ -317,7 +333,7 @@ struct PDFReaderView: View {
         .controlSize(.regular)
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(.regularMaterial)
+        .background(CanopySemanticColors.controlBackground(for: colorScheme))
     }
 
     private var pageControls: some View {

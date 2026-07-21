@@ -23,6 +23,57 @@ struct AnnotationInspectorView: View {
     @State private var frozenRecentOrder: [UUID]?
 
     var body: some View {
+        VStack(spacing: 0) {
+            inspectorHeader
+            Divider()
+            inspectorContent
+        }
+        .task(id: previewTaskID) {
+            loadPreviewDocument()
+        }
+        .onChange(of: paper?.id) {
+            selectedColors.removeAll()
+            frozenRecentOrder = nil
+        }
+        .alert(
+            "Couldn’t Save Annotation",
+            isPresented: Binding(
+                get: { persistenceErrorMessage != nil },
+                set: { if !$0 { persistenceErrorMessage = nil } }
+            )
+        ) {
+            Button("Dismiss", role: .cancel) {}
+        } message: {
+            Text(persistenceErrorMessage ?? "Canopy could not save this annotation.")
+        }
+    }
+
+    private var inspectorHeader: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text("Annotations")
+                    .font(.headline)
+                Spacer(minLength: 8)
+                Text(annotationCount, format: .number)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            .accessibilityElement(children: .combine)
+
+            HStack(spacing: 8) {
+                sortMenu
+                colorFilterMenu
+                Spacer(minLength: 0)
+            }
+            .controlSize(.small)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+    }
+
+    @ViewBuilder
+    private var inspectorContent: some View {
         Group {
             if paper == nil {
                 ContentUnavailableView(
@@ -107,31 +158,11 @@ struct AnnotationInspectorView: View {
                 }
             }
         }
-        .navigationTitle("Annotations")
-        .toolbar {
-            ToolbarItemGroup(placement: .automatic) {
-                sortMenu
-                colorFilterMenu
-            }
-        }
-        .task(id: previewTaskID) {
-            loadPreviewDocument()
-        }
-        .onChange(of: paper?.id) {
-            selectedColors.removeAll()
-            frozenRecentOrder = nil
-        }
-        .alert(
-            "Couldn’t Save Annotation",
-            isPresented: Binding(
-                get: { persistenceErrorMessage != nil },
-                set: { if !$0 { persistenceErrorMessage = nil } }
-            )
-        ) {
-            Button("Dismiss", role: .cancel) {}
-        } message: {
-            Text(persistenceErrorMessage ?? "Canopy could not save this annotation.")
-        }
+    }
+
+    private var annotationCount: Int {
+        guard let paper, annotationSession.paperID == paper.id else { return 0 }
+        return annotationSession.annotations.count
     }
 
     private var sortOrder: AnnotationInspectorSortOrder {
@@ -167,7 +198,7 @@ struct AnnotationInspectorView: View {
                 }
             }
         } label: {
-            Label("Sort Annotations", systemImage: "arrow.up.arrow.down")
+            Label(sortOrder.title, systemImage: "arrow.up.arrow.down")
         }
         .help("Sort Annotations")
         .accessibilityIdentifier("annotation-sort-menu")
@@ -197,7 +228,7 @@ struct AnnotationInspectorView: View {
             }
         } label: {
             Label(
-                "Filter by Color",
+                selectedColors.isEmpty ? "All Colors" : "\(selectedColors.count) Colors",
                 systemImage: selectedColors.isEmpty
                     ? "line.3.horizontal.decrease.circle"
                     : "line.3.horizontal.decrease.circle.fill"

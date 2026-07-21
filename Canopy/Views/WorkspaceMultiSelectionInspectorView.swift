@@ -70,7 +70,6 @@ struct WorkspaceMultiSelectionInspectorView: View {
             }
         }
         .formStyle(.grouped)
-        .navigationTitle("Overview")
     }
 
     private var commonKind: DocumentKind? {

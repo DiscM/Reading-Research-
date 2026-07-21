@@ -1,26 +1,29 @@
 import SwiftUI
 
 enum CanopyAppearanceMode: String, CaseIterable, Identifiable {
-    case system
-    case light
     case dark
+    case light
+
+    static let defaultMode = Self.dark
 
     var id: Self { self }
 
     var title: String {
         switch self {
-        case .system: "Follow System"
-        case .light: "Light"
         case .dark: "Dark"
+        case .light: "Light"
         }
     }
 
-    var preferredColorScheme: ColorScheme? {
+    var preferredColorScheme: ColorScheme {
         switch self {
-        case .system: nil
-        case .light: .light
         case .dark: .dark
+        case .light: .light
         }
+    }
+
+    static func resolve(storedRawValue: String?) -> Self {
+        storedRawValue.flatMap(Self.init(rawValue:)) ?? defaultMode
     }
 }
 
@@ -32,16 +35,24 @@ enum CanopyPreferenceKeys {
 }
 
 struct CanopyAccessibilityPreferences: DynamicProperty {
-    @AppStorage(CanopyPreferenceKeys.appearanceMode) private var appearanceModeRawValue = CanopyAppearanceMode.system.rawValue
+    @AppStorage(CanopyPreferenceKeys.appearanceMode)
+    private var appearanceModeRawValue = CanopyAppearanceMode.defaultMode.rawValue
     @AppStorage(CanopyPreferenceKeys.increasedContrast) private var increasedContrast = false
     @AppStorage(CanopyPreferenceKeys.differentiateWithoutColor) private var differentiateWithoutColor = false
 
     var appearanceMode: CanopyAppearanceMode {
-        CanopyAppearanceMode(rawValue: appearanceModeRawValue) ?? .system
+        CanopyAppearanceMode.resolve(storedRawValue: appearanceModeRawValue)
     }
 
-    var appearanceModeSelection: Binding<String> {
-        $appearanceModeRawValue
+    var lightModeSelection: Binding<Bool> {
+        Binding(
+            get: { appearanceMode == .light },
+            set: { usesLightMode in
+                appearanceModeRawValue = (
+                    usesLightMode ? CanopyAppearanceMode.light : .dark
+                ).rawValue
+            }
+        )
     }
 
     var increasedContrastSelection: Binding<Bool> {
@@ -59,14 +70,11 @@ struct CanopyAccessibilityPreferences: DynamicProperty {
         )
     }
 
-    var usesSystemDefaults: Bool {
-        appearanceModeRawValue == CanopyAppearanceMode.system.rawValue
-            && !increasedContrast
-            && !differentiateWithoutColor
+    var usesSystemAccessibilityDefaults: Bool {
+        !increasedContrast && !differentiateWithoutColor
     }
 
-    func reset() {
-        appearanceModeRawValue = CanopyAppearanceMode.system.rawValue
+    func resetAccessibility() {
         increasedContrast = false
         differentiateWithoutColor = false
     }

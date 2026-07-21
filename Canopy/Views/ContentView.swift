@@ -36,6 +36,7 @@ struct ContentView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.undoManager) private var undoManager
+    @Environment(\.colorScheme) private var colorScheme
     @Query(sort: \Document.title) private var documents: [Document]
     @Query(sort: \Collection.name) private var collections: [Collection]
     @AppStorage("workspace.navigationPresented") private var navigationPresented = true
@@ -125,6 +126,12 @@ struct ContentView: View {
                 )
             }
         }
+        .navigationTitle("Canopy")
+        .toolbarBackground(
+            CanopySemanticColors.controlBackground(for: colorScheme),
+            for: .windowToolbar
+        )
+        .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
         .toolbar {
             ToolbarItemGroup(placement: .navigation) {
                 Button {
@@ -337,6 +344,7 @@ struct ContentView: View {
             if navigationPresented {
                 navigationSidebar
                     .frame(width: WorkspaceLayoutMetrics.navigationWidth)
+                    .background(CanopySemanticColors.textBackground(for: colorScheme))
                     .clipped()
                 workspaceDivider
             }
@@ -344,6 +352,7 @@ struct ContentView: View {
             if documentListPresented {
                 documentList
                     .frame(width: WorkspaceLayoutMetrics.documentListWidth)
+                    .background(CanopySemanticColors.textBackground(for: colorScheme))
                     .clipped()
                 workspaceDivider
             }
@@ -354,13 +363,14 @@ struct ContentView: View {
                     maxWidth: .infinity,
                     maxHeight: .infinity
                 )
+                .background(CanopySemanticColors.windowBackground(for: colorScheme))
                 .layoutPriority(1)
 
             if inspectorPresented {
                 workspaceDivider
                 workspaceInspector
                     .frame(width: WorkspaceLayoutMetrics.inspectorWidth)
-                    .background(.background)
+                    .background(CanopySemanticColors.controlBackground(for: colorScheme))
                     .clipped()
                     .accessibilityIdentifier("workspace-inspector")
             }

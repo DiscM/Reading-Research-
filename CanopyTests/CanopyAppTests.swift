@@ -241,12 +241,16 @@ struct CanopyAppTests {
         #expect(transientState.pdfInteractionResetID != previousPDFInteractionResetID)
     }
 
-    @Test("Accessibility menu preferences preserve system choices and expose appearance modes")
-    func accessibilityMenuPreferences() {
-        #expect(CanopyAppearanceMode.allCases.map(\.title) == ["Follow System", "Light", "Dark"])
-        #expect(CanopyAppearanceMode.system.preferredColorScheme == nil)
-        #expect(CanopyAppearanceMode.light.preferredColorScheme == .light)
+    @Test("Appearance defaults to Dark and safely resolves legacy preferences")
+    func appearancePreferences() {
+        #expect(CanopyAppearanceMode.allCases.map(\.title) == ["Dark", "Light"])
+        #expect(CanopyAppearanceMode.defaultMode == .dark)
         #expect(CanopyAppearanceMode.dark.preferredColorScheme == .dark)
+        #expect(CanopyAppearanceMode.light.preferredColorScheme == .light)
+        #expect(CanopyAppearanceMode.resolve(storedRawValue: nil) == .dark)
+        #expect(CanopyAppearanceMode.resolve(storedRawValue: "system") == .dark)
+        #expect(CanopyAppearanceMode.resolve(storedRawValue: "unexpected") == .dark)
+        #expect(CanopyAppearanceMode.resolve(storedRawValue: "light") == .light)
 
         let defaults = CanopyAccessibilityOverrides()
         #expect(!defaults.usesIncreasedContrast(system: false))

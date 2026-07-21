@@ -106,7 +106,6 @@ struct WorkspaceMultiSelectionSummaryView: View {
         .padding(28)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityElement(children: .contain)
-        .navigationTitle("Selection")
     }
 
     private func statistic(

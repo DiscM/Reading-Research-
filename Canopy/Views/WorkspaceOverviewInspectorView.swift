@@ -71,7 +71,6 @@ struct WorkspaceOverviewInspectorView: View {
             }
             .padding(14)
         }
-        .navigationTitle("Overview")
         .frame(minWidth: 250, idealWidth: 300)
     }
 

@@ -2,6 +2,7 @@ import CanopyCore
 import SwiftUI
 
 struct WorkspaceDocumentListView: View {
+    @Environment(\.colorScheme) private var colorScheme
     let title: String
     let documents: [WorkspaceDocumentListItem]
     let destination: WorkspaceNavigationDestination
@@ -78,10 +79,18 @@ struct WorkspaceDocumentListView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            documentList
+        ZStack {
+            CanopyOpaqueSemanticBackground(
+                semanticColor: .textBackgroundColor,
+                colorScheme: colorScheme
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            VStack(spacing: 0) {
+                header
+                Divider()
+                documentList
+            }
         }
         .frame(minWidth: 240, idealWidth: 320)
         .searchable(
@@ -110,41 +119,45 @@ struct WorkspaceDocumentListView: View {
         .onChange(of: searchScopeDescription) { _, _ in
             expandedSearchGroupIDs.removeAll()
         }
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text(title)
+                    .font(.headline)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                if !normalizedSearchText.isEmpty, let searchScopeDescription {
+                    Text(searchScopeDescription)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                } else if selection.count > 1 {
+                    Text("\(selection.count) selected")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("\(visibleDocuments.count) Documents")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .font(.caption)
+            .accessibilityElement(children: .combine)
+
+            HStack(spacing: 8) {
                 kindFilterMenu
                 sortMenu
+                Spacer(minLength: 4)
                 Button(action: onAddDocuments) {
                     Label("Add Documents", systemImage: "plus")
+                        .labelStyle(.iconOnly)
                 }
                 .help("Add Documents")
                 .accessibilityIdentifier("add-documents-button")
             }
+            .controlSize(.small)
         }
-    }
-
-    private var header: some View {
-        HStack(spacing: 8) {
-            Text(title)
-                .font(.headline)
-                .lineLimit(1)
-            Spacer(minLength: 8)
-            if !normalizedSearchText.isEmpty, let searchScopeDescription {
-                Text(searchScopeDescription)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            } else if selection.count > 1 {
-                Text("\(selection.count) selected")
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("\(visibleDocuments.count) Documents")
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .font(.caption)
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .accessibilityElement(children: .combine)
     }
 
     private var documentList: some View {
@@ -174,6 +187,7 @@ struct WorkspaceDocumentListView: View {
             }
         }
         .listStyle(.inset)
+        .scrollContentBackground(.hidden)
         .onDeleteCommand {
             guard !selection.isEmpty else { return }
             onRequestRemoval(selection.sorted { $0.uuidString < $1.uuidString })
@@ -424,7 +438,7 @@ struct WorkspaceDocumentListView: View {
                 }
             }
         } label: {
-            Label("Sort", systemImage: "arrow.up.arrow.down")
+            Label(sort.field.displayName, systemImage: "arrow.up.arrow.down")
         }
         .help("Sort Documents")
         .accessibilityValue(

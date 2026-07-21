@@ -61,6 +61,10 @@ struct PDFKitReaderView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> PDFView {
         let pdfView = AreaSelectionPDFView()
+        pdfView.backgroundColor = CanopySemanticColors.resolved(
+            .underPageBackgroundColor,
+            for: colorScheme
+        )
         pdfView.displayMode = .singlePageContinuous
         pdfView.displayDirection = .vertical
         pdfView.displaysPageBreaks = true
@@ -74,6 +78,10 @@ struct PDFKitReaderView: NSViewRepresentable {
 
     func updateNSView(_ pdfView: PDFView, context: Context) {
         context.coordinator.parent = self
+        pdfView.backgroundColor = CanopySemanticColors.resolved(
+            .underPageBackgroundColor,
+            for: colorScheme
+        )
         if pdfView.document !== document {
             pdfView.document = document
             context.coordinator.attach(to: pdfView)

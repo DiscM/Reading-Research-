@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct WorkspaceNavigationSidebar<FooterContent: View>: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Binding private var selection: WorkspaceNavigationDestination?
     private let counts: WorkspaceNavigationCounts
     private let collections: [WorkspaceCollectionListItem]
@@ -34,44 +35,52 @@ struct WorkspaceNavigationSidebar<FooterContent: View>: View {
     }
 
     var body: some View {
-        List(selection: $selection) {
-            Section("Library") {
-                navigationRow(
-                    title: "All Documents",
-                    systemImage: "square.stack",
-                    count: counts.allDocuments,
-                    destination: .allDocuments
-                )
-                navigationRow(
-                    title: "Recent",
-                    systemImage: "clock",
-                    count: counts.recent,
-                    destination: .recent
-                )
-                navigationRow(
-                    title: "Unfiled",
-                    systemImage: "tray",
-                    count: counts.unfiled,
-                    destination: .unfiled
-                )
-            }
+        ZStack {
+            CanopyOpaqueSemanticBackground(
+                semanticColor: .windowBackgroundColor,
+                colorScheme: colorScheme
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            Section("Collections") {
-                ForEach(collections) { collection in
-                    collectionRow(collection)
+            List(selection: $selection) {
+                Section("Library") {
+                    navigationRow(
+                        title: "All Documents",
+                        systemImage: "square.stack",
+                        count: counts.allDocuments,
+                        destination: .allDocuments
+                    )
+                    navigationRow(
+                        title: "Recent",
+                        systemImage: "clock",
+                        count: counts.recent,
+                        destination: .recent
+                    )
+                    navigationRow(
+                        title: "Unfiled",
+                        systemImage: "tray",
+                        count: counts.unfiled,
+                        destination: .unfiled
+                    )
                 }
 
-                Button(action: onNewCollection) {
-                    Label("New Collection", systemImage: "plus")
+                Section("Collections") {
+                    ForEach(collections) { collection in
+                        collectionRow(collection)
+                    }
+
+                    Button(action: onNewCollection) {
+                        Label("New Collection", systemImage: "plus")
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Creates an organizational Collection without moving any Source PDFs")
                 }
-                .buttonStyle(.plain)
-                .accessibilityHint("Creates an organizational Collection without moving any Source PDFs")
             }
-        }
-        .listStyle(.sidebar)
-        .navigationTitle("Canopy")
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            footer
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                footer
+            }
         }
     }
 

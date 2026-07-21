@@ -1,0 +1,296 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="900" viewBox="50 160 1180 900">
+  <defs>
+    <filter id="windowShadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="18" stdDeviation="26" flood-color="#000000" flood-opacity="0.28"/>
+    </filter>
+    <filter id="pageShadow" x="-30%" y="-20%" width="160%" height="150%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#121826" flood-opacity="0.22"/>
+    </filter>
+    <linearGradient id="board" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#111111"/>
+      <stop offset="1" stop-color="#080808"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#292929" stop-opacity="0.98"/>
+      <stop offset="1" stop-color="#222222" stop-opacity="0.97"/>
+    </linearGradient>
+    <style>
+      .ui { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; fill: #edf2f8; }
+      .display { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif; fill: #f5f7fb; }
+      .label { font-size: 17px; font-weight: 700; letter-spacing: 1.3px; }
+      .concept { font-size: 31px; font-weight: 720; }
+      .summary { font-size: 18px; fill: #aeb9c8; }
+      .title { font-size: 15px; font-weight: 680; }
+      .body { font-size: 13px; }
+      .small { font-size: 11px; fill: #9ba7b8; }
+      .tiny { font-size: 9px; fill: #8492a6; }
+      .section { font-size: 10px; font-weight: 720; letter-spacing: 0.8px; fill: #8795a8; }
+      .dark { fill: #eef2f7; }
+      .darkMuted { fill: #9da9b9; }
+      .line { stroke: #d8dde6; stroke-width: 1; }
+      .darkLine { stroke: #354152; stroke-width: 1; }
+      .accent { fill: #9a9a9a; }
+      .green { fill: #2e8b68; }
+      .native-dark .ui { fill: #edf2f8; }
+      .native-dark .display { fill: #f5f7fb; }
+      .native-dark .summary { fill: #aeb9c8; }
+      .native-dark .small { fill: #9ba7b8; }
+      .native-dark .tiny { fill: #8492a6; }
+      .native-dark .section { fill: #8795a8; }
+      .native-dark .line { stroke: #ffffff; stroke-opacity: 0.10; }
+      .native-dark .paper .ui { fill: #1f2733; }
+      .native-dark .paper .display { fill: #172033; }
+      .native-dark .paper .small { fill: #687386; }
+      .native-dark .paper .tiny { fill: #7a8495; }
+    </style>
+  </defs>
+
+  <rect width="2480" height="1880" fill="url(#board)"/>
+  <text x="110" y="86" class="display" font-size="40" font-weight="760">Canopy — first design pass</text>
+  <text x="110" y="123" class="ui summary">Three directions for a calmer, clearer scholarly workspace · macOS desktop</text>
+
+  <!-- A: Native Minimal -->
+  <g transform="translate(90 190)" class="native-dark">
+    <text x="0" y="0" class="ui label" style="fill:#a7a7a7">SYSTEM GRAPHITE DARK</text>
+    <text x="0" y="38" class="display concept">Native Minimal — Graphite</text>
+    <text x="0" y="68" class="ui summary">System-neutral surfaces, near-black canvas, accent-free selection</text>
+
+    <g transform="translate(0 104)" filter="url(#windowShadow)">
+      <rect width="1120" height="690" rx="18" fill="#1e1e1e"/>
+      <rect width="1120" height="54" rx="18" fill="url(#glass)"/>
+      <rect y="39" width="1120" height="15" fill="#232323" fill-opacity="0.98"/>
+      <line y1="54" x2="1120" y2="54" class="line"/>
+      <circle cx="22" cy="26" r="6" fill="#ff5f57"/><circle cx="42" cy="26" r="6" fill="#febc2e"/><circle cx="62" cy="26" r="6" fill="#28c840"/>
+      <text x="92" y="32" class="ui title">Canopy</text>
+      <text x="197" y="32" class="ui body" fill="#7d8796">◀  ▶</text>
+      <rect x="738" y="12" width="255" height="30" rx="15" fill="#151515" stroke="#424242"/>
+      <text x="756" y="32" class="ui small">⌕  Search library</text>
+      <rect x="1007" y="11" width="42" height="32" rx="16" fill="#2b2b2b"/><text x="1028" y="32" text-anchor="middle" class="ui body">◫</text>
+      <rect x="1058" y="11" width="42" height="32" rx="16" fill="#2b2b2b"/><text x="1079" y="32" text-anchor="middle" class="ui body">ⓘ</text>
+
+      <!-- sidebar -->
+      <rect y="54" width="172" height="636" fill="#282828"/>
+      <line x1="172" y1="54" x2="172" y2="690" class="line"/>
+      <text x="18" y="88" class="ui section">LIBRARY</text>
+      <g class="ui body">
+        <text x="22" y="121">▣</text><text x="45" y="121">All Documents</text><text x="153" y="121" text-anchor="end" class="small">126</text>
+        <text x="22" y="151">◷</text><text x="45" y="151">Recent</text><text x="153" y="151" text-anchor="end" class="small">18</text>
+        <text x="22" y="181">◇</text><text x="45" y="181">Unfiled</text><text x="153" y="181" text-anchor="end" class="small">14</text>
+      </g>
+      <text x="18" y="226" class="ui section">COLLECTIONS</text>
+      <rect x="10" y="239" width="152" height="31" rx="7" fill="#3c3c3c"/>
+      <circle cx="25" cy="255" r="4" class="accent"/><text x="39" y="260" class="ui body" font-weight="650">Biology 201</text><text x="151" y="260" text-anchor="end" class="ui small">12</text>
+      <circle cx="25" cy="290" r="4" fill="#a7afbc"/><text x="39" y="295" class="ui body">Midterm Review</text>
+      <circle cx="25" cy="324" r="4" fill="#a7afbc"/><text x="39" y="329" class="ui body">Lab Reference</text>
+      <circle cx="25" cy="358" r="4" fill="#a7afbc"/><text x="39" y="363" class="ui body">Design Research</text>
+      <text x="20" y="405" class="ui body" fill="#376af5">＋ New Collection</text>
+      <line x1="0" y1="649" x2="172" y2="649" class="line"/><text x="18" y="674" class="ui small">◔  Indexing 3 documents</text>
+
+      <!-- local document list -->
+      <rect x="173" y="54" width="282" height="636" fill="#1e1e1e"/>
+      <line x1="455" y1="54" x2="455" y2="690" class="line"/>
+      <text x="189" y="84" class="ui title">Biology 201</text><text x="438" y="84" text-anchor="end" class="ui small">12 documents</text>
+      <line x1="173" y1="98" x2="455" y2="98" class="line"/>
+      <rect x="185" y="108" width="118" height="27" rx="7" fill="#2a2a2a"/><text x="198" y="126" class="ui small">Kind: All ⌄</text>
+      <rect x="310" y="108" width="83" height="27" rx="7" fill="#2a2a2a"/><text x="324" y="126" class="ui small">Date ⌄</text>
+      <rect x="402" y="108" width="38" height="27" rx="7" fill="#686868"/><text x="421" y="127" text-anchor="middle" class="ui" font-size="18" fill="#fff">＋</text>
+      <line x1="173" y1="145" x2="455" y2="145" class="line"/>
+      <rect x="182" y="154" width="264" height="58" rx="9" fill="#464646"/>
+      <text x="196" y="179" class="ui" font-size="16" fill="#fff">▤</text><text x="221" y="177" class="ui" font-size="13" font-weight="680" fill="#fff">Lecture 08 — Cell Signaling</text><text x="221" y="197" class="ui" font-size="10" fill="#e4ebff">Lecture Slides · Maya Patel · Jul 18</text>
+      <text x="196" y="241" class="ui" font-size="16" fill="#6580a8">▤</text><text x="221" y="239" class="ui body" font-weight="620">Week 7 Reading Notes</text><text x="221" y="258" class="ui small">Class Notes · Steve · Jul 16</text>
+      <line x1="194" y1="273" x2="440" y2="273" class="line"/>
+      <text x="196" y="299" class="ui" font-size="16" fill="#8c6a45">▧</text><text x="221" y="297" class="ui body" font-weight="620">Alberts — Chapter 15</text><text x="221" y="316" class="ui small">Textbook · 2022</text><text x="430" y="306" class="ui" fill="#db8b16">⚠︎</text>
+      <line x1="194" y1="331" x2="440" y2="331" class="line"/>
+      <text x="196" y="357" class="ui" font-size="16" fill="#745ca4">▱</text><text x="221" y="355" class="ui body" font-weight="620">Lab Safety and Setup</text><text x="221" y="374" class="ui small">Handout · Jul 11</text>
+
+      <!-- reader -->
+      <rect x="456" y="54" width="430" height="636" fill="#101010"/>
+      <line x1="886" y1="54" x2="886" y2="690" class="line"/>
+      <rect x="456" y="54" width="430" height="44" fill="#232323"/>
+      <text x="472" y="81" class="ui title">Lecture 08 — Cell Signaling</text>
+      <text x="713" y="81" class="ui small">18 / 42</text><text x="777" y="81" class="ui body">−  110%  ＋</text><text x="857" y="81" text-anchor="end" class="ui body">⌕</text>
+      <line x1="456" y1="98" x2="886" y2="98" class="line"/>
+      <g class="paper">
+      <rect x="548" y="124" width="246" height="520" rx="2" fill="#f5f5f5" filter="url(#pageShadow)"/>
+      <text x="671" y="174" text-anchor="middle" class="ui small" style="fill:#687386">BIOLOGY 201 · LECTURE 08</text>
+      <text x="671" y="211" text-anchor="middle" class="display" font-size="23" font-weight="720" style="fill:#203451">CELL SIGNALING</text>
+      <line x1="598" y1="230" x2="744" y2="230" stroke="#89aaf0" stroke-width="2"/>
+      <rect x="597" y="276" width="148" height="48" rx="9" fill="#eaf0ff" stroke="#7395e8"/><text x="671" y="305" text-anchor="middle" class="ui small" style="fill:#31538c">Ligand-gated receptor</text>
+      <line x1="671" y1="324" x2="671" y2="365" stroke="#4f71ab" stroke-width="2"/><path d="M666 358l5 8 5-8" fill="none" stroke="#4f71ab" stroke-width="2"/>
+      <rect x="597" y="368" width="148" height="48" rx="9" fill="#edf7f1" stroke="#6ca082"/><text x="671" y="397" text-anchor="middle" class="ui small" style="fill:#376b52">Second messenger</text>
+      <line x1="671" y1="416" x2="671" y2="457" stroke="#5f8d72" stroke-width="2"/><path d="M666 450l5 8 5-8" fill="none" stroke="#5f8d72" stroke-width="2"/>
+      <rect x="597" y="460" width="148" height="48" rx="9" fill="#fff4dd" stroke="#c79a42"/><text x="671" y="489" text-anchor="middle" class="ui small" style="fill:#75551e">Cellular response</text>
+      </g>
+
+      <!-- inspector -->
+      <rect x="887" y="54" width="233" height="636" fill="#282828"/>
+      <rect x="901" y="68" width="205" height="30" rx="8" fill="#1d1d1d"/><rect x="1003" y="71" width="100" height="24" rx="6" fill="#484848" stroke="#5a5a5a"/>
+      <text x="952" y="88" text-anchor="middle" class="ui small">Overview</text><text x="1053" y="88" text-anchor="middle" class="ui small" font-weight="650">Annotations</text>
+      <line x1="887" y1="108" x2="1120" y2="108" class="line"/>
+      <text x="901" y="132" class="ui section">ANNOTATIONS</text><text x="1104" y="132" text-anchor="end" class="ui small">12</text>
+      <rect x="901" y="143" width="98" height="26" rx="7" fill="#303030"/><text x="913" y="161" class="ui tiny">Page order ⌄</text>
+      <rect x="1006" y="143" width="98" height="26" rx="7" fill="#303030"/><text x="1018" y="161" class="ui tiny">All colors ⌄</text>
+      <text x="901" y="195" class="ui tiny" font-weight="700">PAGE 18</text>
+      <rect x="899" y="205" width="207" height="87" rx="9" fill="#303030" stroke="#454545"/><rect x="911" y="219" width="4" height="33" rx="2" fill="#f3c800"/><text x="925" y="232" class="ui body" font-weight="640">Ligand-gated receptors</text><text x="925" y="253" class="ui small">Compare this pathway with</text><text x="925" y="269" class="ui small">lecture 6 before the midterm.</text><text x="925" y="284" class="ui tiny">Yellow · 2 minutes ago</text>
+      <text x="901" y="324" class="ui tiny" font-weight="700">PAGE 23</text>
+      <rect x="899" y="334" width="207" height="67" rx="9" fill="#303030" stroke="#454545"/><rect x="911" y="348" width="4" height="30" rx="2" fill="#64c8ec"/><text x="925" y="361" class="ui body" font-weight="640">Second messenger cascade</text><text x="925" y="383" class="ui small">Review the amplification step.</text>
+    </g>
+    <text x="0" y="835" class="ui body" font-weight="650">Best for:</text><text x="64" y="835" class="ui body" fill="#637083">broadest audience, lowest learning cost, strongest macOS fit</text>
+  </g>
+
+  <!-- B: Zotero Dense -->
+  <g transform="translate(1270 190)">
+    <text x="0" y="0" class="ui label" fill="#2e8b68">DIRECTION B</text>
+    <text x="0" y="38" class="display concept">Zotero-Dense</text>
+    <text x="0" y="68" class="ui summary">Compact library scanning with a richer metadata inspector</text>
+
+    <g transform="translate(0 104)" filter="url(#windowShadow)">
+      <rect width="1120" height="690" rx="18" fill="#192330"/>
+      <rect width="1120" height="54" rx="18" fill="#202c3a"/>
+      <rect y="39" width="1120" height="15" fill="#202c3a"/>
+      <line y1="54" x2="1120" y2="54" class="darkLine"/>
+      <circle cx="22" cy="26" r="6" fill="#ff5f57"/><circle cx="42" cy="26" r="6" fill="#febc2e"/><circle cx="62" cy="26" r="6" fill="#28c840"/>
+      <text x="92" y="32" class="ui title dark">Canopy</text><text x="181" y="32" class="ui small darkMuted">Biology 201</text>
+      <rect x="735" y="11" width="270" height="32" rx="9" fill="#17212d" stroke="#3a4658"/><text x="753" y="32" class="ui small darkMuted">⌕  Search title, author, or full text</text>
+      <rect x="1018" y="11" width="38" height="32" rx="8" fill="#2a3747"/><text x="1037" y="32" text-anchor="middle" class="ui body dark">＋</text>
+      <rect x="1065" y="11" width="38" height="32" rx="8" fill="#2a3747"/><text x="1084" y="32" text-anchor="middle" class="ui body dark">◫</text>
+
+      <!-- compact sources -->
+      <rect y="54" width="190" height="636" fill="#202b38"/><line x1="190" y1="54" x2="190" y2="690" class="darkLine"/>
+      <text x="17" y="84" class="ui section darkMuted">LIBRARY</text>
+      <rect x="9" y="96" width="172" height="28" rx="6" fill="#33425a"/><text x="20" y="115" class="ui body dark">▣  All Documents</text><text x="169" y="115" text-anchor="end" class="ui tiny darkMuted">126</text>
+      <text x="20" y="146" class="ui body darkMuted">◷  Recent</text><text x="169" y="146" text-anchor="end" class="ui tiny darkMuted">18</text>
+      <text x="20" y="176" class="ui body darkMuted">◇  Unfiled</text><text x="169" y="176" text-anchor="end" class="ui tiny darkMuted">14</text>
+      <text x="17" y="218" class="ui section darkMuted">COLLECTIONS</text>
+      <text x="20" y="249" class="ui body dark">▾  Courses</text>
+      <text x="38" y="279" class="ui body dark">●  Biology 201</text><text x="169" y="279" text-anchor="end" class="ui tiny darkMuted">12</text>
+      <text x="38" y="309" class="ui body darkMuted">●  Philosophy 110</text>
+      <text x="20" y="350" class="ui body dark">▾  Projects</text>
+      <text x="38" y="380" class="ui body darkMuted">●  Design Research</text>
+      <text x="38" y="410" class="ui body darkMuted">●  Thesis Sources</text>
+      <line x1="0" y1="646" x2="190" y2="646" class="darkLine"/><text x="17" y="672" class="ui small darkMuted">Index healthy · 126 items</text>
+
+      <!-- dense table -->
+      <rect x="191" y="54" width="375" height="636" fill="#18222e"/><line x1="566" y1="54" x2="566" y2="690" class="darkLine"/>
+      <text x="207" y="83" class="ui title dark">All Documents</text><text x="548" y="83" text-anchor="end" class="ui small darkMuted">126</text>
+      <rect x="204" y="99" width="148" height="27" rx="7" fill="#222e3c"/><text x="216" y="117" class="ui tiny darkMuted">Kind: Research Paper ⌄</text>
+      <rect x="359" y="99" width="93" height="27" rx="7" fill="#222e3c"/><text x="371" y="117" class="ui tiny darkMuted">Year: Any ⌄</text>
+      <rect x="459" y="99" width="90" height="27" rx="7" fill="#222e3c"/><text x="471" y="117" class="ui tiny darkMuted">Sort: Date ⌄</text>
+      <line x1="191" y1="137" x2="566" y2="137" class="darkLine"/>
+      <text x="207" y="157" class="ui tiny darkMuted">TITLE</text><text x="504" y="157" text-anchor="end" class="ui tiny darkMuted">YEAR</text><text x="548" y="157" text-anchor="end" class="ui tiny darkMuted">NOTES</text>
+      <rect x="198" y="168" width="360" height="53" rx="7" fill="#31526a"/>
+      <text x="209" y="188" class="ui body dark" font-weight="650">Continual Learning in Bio-plausible SNNs</text><text x="209" y="207" class="ui tiny darkMuted">Ali Safa · Research Paper</text><text x="504" y="192" text-anchor="end" class="ui small dark">2024</text><text x="548" y="192" text-anchor="end" class="ui small dark">7</text>
+      <text x="209" y="246" class="ui body dark">Evolution Strategies as a Scalable Alternative</text><text x="209" y="265" class="ui tiny darkMuted">Salimans, Ho, Chen, Sidor, Sutskever</text><text x="504" y="250" text-anchor="end" class="ui small darkMuted">2017</text><text x="548" y="250" text-anchor="end" class="ui small darkMuted">3</text>
+      <line x1="207" y1="278" x2="550" y2="278" class="darkLine"/>
+      <text x="209" y="304" class="ui body dark">Evolution Strategies at Scale: LLM Fine-Tuning</text><text x="209" y="323" class="ui tiny darkMuted">Qiu, Gan, Hayes, Liang, Xu</text><text x="504" y="308" text-anchor="end" class="ui small darkMuted">2026</text><text x="548" y="308" text-anchor="end" class="ui small darkMuted">12</text>
+      <line x1="207" y1="336" x2="550" y2="336" class="darkLine"/>
+      <text x="209" y="362" class="ui body dark">Measuring AI’s environmental impact</text><text x="209" y="381" class="ui tiny darkMuted">Elsworth, Huang, Patterson, Schneider</text><text x="504" y="366" text-anchor="end" class="ui small darkMuted">2025</text><text x="548" y="366" text-anchor="end" class="ui small darkMuted">5</text>
+      <line x1="207" y1="394" x2="550" y2="394" class="darkLine"/>
+      <text x="209" y="420" class="ui body dark">QJL: 1-Bit Quantized JL Transform</text><text x="209" y="439" class="ui tiny darkMuted">Zandieh, Daliri, Han</text><text x="504" y="424" text-anchor="end" class="ui small darkMuted">2024</text><text x="548" y="424" text-anchor="end" class="ui small darkMuted">2</text>
+
+      <!-- reading preview -->
+      <rect x="567" y="54" width="317" height="636" fill="#111a24"/><line x1="884" y1="54" x2="884" y2="690" class="darkLine"/>
+      <rect x="567" y="54" width="317" height="42" fill="#1b2633"/><text x="581" y="80" class="ui small darkMuted">1 / 31</text><text x="688" y="80" class="ui body darkMuted">−  94%  ＋</text><text x="857" y="80" text-anchor="end" class="ui body darkMuted">⌕  ▱</text>
+      <rect x="621" y="116" width="210" height="500" fill="#fff" filter="url(#pageShadow)"/>
+      <text x="646" y="153" class="ui tiny">arXiv:2407.17305v1 [cs.NE]</text>
+      <text x="646" y="194" class="ui" font-family="Georgia, serif" font-size="15" font-weight="700">Continual Learning in</text><text x="646" y="214" class="ui" font-family="Georgia, serif" font-size="15" font-weight="700">Bio-plausible Spiking</text><text x="646" y="234" class="ui" font-family="Georgia, serif" font-size="15" font-weight="700">Neural Networks</text>
+      <text x="646" y="270" class="ui tiny">Ali Safa · KU Leuven · July 2024</text>
+      <text x="646" y="306" class="ui tiny" font-weight="700">Abstract.</text>
+      <g stroke="#cfd4dc" stroke-width="3"><line x1="646" y1="320" x2="808" y2="320"/><line x1="646" y1="330" x2="808" y2="330"/><line x1="646" y1="340" x2="794" y2="340"/><line x1="646" y1="350" x2="808" y2="350"/><line x1="646" y1="360" x2="785" y2="360"/></g>
+      <rect x="643" y="372" width="151" height="11" rx="2" fill="#f4d950" fill-opacity="0.65"/><g stroke="#cfd4dc" stroke-width="3"><line x1="646" y1="379" x2="808" y2="379"/><line x1="646" y1="391" x2="808" y2="391"/><line x1="646" y1="403" x2="795" y2="403"/><line x1="646" y1="415" x2="808" y2="415"/><line x1="646" y1="427" x2="780" y2="427"/></g>
+
+      <!-- rich inspector -->
+      <rect x="885" y="54" width="235" height="636" fill="#202b38"/>
+      <text x="899" y="84" class="ui title dark">Continual Learning…</text><text x="899" y="103" class="ui small darkMuted">Ali Safa · 2024</text>
+      <line x1="885" y1="119" x2="1120" y2="119" class="darkLine"/>
+      <text x="899" y="146" class="ui body dark" font-weight="650">⌄  Info</text>
+      <text x="899" y="174" class="ui small darkMuted">Type</text><text x="1105" y="174" text-anchor="end" class="ui small dark">Research Paper</text>
+      <text x="899" y="197" class="ui small darkMuted">Published</text><text x="1105" y="197" text-anchor="end" class="ui small dark">July 2024</text>
+      <text x="899" y="220" class="ui small darkMuted">Pages</text><text x="1105" y="220" text-anchor="end" class="ui small dark">31</text>
+      <line x1="899" y1="237" x2="1105" y2="237" class="darkLine"/>
+      <text x="899" y="265" class="ui body dark" font-weight="650">⌄  Collections</text>
+      <rect x="899" y="281" width="88" height="24" rx="12" fill="#314f45"/><text x="943" y="297" text-anchor="middle" class="ui tiny" fill="#a9e0cb">Biology 201</text>
+      <rect x="993" y="281" width="97" height="24" rx="12" fill="#343f50"/><text x="1042" y="297" text-anchor="middle" class="ui tiny darkMuted">Thesis Sources</text>
+      <line x1="899" y1="321" x2="1105" y2="321" class="darkLine"/>
+      <text x="899" y="349" class="ui body dark" font-weight="650">⌄  Annotations</text><text x="1105" y="349" text-anchor="end" class="ui small darkMuted">7</text>
+      <rect x="899" y="363" width="206" height="77" rx="8" fill="#273444"/><rect x="909" y="376" width="4" height="31" rx="2" fill="#f3ce45"/><text x="922" y="389" class="ui small dark">Bio-plausible learning techniques…</text><text x="922" y="409" class="ui tiny darkMuted">Useful framing for introduction.</text><text x="922" y="427" class="ui tiny darkMuted">Page 1</text>
+      <line x1="899" y1="457" x2="1105" y2="457" class="darkLine"/>
+      <text x="899" y="485" class="ui body dark" font-weight="650">›  Document note</text>
+      <line x1="899" y1="506" x2="1105" y2="506" class="darkLine"/>
+      <text x="899" y="534" class="ui body dark" font-weight="650">›  Source PDF</text>
+      <line x1="899" y1="555" x2="1105" y2="555" class="darkLine"/>
+      <text x="899" y="583" class="ui body dark" font-weight="650">›  Search index</text>
+    </g>
+    <text x="0" y="835" class="ui body" font-weight="650">Best for:</text><text x="64" y="835" class="ui body" fill="#637083">large libraries, metadata-heavy workflows, expert users</text>
+  </g>
+
+  <!-- C: Reading Focus -->
+  <g transform="translate(90 1090)">
+    <text x="0" y="0" class="ui label" fill="#9a5bd5">DIRECTION C</text>
+    <text x="0" y="38" class="display concept">Reading Focus</text>
+    <text x="0" y="68" class="ui summary">A generous document canvas with tools revealed only in context</text>
+
+    <g transform="translate(0 104)" filter="url(#windowShadow)">
+      <rect width="2300" height="590" rx="18" fill="#17202a"/>
+      <rect width="2300" height="54" rx="18" fill="#202a36"/>
+      <rect y="39" width="2300" height="15" fill="#202a36"/>
+      <line y1="54" x2="2300" y2="54" class="darkLine"/>
+      <circle cx="22" cy="26" r="6" fill="#ff5f57"/><circle cx="42" cy="26" r="6" fill="#febc2e"/><circle cx="62" cy="26" r="6" fill="#28c840"/>
+      <rect x="90" y="10" width="38" height="34" rx="10" fill="#2d3948"/><text x="109" y="32" text-anchor="middle" class="ui body dark">◫</text>
+      <text x="148" y="31" class="ui title dark">Lecture 08 — Cell Signaling</text>
+      <text x="1070" y="31" text-anchor="middle" class="ui small darkMuted">18 of 42</text>
+      <rect x="2025" y="10" width="168" height="34" rx="17" fill="#18212c" stroke="#3b4655"/><text x="2044" y="32" class="ui small darkMuted">⌕  Find in document</text>
+      <rect x="2206" y="10" width="38" height="34" rx="10" fill="#2d3948"/><text x="2225" y="32" text-anchor="middle" class="ui body dark">◧</text>
+      <rect x="2252" y="10" width="38" height="34" rx="10" fill="#7350ad"/><text x="2271" y="32" text-anchor="middle" class="ui body dark">✎</text>
+
+      <!-- slim library rail -->
+      <rect y="54" width="72" height="536" fill="#202a36"/><line x1="72" y1="54" x2="72" y2="590" class="darkLine"/>
+      <circle cx="36" cy="92" r="18" fill="#344254"/><text x="36" y="98" text-anchor="middle" class="ui body dark">▣</text>
+      <circle cx="36" cy="140" r="18" fill="#293544"/><text x="36" y="146" text-anchor="middle" class="ui body darkMuted">◷</text>
+      <circle cx="36" cy="188" r="18" fill="#293544"/><text x="36" y="194" text-anchor="middle" class="ui body darkMuted">◇</text>
+      <line x1="16" y1="224" x2="56" y2="224" class="darkLine"/>
+      <circle cx="36" cy="258" r="5" fill="#7f68d9"/><circle cx="36" cy="286" r="5" fill="#4eaa80"/><circle cx="36" cy="314" r="5" fill="#d7994f"/>
+      <circle cx="36" cy="550" r="18" fill="#293544"/><text x="36" y="556" text-anchor="middle" class="ui body darkMuted">＋</text>
+
+      <!-- immersive canvas -->
+      <rect x="73" y="54" width="1842" height="536" fill="#111820"/>
+      <rect x="679" y="80" width="630" height="482" rx="3" fill="#fff" filter="url(#pageShadow)"/>
+      <text x="994" y="124" text-anchor="middle" class="ui small">BIOLOGY 201 · LECTURE 08</text>
+      <text x="994" y="161" text-anchor="middle" class="display" font-size="25" font-weight="730" fill="#203451">CELL SIGNALING</text>
+      <line x1="893" y1="180" x2="1095" y2="180" stroke="#8faaf0" stroke-width="2"/>
+      <rect x="864" y="212" width="260" height="55" rx="10" fill="#eaf0ff" stroke="#7395e8"/><text x="994" y="245" text-anchor="middle" class="ui body" fill="#31538c">Ligand-gated receptor</text>
+      <line x1="994" y1="267" x2="994" y2="303" stroke="#5372ab" stroke-width="2"/><path d="M988 296l6 9 6-9" fill="none" stroke="#5372ab" stroke-width="2"/>
+      <rect x="864" y="307" width="260" height="55" rx="10" fill="#edf7f1" stroke="#6ca082"/><text x="994" y="340" text-anchor="middle" class="ui body" fill="#376b52">Second messenger cascade</text>
+      <line x1="994" y1="362" x2="994" y2="398" stroke="#5f8d72" stroke-width="2"/><path d="M988 391l6 9 6-9" fill="none" stroke="#5f8d72" stroke-width="2"/>
+      <rect x="864" y="402" width="260" height="55" rx="10" fill="#fff4dd" stroke="#c79a42"/><text x="994" y="435" text-anchor="middle" class="ui body" fill="#75551e">Cellular response</text>
+      <text x="994" y="516" text-anchor="middle" class="ui small">18</text>
+
+      <!-- floating reader controls -->
+      <rect x="785" y="532" width="418" height="42" rx="21" fill="#2a3543" fill-opacity="0.96" stroke="#465266"/>
+      <text x="812" y="558" class="ui body darkMuted">−</text><text x="854" y="558" class="ui small dark">110%</text><text x="904" y="558" class="ui body darkMuted">＋</text>
+      <line x1="940" y1="542" x2="940" y2="564" class="darkLine"/>
+      <text x="966" y="558" class="ui small darkMuted">Fit width</text><text x="1047" y="558" class="ui small darkMuted">1:1</text>
+      <line x1="1084" y1="542" x2="1084" y2="564" class="darkLine"/><text x="1110" y="558" class="ui body dark">▱</text><text x="1152" y="558" class="ui body dark">✎</text>
+
+      <!-- annotation margin -->
+      <line x1="1309" y1="227" x2="1365" y2="227" stroke="#f2cc47" stroke-width="2"/><circle cx="1372" cy="227" r="5" fill="#f2cc47"/>
+      <rect x="1388" y="188" width="264" height="93" rx="12" fill="#222d3a" stroke="#435064"/>
+      <rect x="1402" y="202" width="4" height="37" rx="2" fill="#f2cc47"/><text x="1418" y="217" class="ui body dark" font-weight="650">Ligand-gated receptors</text><text x="1418" y="239" class="ui small darkMuted">Compare with lecture 6 before</text><text x="1418" y="256" class="ui small darkMuted">the midterm.</text><text x="1418" y="272" class="ui tiny darkMuted">Page 18 · 2 minutes ago</text>
+      <line x1="1309" y1="325" x2="1455" y2="325" stroke="#64c8ec" stroke-width="2"/><circle cx="1462" cy="325" r="5" fill="#64c8ec"/>
+      <rect x="1478" y="298" width="224" height="68" rx="12" fill="#222d3a" stroke="#435064"/>
+      <rect x="1492" y="312" width="4" height="28" rx="2" fill="#64c8ec"/><text x="1508" y="327" class="ui body dark" font-weight="650">Second messenger cascade</text><text x="1508" y="349" class="ui small darkMuted">Review amplification step.</text>
+
+      <!-- notebook -->
+      <rect x="1916" y="54" width="384" height="536" fill="#202a36"/>
+      <text x="1937" y="86" class="ui title dark">Notebook</text><text x="2276" y="86" text-anchor="end" class="ui small darkMuted">12 annotations</text>
+      <rect x="1936" y="103" width="344" height="32" rx="8" fill="#18212c" stroke="#3b4655"/><text x="1953" y="124" class="ui small darkMuted">⌕  Search annotations</text>
+      <text x="1937" y="166" class="ui section darkMuted">DOCUMENT NOTE</text>
+      <rect x="1936" y="179" width="344" height="92" rx="10" fill="#273442"/><text x="1952" y="203" class="ui small dark">This lecture connects receptor dynamics to the</text><text x="1952" y="222" class="ui small dark">feedback model from week 6. Revisit before</text><text x="1952" y="241" class="ui small dark">writing the signaling pathway summary.</text><text x="1952" y="261" class="ui tiny darkMuted">Saved</text>
+      <text x="1937" y="304" class="ui section darkMuted">ANNOTATIONS</text>
+      <rect x="1936" y="318" width="344" height="90" rx="10" fill="#2b3745"/><rect x="1950" y="333" width="4" height="34" rx="2" fill="#f2cc47"/><text x="1967" y="348" class="ui body dark" font-weight="650">Ligand-gated receptors</text><text x="1967" y="369" class="ui small darkMuted">Compare this pathway with lecture 6…</text><text x="1967" y="393" class="ui tiny darkMuted">Page 18 · Yellow</text>
+      <rect x="1936" y="419" width="344" height="75" rx="10" fill="#273442"/><rect x="1950" y="434" width="4" height="30" rx="2" fill="#64c8ec"/><text x="1967" y="449" class="ui body dark" font-weight="650">Second messenger cascade</text><text x="1967" y="471" class="ui small darkMuted">Review the amplification step.</text>
+      <text x="1937" y="533" class="ui body" fill="#a88be0">＋ New note</text>
+    </g>
+    <text x="0" y="735" class="ui body" font-weight="650">Best for:</text><text x="64" y="735" class="ui body" fill="#637083">deep reading, annotation-heavy study, distraction-free sessions</text>
+  </g>
+</svg>
